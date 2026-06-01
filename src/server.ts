@@ -1,0 +1,130 @@
+// src/server.ts — boardgame.io Server + REST API + static React build.
+import path from 'node:path';
+import fs from 'node:fs';
+import { Server, Origins } from 'boardgame.io/server';
+import serveStatic from 'koa-static';
+import { ChainsTCG } from './Game';
+import { initDb, upsertProfile, updateProfile, getProfile, listProfiles, recordMatch } from './db';
+
+const distDir = path.resolve(__dirname, '..', 'dist');
+
+const PORT = Number(process.env.PORT) || 8000;
+
+const server = Server({
+  games: [ChainsTCG],
+  origins: [
+    Origins.LOCALHOST_IN_DEVELOPMENT,
+    Origins.LOCALHOST,
+    // Allow same-origin (when client served from this server). Use ALLOW_ORIGIN env to add prod domain.
+    ...(process.env.ALLOW_ORIGIN ? [process.env.ALLOW_ORIGIN] : []),
+  ],
+});
+
+// ── Custom REST API (mounted on the same Koa app) ───────────────────────────
+const app = server.app;
+
+async function readJson(ctx: any): Promise<any> {
+  return await new Promise((resolve, reject) => {
+    let raw = '';
+    ctx.req.on('data', (chunk: Buffer) => { raw += chunk; });
+    ctx.req.on('end', () => {
+      if (!raw) return resolve({});
+      try { resolve(JSON.parse(raw)); } catch (e) { reject(e); }
+    });
+    ctx.req.on('error', reject);
+  });
+}
+
+app.use(async (ctx, next) => {
+  const url = ctx.request.url || '';
+  const method = ctx.request.method;
+
+  // CORS for /api/*
+  if (url.startsWith('/api/')) {
+    ctx.set('Access-Control-Allow-Origin', '*');
+    ctx.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    ctx.set('Access-Control-Allow-Headers', 'Content-Type');
+    if (method === 'OPTIONS') { ctx.status = 204; return; }
+  }
+
+  try {
+    if (method === 'GET' && url === '/api/health') {
+      ctx.body = { ok: true, ts: Date.now() };
+      return;
+    }
+    if (method === 'GET' && url === '/api/leaderboard') {
+      ctx.body = { profiles: await listProfiles() };
+      return;
+    }
+    if (method === 'GET' && url.startsWith('/api/profile/')) {
+      const name = decodeURIComponent(url.slice('/api/profile/'.length));
+      ctx.body = { profile: await getProfile(name) };
+      return;
+    }
+    if (method === 'POST' && url === '/api/profile') {
+      const body = await readJson(ctx);
+      if (!body?.name) { ctx.status = 400; ctx.body = { error: 'name required' }; return; }
+      ctx.body = { profile: await upsertProfile(String(body.name)) };
+      return;
+    }
+    if (method === 'POST' && url === '/api/profile/update') {
+      const body = await readJson(ctx);
+      if (!body?.name) { ctx.status = 400; ctx.body = { error: 'name required' }; return; }
+      const patch: { avatarUrl?: string | null; bio?: string | null } = {};
+      if ('avatarUrl' in body) patch.avatarUrl = body.avatarUrl == null ? null : String(body.avatarUrl);
+      if ('bio'       in body) patch.bio       = body.bio       == null ? null : String(body.bio).slice(0, 500);
+      ctx.body = { profile: await updateProfile(String(body.name), patch) };
+      return;
+    }
+    if (method === 'POST' && url === '/api/result') {
+      const body = await readJson(ctx);
+      const { matchID, winner, loser, draw } = body ?? {};
+      if (!matchID) { ctx.status = 400; ctx.body = { error: 'matchID required' }; return; }
+      const status = await recordMatch(String(matchID), winner ?? null, loser ?? null, !!draw);
+      ctx.body = { status };
+      return;
+    }
+  } catch (e: any) {
+    ctx.status = 500;
+    ctx.body = { error: String(e?.message ?? e) };
+    return;
+  }
+
+  await next();
+});
+
+// ── Serve built React app from /dist (if present) ───────────────────────────
+if (fs.existsSync(distDir)) {
+  app.use(serveStatic(distDir, { index: 'index.html' }));
+  // SPA fallback for non-API, non-lobby routes
+  app.use(async (ctx, next) => {
+    const url = ctx.request.url || '';
+    if (
+      ctx.request.method === 'GET' &&
+      !url.startsWith('/api/') &&
+      !url.startsWith('/games/') &&
+      !url.startsWith('/socket.io/') &&
+      !path.extname(url)
+    ) {
+      const indexPath = path.join(distDir, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        ctx.type = 'html';
+        ctx.body = fs.createReadStream(indexPath);
+        return;
+      }
+    }
+    await next();
+  });
+  console.log(`[server] serving static client from ${distDir}`);
+} else {
+  console.log(`[server] no dist/ folder — run 'npm run build' to enable static serving`);
+}
+
+// ── Boot ────────────────────────────────────────────────────────────────────
+(async () => {
+  await initDb();
+  server.run(PORT, () => {
+    console.log(`[server] Chains TCG listening on :${PORT}`);
+  });
+})().catch(e => { console.error(e); process.exit(1); });
+

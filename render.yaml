@@ -1,0 +1,29 @@
+# Render.com blueprint for Chains TCG.
+# Deploys a Node web service that runs the boardgame.io server + REST API
+# and serves the built React app, backed by a managed Postgres database.
+
+databases:
+  - name: chains-tcg-db
+    plan: free                # free Postgres on Render
+    databaseName: chains
+    user: chains
+
+services:
+  - type: web
+    name: chains-tcg
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: DATABASE_URL
+        fromDatabase:
+          name: chains-tcg-db
+          property: connectionString
+      - key: PGSSL
+        value: "1"            # Render Postgres requires SSL
+      - key: ALLOW_ORIGIN
+        sync: false           # set this to your public URL after first deploy, e.g. https://chains-tcg.onrender.com
