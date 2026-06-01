@@ -4,7 +4,7 @@
 import type { Game, Move } from 'boardgame.io';
 import { INVALID_MOVE, PlayerView, Stage, ActivePlayers } from 'boardgame.io/core';
 import {
-  CARDS, COLORS, STARTER_DECKS, DEFAULT_MATCHUP,
+  CARDS, COLORS, STARTER_DECKS, DEFAULT_MATCHUP, derivePrimaryColor, validateDeck,
   type Color, type CardDef,
 } from './cards';
 
@@ -465,18 +465,38 @@ function applyLifelink(G: GState, pid: string, amount: number) {
   }
 }
 
-/** Pick your deck color. Valid only while you still need to pick. Callable by either player at any time during the pick phase. */
-const chooseColor: Move<GState> = ({ G, playerID, random }, color: Color) => {
+/**
+ * Pick your deck. Valid only while you still need to pick.
+ * If `customDeck` is provided, it overrides the color choice and is used as the
+ * deck list directly (color is derived from the deck contents). Otherwise the
+ * standard starter deck for `color` is used.
+ */
+const chooseColor: Move<GState> = ({ G, playerID, random }, color: Color, customDeck?: string[]) => {
   if (playerID == null) return INVALID_MOVE;
   const p = G.players[playerID];
   if (!p?.needsColorPick) return INVALID_MOVE;
-  if (!COLORS.includes(color)) return INVALID_MOVE;
-  const shuffled = random!.Shuffle([...STARTER_DECKS[color]]);
-  p.color = color;
+  let deck: string[];
+  let finalColor: Color;
+  if (customDeck && Array.isArray(customDeck) && customDeck.length > 0) {
+    const v = validateDeck(customDeck);
+    if (!v.ok) return INVALID_MOVE;
+    deck = [...customDeck];
+    finalColor = derivePrimaryColor(customDeck);
+  } else {
+    if (!COLORS.includes(color)) return INVALID_MOVE;
+    deck = [...STARTER_DECKS[color]];
+    finalColor = color;
+  }
+  const shuffled = random!.Shuffle(deck);
+  p.color = finalColor;
   p.hand = shuffled.slice(0, 7);
   G.secret.decks[playerID] = shuffled.slice(7);
   p.needsColorPick = false;
-  G.log.push(`Player ${playerID} chose the ${color.toUpperCase()} deck.`);
+  G.log.push(
+    customDeck
+      ? `Player ${playerID} brought a custom deck (${finalColor.toUpperCase()} themed).`
+      : `Player ${playerID} chose the ${finalColor.toUpperCase()} deck.`
+  );
 };
 
 /** Skip directly from main to end (no attacks this turn). */
@@ -505,19 +525,25 @@ export const ChainsTCG: Game<GState> = {
   minPlayers: 2,
   maxPlayers: 2,
 
-  setup: ({ ctx, random }, setupData?: { colors?: Array<Color | null | undefined>; names?: [string, string] }) => {
+  setup: ({ ctx, random }, setupData?: { colors?: Array<Color | null | undefined>; names?: [string, string]; decks?: Array<string[] | null | undefined> }) => {
     const colors = setupData?.colors ?? DEFAULT_MATCHUP;
     const names = setupData?.names ?? ['Player 0', 'Player 1'];
+    const decksIn = setupData?.decks ?? [];
     const players: Record<string, PlayerState> = {};
     const decks:   Record<string, string[]>     = {};
     for (let i = 0; i < ctx.numPlayers; i++) {
       const pid = String(i);
       const chosen = colors[i] as Color | null | undefined;
-      if (chosen) {
-        const shuffled = random!.Shuffle([...STARTER_DECKS[chosen]]);
+      const customDeck = decksIn[i];
+      const validCustom = customDeck && Array.isArray(customDeck) && customDeck.length > 0 && validateDeck(customDeck).ok
+        ? [...customDeck] : null;
+      if (chosen || validCustom) {
+        const deck = validCustom ?? [...STARTER_DECKS[chosen as Color]];
+        const themeColor: Color = validCustom ? derivePrimaryColor(deck) : (chosen as Color);
+        const shuffled = random!.Shuffle(deck);
         decks[pid] = shuffled.slice(7);
         players[pid] = {
-          color: chosen,
+          color: themeColor,
           profileName: names[i] ?? `Player ${i}`,
           life: 20,
           hand: shuffled.slice(0, 7),

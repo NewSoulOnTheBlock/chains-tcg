@@ -140,12 +140,29 @@ export function ChainsBoard(props: Props) {
   const pickAppliedRef = useRef(false);
   useEffect(() => {
     if (!iMustPick || pickAppliedRef.current) return;
-    let stashed: string | null = null;
-    try { stashed = sessionStorage.getItem('pendingPickColor'); } catch {}
-    if (stashed && COLORS.includes(stashed as Color)) {
+    let stashedDeck: string | null = null;
+    let stashedColor: string | null = null;
+    try {
+      stashedDeck = sessionStorage.getItem('pendingCustomDeck');
+      stashedColor = sessionStorage.getItem('pendingPickColor');
+    } catch {}
+    if (stashedDeck) {
+      try {
+        const deck = JSON.parse(stashedDeck);
+        if (Array.isArray(deck) && deck.length > 0) {
+          pickAppliedRef.current = true;
+          try { sessionStorage.removeItem('pendingCustomDeck'); } catch {}
+          try { sessionStorage.removeItem('pendingPickColor'); } catch {}
+          // The first arg is ignored when a custom deck is provided; pass any color.
+          moves.chooseColor('sol' as Color, deck);
+          return;
+        }
+      } catch {}
+    }
+    if (stashedColor && COLORS.includes(stashedColor as Color)) {
       pickAppliedRef.current = true;
       try { sessionStorage.removeItem('pendingPickColor'); } catch {}
-      moves.chooseColor(stashed as Color);
+      moves.chooseColor(stashedColor as Color);
     }
   }, [iMustPick, moves]);
 

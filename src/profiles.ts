@@ -80,6 +80,17 @@ export async function getLibraryApi(walletAddress: string): Promise<LibraryCard[
   return cards;
 }
 
+export async function getDeckApi(name: string): Promise<string[]> {
+  const { cards } = await http<{ cards: string[] }>(`/api/deck/${encodeURIComponent(name)}`);
+  return cards;
+}
+
+export async function saveDeckApi(name: string, cards: string[]): Promise<void> {
+  await http<{ ok: true }>('/api/deck', {
+    method: 'POST', body: JSON.stringify({ name, cards }),
+  });
+}
+
 export function formatRecord(p: Profile | null | undefined): string {
   if (!p) return '0-0';
   return p.draws > 0 ? `${p.wins}-${p.losses}-${p.draws}` : `${p.wins}-${p.losses}`;

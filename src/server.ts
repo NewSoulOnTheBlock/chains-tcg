@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import { Server, Origins } from 'boardgame.io/server';
 import serveStatic from 'koa-static';
 import { ChainsTCG } from './Game';
-import { initDb, upsertProfile, updateProfile, getProfile, getProfileByWallet, listProfiles, recordMatch } from './db';
+import { initDb, upsertProfile, updateProfile, getProfile, getProfileByWallet, listProfiles, recordMatch, getDeck, saveDeck } from './db';
+import { validateDeck } from './cards';
 
 const distDir = path.resolve(__dirname, '..', 'dist');
 
@@ -143,6 +144,22 @@ app.use(async (ctx, next) => {
       if ('walletAddress' in body) patch.walletAddress = body.walletAddress == null ? null : String(body.walletAddress).slice(0, 128);
       if ('walletChain'   in body) patch.walletChain   = body.walletChain   == null ? null : String(body.walletChain).slice(0, 32);
       ctx.body = { profile: await updateProfile(String(body.name), patch) };
+      return;
+    }
+    if (method === 'GET' && url.startsWith('/api/deck/')) {
+      const name = decodeURIComponent(url.slice('/api/deck/'.length));
+      ctx.body = { cards: (await getDeck(name)) ?? [] };
+      return;
+    }
+    if (method === 'POST' && url === '/api/deck') {
+      const body = await readJson(ctx);
+      if (!body?.name) { ctx.status = 400; ctx.body = { error: 'name required' }; return; }
+      if (!Array.isArray(body?.cards)) { ctx.status = 400; ctx.body = { error: 'cards[] required' }; return; }
+      const cards = body.cards.map(String);
+      const v = validateDeck(cards);
+      if (!v.ok) { ctx.status = 400; ctx.body = { error: 'invalid deck', issues: v.issues }; return; }
+      await saveDeck(String(body.name), cards);
+      ctx.body = { ok: true };
       return;
     }
     if (method === 'GET' && url.startsWith('/api/library/')) {

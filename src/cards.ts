@@ -222,3 +222,76 @@ export const STARTER_DECKS: Record<Color, string[]> = {
 };
 
 export const DEFAULT_MATCHUP: [Color, Color] = ['sol', 'eth'];
+
+// ── Deckbuilding ────────────────────────────────────────────────────────────
+
+/** Every card a player can put in a custom deck (the standard pool). */
+export const BUILDABLE_CARDS: CardDef[] = Object.values(CARDS);
+
+/** Deck rule constants. */
+export const DECK_SIZE = 60;
+export const MAX_COPIES_NONBASIC = 4; // basic chain nodes are unlimited; everything else capped at 4
+
+export function isBasicNode(defId: string): boolean {
+  return defId.startsWith('node_');
+}
+
+export type DeckIssue = { code: string; message: string };
+export type DeckValidation = { ok: boolean; size: number; issues: DeckIssue[] };
+
+/** Validate a custom deck. Returns ok + total size + every issue (so the UI can list them all). */
+export function validateDeck(cards: string[]): DeckValidation {
+  const issues: DeckIssue[] = [];
+  const size = cards.length;
+  if (size !== DECK_SIZE) {
+    issues.push({
+      code: 'size',
+      message: `Deck must be exactly ${DECK_SIZE} cards (currently ${size}).`,
+    });
+  }
+  const counts: Record<string, number> = {};
+  for (const id of cards) {
+    if (!CARDS[id]) {
+      issues.push({ code: 'unknown', message: `Unknown card id: ${id}` });
+      continue;
+    }
+    counts[id] = (counts[id] ?? 0) + 1;
+  }
+  for (const [id, n] of Object.entries(counts)) {
+    if (!isBasicNode(id) && n > MAX_COPIES_NONBASIC) {
+      issues.push({
+        code: 'copies',
+        message: `Too many copies of ${CARDS[id].name} (${n}/${MAX_COPIES_NONBASIC}).`,
+      });
+    }
+  }
+  return { ok: issues.length === 0, size, issues };
+}
+
+/**
+ * Derive a primary color from a deck — used to set `player.color` and the deck's
+ * theme when a custom deck is selected. Counts non-node cards by color (since
+ * nodes generate, they shouldn't tilt the theme); falls back to majority node
+ * color, then 'sol'.
+ */
+export function derivePrimaryColor(cards: string[]): Color {
+  const counts: Record<Color, number> = { bnb: 0, sol: 0, hl: 0, eth: 0, xrp: 0 };
+  let any = false;
+  for (const id of cards) {
+    const def = CARDS[id]; if (!def) continue;
+    if (def.type === 'node') continue;
+    counts[def.color]++;
+    any = true;
+  }
+  if (!any) {
+    for (const id of cards) {
+      const def = CARDS[id]; if (!def) continue;
+      counts[def.color]++;
+    }
+  }
+  let best: Color = 'sol'; let bestN = -1;
+  for (const c of COLORS) {
+    if (counts[c] > bestN) { best = c; bestN = counts[c]; }
+  }
+  return best;
+}

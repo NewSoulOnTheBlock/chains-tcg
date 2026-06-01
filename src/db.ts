@@ -44,14 +44,16 @@ export async function initDb() {
       avatar_url TEXT,
       bio        TEXT,
       wallet_address TEXT,
-      wallet_chain   TEXT
+      wallet_chain   TEXT,
+      custom_deck    TEXT
     );
   `);
-  // Migrate older deployments that pre-date avatar_url/bio/wallet columns.
+  // Migrate older deployments that pre-date avatar_url/bio/wallet/deck columns.
   await pool.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT;`);
   await pool.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS bio TEXT;`);
   await pool.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS wallet_address TEXT;`);
   await pool.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS wallet_chain TEXT;`);
+  await pool.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS custom_deck TEXT;`);
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS profiles_wallet_idx ON profiles (LOWER(wallet_address)) WHERE wallet_address IS NOT NULL;`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS recorded_matches (
@@ -161,6 +163,36 @@ export async function listProfiles(): Promise<Profile[]> {
     `SELECT * FROM profiles ORDER BY (wins - losses) DESC, wins DESC LIMIT 200`,
   );
   return rows.map(rowToProfile);
+}
+
+// ── Custom decks ────────────────────────────────────────────────────────────
+const memDecks: Map<string, string[]> = new Map();
+
+export async function getDeck(name: string): Promise<string[] | null> {
+  const k = key(name);
+  if (!pool) return memDecks.get(k) ?? null;
+  const { rows } = await pool.query(`SELECT custom_deck FROM profiles WHERE name_key = $1`, [k]);
+  const raw = rows[0]?.custom_deck;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : null;
+  } catch { return null; }
+}
+
+export async function saveDeck(name: string, cards: string[]): Promise<void> {
+  const n = name.trim();
+  if (!n) throw new Error('Profile name required');
+  const k = key(n);
+  const json = JSON.stringify(cards);
+  if (!pool) {
+    // Ensure profile exists (in-memory mode).
+    await upsertProfile(n);
+    memDecks.set(k, [...cards]);
+    return;
+  }
+  await upsertProfile(n);
+  await pool.query(`UPDATE profiles SET custom_deck = $2 WHERE name_key = $1`, [k, json]);
 }
 
 /**

@@ -7,10 +7,10 @@ import { SocketIO } from 'boardgame.io/multiplayer';
 import { LobbyClient } from 'boardgame.io/client';
 import { ChainsTCG } from './Game';
 import { ChainsBoard } from './Board';
-import { COLOR_META, COLORS, type Color } from './cards';
+import { COLOR_META, COLORS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MAX_COPIES_NONBASIC, isBasicNode, type Color } from './cards';
 import {
   listProfilesApi, getProfileApi, getProfileByWalletApi, upsertProfileApi, updateProfileApi, getLibraryApi,
-  formatRecord, type Profile, type LibraryCard,
+  getDeckApi, saveDeckApi, formatRecord, type Profile, type LibraryCard,
 } from './profiles';
 import { connectEvm, connectSolana, shortAddr, type ConnectedWallet } from './wallet';
 
@@ -605,6 +605,7 @@ function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void })
       )}
 
       {!loading && <LibrarySection prof={prof} />}
+      {!loading && <DeckbuilderPanel myName={myName} />}
     </div>
   );
 }
@@ -707,6 +708,166 @@ function LibraryCardTile({ card }: { card: LibraryCard }) {
   );
 }
 
+// ── Deckbuilder ─────────────────────────────────────────────────────────────
+function DeckbuilderPanel({ myName }: { myName: string }) {
+  const mobile = useIsMobile();
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState('');
+  const [filter, setFilter] = useState<Color | 'all'>('all');
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const cards = await getDeckApi(myName);
+        const next: Record<string, number> = {};
+        for (const id of cards) next[id] = (next[id] ?? 0) + 1;
+        setCounts(next);
+      } finally { setLoading(false); }
+    })();
+  }, [myName]);
+
+  const deckList = useMemo(() => {
+    const out: string[] = [];
+    for (const [id, n] of Object.entries(counts)) for (let i = 0; i < n; i++) out.push(id);
+    return out;
+  }, [counts]);
+  const validation = useMemo(() => validateDeck(deckList), [deckList]);
+  const total = validation.size;
+
+  function bump(id: string, delta: number) {
+    setCounts(prev => {
+      const cur = prev[id] ?? 0;
+      let next = cur + delta;
+      if (next < 0) next = 0;
+      if (!isBasicNode(id) && next > MAX_COPIES_NONBASIC) next = MAX_COPIES_NONBASIC;
+      if (delta > 0 && total >= DECK_SIZE) return prev; // hard-cap at 60 when adding
+      const out = { ...prev };
+      if (next === 0) delete out[id]; else out[id] = next;
+      return out;
+    });
+  }
+
+  async function save() {
+    setSaving(true); setStatus('');
+    try {
+      if (!validation.ok) { setStatus(validation.issues[0]?.message ?? 'Invalid deck.'); return; }
+      await saveDeckApi(myName, deckList);
+      setStatus('Saved!');
+    } catch (e: any) {
+      setStatus(String(e?.message ?? e));
+    } finally { setSaving(false); }
+  }
+
+  function clear() {
+    if (!confirm('Clear your custom deck?')) return;
+    setCounts({});
+    setStatus('');
+  }
+
+  const visible = filter === 'all' ? BUILDABLE_CARDS : BUILDABLE_CARDS.filter(c => c.color === filter);
+
+  return (
+    <div style={{ maxWidth: 980, margin: '0 auto', padding: mobile ? '0 14px 40px' : '0 24px 50px' }}>
+      <div style={{ marginTop: 14, padding: 14, background: '#101015', border: '1px solid #25252e', borderRadius: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ fontWeight: 800, color: '#9cf', letterSpacing: 1.5, fontSize: 14 }}>
+            🛠️ CUSTOM DECK ({total}/{DECK_SIZE})
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button onClick={clear} style={ghostBtn}>Clear</button>
+            <button onClick={save} disabled={!validation.ok || saving} style={validation.ok ? primaryBtn(!saving) : disabledBtn}>
+              {saving ? 'Saving…' : 'Save deck'}
+            </button>
+            {status && <span style={{ fontSize: 12, color: status === 'Saved!' ? '#7fdc7f' : '#ef7373' }}>{status}</span>}
+          </div>
+        </div>
+
+        {/* Validation hints */}
+        {!validation.ok && validation.issues.length > 0 && (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#fc8' }}>
+            {validation.issues.slice(0, 3).map((it, i) => <div key={i}>• {it.message}</div>)}
+          </div>
+        )}
+
+        {/* Color filter */}
+        <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+          <FilterChip selected={filter === 'all'} onClick={() => setFilter('all')} label="All" />
+          {COLORS.map(c => (
+            <FilterChip key={c} selected={filter === c}
+              onClick={() => setFilter(c)}
+              label={COLOR_META[c].name} hex={COLOR_META[c].hex} ink={COLOR_META[c].ink} />
+          ))}
+        </div>
+
+        {loading ? (
+          <div style={{ marginTop: 10, fontSize: 13, color: '#888' }}>Loading deck…</div>
+        ) : (
+          <div style={{
+            marginTop: 12, display: 'grid',
+            gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 150 : 200}px, 1fr))`, gap: 8,
+          }}>
+            {visible.map(def => {
+              const n = counts[def.id] ?? 0;
+              const cap = isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC;
+              const meta = COLOR_META[def.color];
+              return (
+                <div key={def.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 8px',
+                  background: '#0c0c12', borderRadius: 4,
+                  border: `1px solid ${n > 0 ? meta.hex : '#25252e'}`,
+                }}>
+                  <div style={{
+                    width: 18, height: 18, borderRadius: 9,
+                    background: meta.hex, color: meta.ink, flex: '0 0 auto',
+                    fontSize: 10, fontWeight: 800, display: 'flex',
+                    alignItems: 'center', justifyContent: 'center',
+                  }}>{def.type[0].toUpperCase()}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#eee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {def.name}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#888' }}>
+                      {def.type}{def.type === 'meme' && ` · ${def.power}/${def.toughness}`}
+                    </div>
+                  </div>
+                  <button onClick={() => bump(def.id, -1)} disabled={n === 0} style={tinyBtn}>−</button>
+                  <div style={{ minWidth: 16, textAlign: 'center', fontSize: 12, fontWeight: 700, color: n > 0 ? '#fff' : '#555' }}>{n}</div>
+                  <button onClick={() => bump(def.id, +1)}
+                    disabled={n >= cap || total >= DECK_SIZE}
+                    style={tinyBtn}>+</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FilterChip({ selected, onClick, label, hex, ink }: { selected: boolean; onClick: () => void; label: string; hex?: string; ink?: string }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: '4px 10px', fontSize: 12, fontWeight: 700,
+      background: selected ? (hex ?? '#e9e4d0') : 'transparent',
+      color: selected ? (ink ?? '#000') : '#ccc',
+      border: `1px solid ${selected ? (hex ?? '#888') : '#3a3a44'}`,
+      borderRadius: 999, cursor: 'pointer',
+    }}>{label}</button>
+  );
+}
+
+const tinyBtn: React.CSSProperties = {
+  width: 22, height: 22, padding: 0,
+  background: '#1c1c24', color: '#fff',
+  border: '1px solid #3a3a44', borderRadius: 4,
+  fontSize: 14, fontWeight: 800, cursor: 'pointer',
+};
+
 function Stat({ label, value, color }: { label: string; value: number; color: string }) {
   return (
     <div>
@@ -729,9 +890,27 @@ function Lobby({
   // Create-match panel state — creator only picks their own color now.
   const [myColor, setMyColor] = useState<Color>('sol');
   const [seatChoice, setSeatChoice] = useState<'0' | '1'>('0');
+  // Custom-deck state (creator and joiner each pick standard color OR custom).
+  const [myDeck, setMyDeck] = useState<string[]>([]);
+  const [useCustom, setUseCustom] = useState(false);
+  const [joinDeck, setJoinDeck] = useState<string[]>([]);
+  const [joinUseCustom, setJoinUseCustom] = useState(false);
   // Join modal state — second player picks their color when accepting.
   const [joinTarget, setJoinTarget] = useState<{ match: any; seat: string } | null>(null);
   const [joinColor, setJoinColor] = useState<Color>('eth');
+
+  // Load this player's saved custom deck on mount (if any).
+  useEffect(() => {
+    (async () => {
+      try {
+        const cards = await getDeckApi(myName);
+        setMyDeck(cards);
+        setJoinDeck(cards);
+      } catch {}
+    })();
+  }, [myName]);
+
+  const myDeckOk = useMemo(() => validateDeck(myDeck).ok, [myDeck]);
 
   const refresh = useCallback(async () => {
     setLoading(true); setError('');
@@ -752,13 +931,22 @@ function Lobby({
   async function createAndJoin() {
     setError('');
     try {
+      if (useCustom && !myDeckOk) {
+        setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile → Custom Deck.`);
+        return;
+      }
       await upsertProfileApi(myName);
-      // Only the creator's color is fixed at creation. The other seat is left null
-      // and the second player picks their deck when accepting the match.
-      const colors: Array<Color | null> = ['0', '1'].map(s => (s === seatChoice ? myColor : null)) as Array<Color | null>;
+      // When using a custom deck, the color slot is null and the deck is passed
+      // via setupData.decks; the game derives a theme color from the deck.
+      const colors: Array<Color | null> = ['0', '1'].map(s =>
+        s === seatChoice ? (useCustom ? null : myColor) : null
+      ) as Array<Color | null>;
+      const decks: Array<string[] | null> = ['0', '1'].map(s =>
+        s === seatChoice && useCustom ? myDeck : null
+      ) as Array<string[] | null>;
       const created = await lobby.createMatch(GAME_NAME, {
         numPlayers: 2,
-        setupData: { colors, names: ['Player 0', 'Player 1'] },
+        setupData: { colors, names: ['Player 0', 'Player 1'], decks },
       });
       const joined = await lobby.joinMatch(GAME_NAME, created.matchID, {
         playerID: seatChoice,
@@ -766,6 +954,7 @@ function Lobby({
       });
       // Creator already picked, no pending color needed.
       try { sessionStorage.removeItem('pendingPickColor'); } catch {}
+      try { sessionStorage.removeItem('pendingCustomDeck'); } catch {}
       onJoined({ matchID: created.matchID, playerID: seatChoice, credentials: joined.playerCredentials, playerName: myName });
     } catch (e: any) { setError(String(e?.message ?? e)); }
   }
@@ -779,6 +968,7 @@ function Lobby({
       const fallback = COLOR_ORDER.find(c => c !== creatorColor)!;
       setJoinColor(fallback);
     }
+    setJoinUseCustom(false);
     setJoinTarget({ match: m, seat: String(openSeat.id) });
   }
 
@@ -787,9 +977,21 @@ function Lobby({
     setError('');
     const { match: m, seat: pid } = joinTarget;
     try {
+      if (joinUseCustom && !validateDeck(joinDeck).ok) {
+        setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile → Custom Deck.`);
+        return;
+      }
       await upsertProfileApi(myName);
-      // Stash the joiner's color choice; Board.tsx will auto-call chooseColor on mount.
-      try { sessionStorage.setItem('pendingPickColor', joinColor); } catch {}
+      // Stash the joiner's choice; Board.tsx will auto-call chooseColor on mount.
+      try {
+        if (joinUseCustom) {
+          sessionStorage.setItem('pendingCustomDeck', JSON.stringify(joinDeck));
+          sessionStorage.removeItem('pendingPickColor');
+        } else {
+          sessionStorage.setItem('pendingPickColor', joinColor);
+          sessionStorage.removeItem('pendingCustomDeck');
+        }
+      } catch {}
       const joined = await lobby.joinMatch(GAME_NAME, m.matchID, { playerID: pid, playerName: myName });
       setJoinTarget(null);
       onJoined({ matchID: m.matchID, playerID: pid, credentials: joined.playerCredentials, playerName: myName });
@@ -873,9 +1075,9 @@ function Lobby({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {COLORS.map(c => {
                 const meta = COLOR_META[c];
-                const selected = myColor === c;
+                const selected = !useCustom && myColor === c;
                 return (
-                  <button key={c} onClick={() => setMyColor(c)} style={{
+                  <button key={c} onClick={() => { setUseCustom(false); setMyColor(c); }} style={{
                     padding: '10px 12px', fontWeight: 800, fontSize: 14,
                     background: selected ? `linear-gradient(90deg, ${meta.hex}, ${meta.hex}aa)` : 'rgba(10,12,20,0.78)',
                     color: selected ? meta.ink : '#e9e4d0',
@@ -888,6 +1090,19 @@ function Lobby({
                   </button>
                 );
               })}
+              <button onClick={() => setUseCustom(v => !v)} disabled={!myDeckOk} style={{
+                padding: '10px 12px', fontWeight: 800, fontSize: 14,
+                background: useCustom ? 'linear-gradient(90deg,#7aa7ff,#5b6df5)' : 'rgba(10,12,20,0.78)',
+                color: useCustom ? '#0a0a18' : (myDeckOk ? '#e9e4d0' : '#666'),
+                border: `2px dashed ${useCustom ? '#f1e3a8' : 'rgba(120,170,255,0.45)'}`,
+                borderRadius: 4, cursor: myDeckOk ? 'pointer' : 'not-allowed', textAlign: 'left',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              }}>
+                <span>🛠️ Custom Deck</span>
+                <span style={{ fontSize: 10, opacity: 0.85 }}>
+                  {myDeckOk ? (useCustom ? 'ON' : 'OFF') : `Build in Profile`}
+                </span>
+              </button>
             </div>
             <div style={{
               display: 'flex', gap: 6, marginTop: 10, justifyContent: 'center',
@@ -972,9 +1187,9 @@ function Lobby({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 220 }}>
             {COLORS.map(c => {
               const meta = COLOR_META[c];
-              const selected = myColor === c;
+              const selected = !useCustom && myColor === c;
               return (
-                <button key={c} onClick={() => setMyColor(c)} style={{
+                <button key={c} onClick={() => { setUseCustom(false); setMyColor(c); }} style={{
                   padding: '8px 12px', fontWeight: 800, fontSize: 14,
                   background: selected
                     ? `linear-gradient(90deg, ${meta.hex}, ${meta.hex}aa)`
@@ -990,6 +1205,19 @@ function Lobby({
                 </button>
               );
             })}
+            <button onClick={() => setUseCustom(v => !v)} disabled={!myDeckOk} style={{
+              padding: '8px 12px', fontWeight: 800, fontSize: 14,
+              background: useCustom ? 'linear-gradient(90deg,#7aa7ff,#5b6df5)' : 'rgba(10,12,20,0.7)',
+              color: useCustom ? '#0a0a18' : (myDeckOk ? '#e9e4d0' : '#666'),
+              border: `2px dashed ${useCustom ? '#f1e3a8' : 'rgba(120,170,255,0.45)'}`,
+              borderRadius: 4, cursor: myDeckOk ? 'pointer' : 'not-allowed', textAlign: 'left',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <span>🛠️ Custom Deck</span>
+              <span style={{ fontSize: 10, opacity: 0.85 }}>
+                {myDeckOk ? (useCustom ? 'ON' : 'OFF') : 'Build in Profile'}
+              </span>
+            </button>
           </div>
           <div style={{
             display: 'flex', gap: 6, marginTop: 4,
@@ -1094,7 +1322,22 @@ function Lobby({
                 </div>
               ) : null;
             })()}
-            <ColorChooser label="Your chain" value={joinColor} onChange={setJoinColor} />
+            <ColorChooser label="Your chain" value={joinColor} onChange={(c) => { setJoinUseCustom(false); setJoinColor(c); }} />
+            {validateDeck(joinDeck).ok && (
+              <div style={{ marginTop: 10 }}>
+                <button onClick={() => setJoinUseCustom(v => !v)} style={{
+                  width: '100%', padding: '8px 12px', fontWeight: 800, fontSize: 13,
+                  background: joinUseCustom ? 'linear-gradient(90deg,#7aa7ff,#5b6df5)' : 'rgba(10,12,20,0.78)',
+                  color: joinUseCustom ? '#0a0a18' : '#e9e4d0',
+                  border: `2px dashed ${joinUseCustom ? '#f1e3a8' : 'rgba(120,170,255,0.45)'}`,
+                  borderRadius: 4, cursor: 'pointer',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}>
+                  <span>🛠️ Use Custom Deck</span>
+                  <span style={{ fontSize: 10, opacity: 0.85 }}>{joinUseCustom ? 'ON' : 'OFF'}</span>
+                </button>
+              </div>
+            )}
             <div style={{ marginTop: 18, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button onClick={() => setJoinTarget(null)} style={ghostBtn}>Cancel</button>
               <button onClick={confirmJoin} style={primaryBtn(true)}>Accept & enter match</button>
