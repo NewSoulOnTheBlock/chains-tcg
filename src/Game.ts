@@ -2,7 +2,7 @@
 // Chains TCG — Magic-style turn-based card game built on boardgame.io.
 
 import type { Game, Move } from 'boardgame.io';
-import { INVALID_MOVE, PlayerView, Stage } from 'boardgame.io/core';
+import { INVALID_MOVE, PlayerView, Stage, ActivePlayers } from 'boardgame.io/core';
 import {
   CARDS, COLORS, STARTER_DECKS, DEFAULT_MATCHUP,
   type Color, type CardDef,
@@ -33,6 +33,7 @@ export interface PlayerState {
   gas: Record<Color, number>; // floating gas pool, drained each cleanup
   nodesPlayedThisTurn: number;
   hasDrawnForTurn: boolean;
+  needsColorPick?: boolean;   // true until the player has chosen a deck color
 }
 
 export interface SecretState {
@@ -186,6 +187,10 @@ function dealDamageToMeme(G: GState, ownerId: string, uid: string, amount: numbe
   if (!m) return;
   m.damage += amount;
   if (m.damage >= memeToughness(p, m)) destroyMeme(G, ownerId, uid);
+}
+
+function pickingPending(G: GState): boolean {
+  return Object.values(G.players).some(p => p.needsColorPick);
 }
 
 function otherPlayer(ctx: { currentPlayer: string; playOrder: string[] }): string {
@@ -460,6 +465,20 @@ function applyLifelink(G: GState, pid: string, amount: number) {
   }
 }
 
+/** Pick your deck color. Valid only while you still need to pick. Callable by either player at any time during the pick phase. */
+const chooseColor: Move<GState> = ({ G, playerID, random }, color: Color) => {
+  if (playerID == null) return INVALID_MOVE;
+  const p = G.players[playerID];
+  if (!p?.needsColorPick) return INVALID_MOVE;
+  if (!COLORS.includes(color)) return INVALID_MOVE;
+  const shuffled = random!.Shuffle([...STARTER_DECKS[color]]);
+  p.color = color;
+  p.hand = shuffled.slice(0, 7);
+  G.secret.decks[playerID] = shuffled.slice(7);
+  p.needsColorPick = false;
+  G.log.push(`Player ${playerID} chose the ${color.toUpperCase()} deck.`);
+};
+
 /** Skip directly from main to end (no attacks this turn). */
 const passTurn: Move<GState> = ({ G, ctx, playerID, events }) => {
   if (playerID == null || ctx.currentPlayer !== playerID) return INVALID_MOVE;
@@ -486,29 +505,44 @@ export const ChainsTCG: Game<GState> = {
   minPlayers: 2,
   maxPlayers: 2,
 
-  setup: ({ ctx, random }, setupData?: { colors?: [Color, Color]; names?: [string, string] }) => {
+  setup: ({ ctx, random }, setupData?: { colors?: Array<Color | null | undefined>; names?: [string, string] }) => {
     const colors = setupData?.colors ?? DEFAULT_MATCHUP;
     const names = setupData?.names ?? ['Player 0', 'Player 1'];
     const players: Record<string, PlayerState> = {};
     const decks:   Record<string, string[]>     = {};
     for (let i = 0; i < ctx.numPlayers; i++) {
       const pid = String(i);
-      const color = colors[i] ?? DEFAULT_MATCHUP[i % 2];
-      const shuffled = random!.Shuffle([...STARTER_DECKS[color]]);
-      const hand = shuffled.slice(0, 7);
-      const deck = shuffled.slice(7);
-      decks[pid] = deck;
-      players[pid] = {
-        color,
-        profileName: names[i] ?? `Player ${i}`,
-        life: 20,
-        hand,
-        graveyard: [],
-        nodes: [], memes: [], machines: [],
-        gas: emptyGas(),
-        nodesPlayedThisTurn: 0,
-        hasDrawnForTurn: true,
-      };
+      const chosen = colors[i] as Color | null | undefined;
+      if (chosen) {
+        const shuffled = random!.Shuffle([...STARTER_DECKS[chosen]]);
+        decks[pid] = shuffled.slice(7);
+        players[pid] = {
+          color: chosen,
+          profileName: names[i] ?? `Player ${i}`,
+          life: 20,
+          hand: shuffled.slice(0, 7),
+          graveyard: [],
+          nodes: [], memes: [], machines: [],
+          gas: emptyGas(),
+          nodesPlayedThisTurn: 0,
+          hasDrawnForTurn: true,
+        };
+      } else {
+        // Color not yet chosen — placeholder state, player must call chooseColor before play.
+        decks[pid] = [];
+        players[pid] = {
+          color: DEFAULT_MATCHUP[i % 2],
+          profileName: names[i] ?? `Player ${i}`,
+          life: 20,
+          hand: [],
+          graveyard: [],
+          nodes: [], memes: [], machines: [],
+          gas: emptyGas(),
+          nodesPlayedThisTurn: 0,
+          hasDrawnForTurn: true,
+          needsColorPick: true,
+        };
+      }
     }
     return {
       players,
@@ -552,6 +586,28 @@ export const ChainsTCG: Game<GState> = {
     confirmBlocks,
     passTurn,
     goToCombat,
+    chooseColor,
+  },
+
+  phases: {
+    pick: {
+      start: true,
+      moves: { chooseColor },
+      turn: {
+        // Both players act simultaneously during deck selection.
+        activePlayers: ActivePlayers.ALL,
+      },
+      endIf: ({ G }) => !pickingPending(G),
+      next: 'play',
+    },
+    play: {
+      moves: {
+        playCard, tapNode,
+        declareAttacker, confirmAttackers,
+        declareBlocker, confirmBlocks,
+        passTurn, goToCombat,
+      },
+    },
   },
 
   endIf: ({ G, ctx }) => {

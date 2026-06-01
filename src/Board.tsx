@@ -113,6 +113,21 @@ export function ChainsBoard(props: Props) {
 
   const myTurn = ctx.currentPlayer === myId;
   const inBlockers = ctx.activePlayers?.[myId] === 'blockers';
+  const pickPhase = !!me?.needsColorPick || !!opp?.needsColorPick;
+  const iMustPick = !!me?.needsColorPick;
+
+  // Auto-apply the joiner's stashed deck choice from the lobby modal, once.
+  const pickAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!iMustPick || pickAppliedRef.current) return;
+    let stashed: string | null = null;
+    try { stashed = sessionStorage.getItem('pendingPickColor'); } catch {}
+    if (stashed && COLORS.includes(stashed as Color)) {
+      pickAppliedRef.current = true;
+      try { sessionStorage.removeItem('pendingPickColor'); } catch {}
+      moves.chooseColor(stashed as Color);
+    }
+  }, [iMustPick, moves]);
 
   function tryPlay(idx: number) {
     const defId = me.hand[idx];
@@ -195,8 +210,37 @@ export function ChainsBoard(props: Props) {
         <b style={{ color: '#fff' }}>{oppName}</b> <span style={{ color: '#888' }}>({formatRecord(oppProfile)})</span>
       </div>
 
+      {/* Deck-pick overlay — second player picks here if they arrived without a stashed color */}
+      {iMustPick && (
+        <div style={{ padding: 16, marginBottom: 10, background: '#0e1c30', border: '1px solid #2a4a78', borderRadius: 6 }}>
+          <div style={{ fontWeight: 800, color: '#9cf', marginBottom: 6 }}>🎴 Choose your deck</div>
+          <div style={{ fontSize: 12, color: '#bbb', marginBottom: 10 }}>
+            The match has begun. Pick a chain to play with — your deck will be shuffled and dealt.
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {COLORS.map(c => {
+              const meta = COLOR_META[c];
+              return (
+                <button key={c} onClick={() => moves.chooseColor(c)} style={{
+                  padding: '10px 16px',
+                  background: meta.hex, color: meta.ink,
+                  border: '2px solid #000', borderRadius: 6, fontWeight: 800, cursor: 'pointer', fontSize: 13,
+                }}>{meta.name}</button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Waiting banner — opponent hasn't picked yet */}
+      {!iMustPick && opp?.needsColorPick && (
+        <div style={{ padding: '8px 12px', marginBottom: 10, fontSize: 13, background: '#1a1a05', border: '1px solid #665'  , borderRadius: 6, color: '#ffd' }}>
+          ⏳ Waiting for opponent to choose their deck…
+        </div>
+      )}
+
       {/* Step instructions */}
-      {!ctx.gameover && (
+      {!ctx.gameover && !pickPhase && (
         <div style={{
           padding: '6px 10px', marginBottom: 6, fontSize: 12,
           background: inBlockers ? '#3a2a05' : (myTurn ? '#053a2a' : '#222'),

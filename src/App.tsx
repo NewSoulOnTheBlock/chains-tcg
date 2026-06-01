@@ -589,10 +589,12 @@ function Lobby({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Create-match panel state
-  const [c0, setC0] = useState<Color>('sol');
-  const [c1, setC1] = useState<Color>('eth');
+  // Create-match panel state — creator only picks their own color now.
+  const [myColor, setMyColor] = useState<Color>('sol');
   const [seatChoice, setSeatChoice] = useState<'0' | '1'>('0');
+  // Join modal state — second player picks their color when accepting.
+  const [joinTarget, setJoinTarget] = useState<{ match: any; seat: string } | null>(null);
+  const [joinColor, setJoinColor] = useState<Color>('eth');
 
   const refresh = useCallback(async () => {
     setLoading(true); setError('');
@@ -614,26 +616,45 @@ function Lobby({
     setError('');
     try {
       await upsertProfileApi(myName);
+      // Only the creator's color is fixed at creation. The other seat is left null
+      // and the second player picks their deck when accepting the match.
+      const colors: Array<Color | null> = ['0', '1'].map(s => (s === seatChoice ? myColor : null)) as Array<Color | null>;
       const created = await lobby.createMatch(GAME_NAME, {
         numPlayers: 2,
-        setupData: { colors: [c0, c1], names: ['Player 0', 'Player 1'] },
+        setupData: { colors, names: ['Player 0', 'Player 1'] },
       });
       const joined = await lobby.joinMatch(GAME_NAME, created.matchID, {
         playerID: seatChoice,
         playerName: myName,
       });
+      // Creator already picked, no pending color needed.
+      try { sessionStorage.removeItem('pendingPickColor'); } catch {}
       onJoined({ matchID: created.matchID, playerID: seatChoice, credentials: joined.playerCredentials, playerName: myName });
     } catch (e: any) { setError(String(e?.message ?? e)); }
   }
 
-  async function joinExisting(m: any) {
+  function openJoin(m: any) {
+    const openSeat = (m.players as Array<{ id: number; name?: string }>).find(p => !p.name);
+    if (!openSeat) { setError('No open seat'); return; }
+    // Default the join-color to something different from the creator's color if known.
+    const creatorColor = (m.setupData?.colors ?? []).find((c: any) => !!c) as Color | undefined;
+    if (creatorColor && creatorColor === joinColor) {
+      const fallback = COLOR_ORDER.find(c => c !== creatorColor)!;
+      setJoinColor(fallback);
+    }
+    setJoinTarget({ match: m, seat: String(openSeat.id) });
+  }
+
+  async function confirmJoin() {
+    if (!joinTarget) return;
     setError('');
+    const { match: m, seat: pid } = joinTarget;
     try {
       await upsertProfileApi(myName);
-      const openSeat = (m.players as Array<{ id: number; name?: string }>).find(p => !p.name);
-      if (!openSeat) throw new Error('No open seat');
-      const pid = String(openSeat.id);
+      // Stash the joiner's color choice; Board.tsx will auto-call chooseColor on mount.
+      try { sessionStorage.setItem('pendingPickColor', joinColor); } catch {}
       const joined = await lobby.joinMatch(GAME_NAME, m.matchID, { playerID: pid, playerName: myName });
+      setJoinTarget(null);
       onJoined({ matchID: m.matchID, playerID: pid, credentials: joined.playerCredentials, playerName: myName });
     } catch (e: any) { setError(String(e?.message ?? e)); }
   }
@@ -645,8 +666,7 @@ function Lobby({
 
       <Section title="Create match">
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <ColorChooser label="Player 0 chain" value={c0} onChange={setC0} />
-          <ColorChooser label="Player 1 chain" value={c1} onChange={setC1} />
+          <ColorChooser label="Your chain" value={myColor} onChange={setMyColor} />
           <div>
             <div style={labelStyle}>Your seat</div>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -657,6 +677,9 @@ function Lobby({
             </div>
           </div>
           <button onClick={createAndJoin} style={primaryBtn(true)}>Create & Join</button>
+          <div style={{ fontSize: 11, color: '#777', flex: 1 }}>
+            Your opponent picks their own chain when they accept the match.
+          </div>
         </div>
       </Section>
 
@@ -676,22 +699,25 @@ function Lobby({
                     Match <span style={{ color: '#888', fontFamily: 'monospace' }}>{m.matchID.slice(0, 8)}</span>
                   </div>
                   <div style={{ fontSize: 12, color: '#aaa', marginTop: 2 }}>
-                    {players.map((p, i) => (
-                      <span key={i} style={{ marginRight: 12 }}>
-                        P{i}: <b style={{ color: '#fff' }}>{p.name ?? <i style={{ color: '#777' }}>open</i>}</b>
-                        {' '}
-                        <span style={{ color: COLOR_META[colors[i] as Color]?.hex ?? '#888' }}>
-                          ({COLOR_META[colors[i] as Color]?.name ?? colors[i]})
+                    {players.map((p, i) => {
+                      const col = colors[i] as Color | null | undefined;
+                      return (
+                        <span key={i} style={{ marginRight: 12 }}>
+                          P{i}: <b style={{ color: '#fff' }}>{p.name ?? <i style={{ color: '#777' }}>open</i>}</b>
+                          {' '}
+                          {col
+                            ? <span style={{ color: COLOR_META[col].hex }}>({COLOR_META[col].name})</span>
+                            : <span style={{ color: '#777' }}>(picks on accept)</span>}
                         </span>
-                      </span>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
                 <button
-                  onClick={() => joinExisting(m)}
+                  onClick={() => openJoin(m)}
                   disabled={inProgress}
                   style={inProgress ? disabledBtn : primaryBtn(true)}
-                >{inProgress ? 'Full' : 'Join'}</button>
+                >{inProgress ? 'Full' : 'Accept'}</button>
               </div>
             );
           })}
@@ -732,6 +758,37 @@ function Lobby({
           </table>
         )}
       </Section>
+
+      {joinTarget && (
+        <div onClick={() => setJoinTarget(null)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: '#141418', border: '1px solid #2a2a32', borderRadius: 10,
+            padding: 24, minWidth: 420, maxWidth: 560, color: '#eee',
+          }}>
+            <h2 style={{ margin: '0 0 6px', fontSize: 20 }}>Accept match</h2>
+            <p style={{ color: '#aaa', marginTop: 0, fontSize: 13 }}>
+              You're joining as <b style={{ color: '#fff' }}>P{joinTarget.seat}</b>. Pick the deck you want to play with.
+            </p>
+            {(() => {
+              const otherSeat = joinTarget.seat === '0' ? '1' : '0';
+              const oppCol = (joinTarget.match.setupData?.colors ?? [])[Number(otherSeat)] as Color | null | undefined;
+              return oppCol ? (
+                <div style={{ fontSize: 13, color: '#bbb', marginBottom: 12 }}>
+                  Opponent is playing <span style={{ color: COLOR_META[oppCol].hex, fontWeight: 700 }}>{COLOR_META[oppCol].name}</span>.
+                </div>
+              ) : null;
+            })()}
+            <ColorChooser label="Your chain" value={joinColor} onChange={setJoinColor} />
+            <div style={{ marginTop: 18, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setJoinTarget(null)} style={ghostBtn}>Cancel</button>
+              <button onClick={confirmJoin} style={primaryBtn(true)}>Accept & enter match</button>
+            </div>
+          </div>
+        </div>
+      )}
     </Screen>
   );
 }
