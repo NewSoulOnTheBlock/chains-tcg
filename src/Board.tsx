@@ -8,6 +8,7 @@ import {
 } from './cards';
 import type { GState, Instance } from './Game';
 import { recordResultApi, getProfileApi, formatRecord, type Profile } from './profiles';
+import { CardHover } from './CardPreview';
 
 type Props = BoardProps<GState>;
 
@@ -77,6 +78,7 @@ function CardFace({
   const meta = COLOR_META[def.color];
   const dimmed = instance?.summoningSick || instance?.tapped;
   return (
+    <CardHover defId={defId}>
     <div onClick={onClick}
       style={{
         width: W, height: H, margin: 2, padding: 5, borderRadius: 8,
@@ -105,6 +107,7 @@ function CardFace({
       <CostPips def={def} />
       {footer && <div style={{ fontSize: 8, lineHeight: 1.1 }}>{footer}</div>}
     </div>
+    </CardHover>
   );
 }
 
@@ -712,8 +715,8 @@ function MiniCard({
   if (!def) return null;
   const meta = COLOR_META[def.color];
   return (
+    <CardHover defId={defId}>
     <div onClick={onClick}
-      title={`${def.name}\n${def.type.toUpperCase()}${def.power != null ? ` ${def.power}/${def.toughness}` : ''}\n${def.text ?? ''}`}
       style={{
         width: 52, height: 72, padding: 3, borderRadius: 4,
         background: meta.hex, color: meta.ink,
@@ -733,6 +736,7 @@ function MiniCard({
       )}
       {footer && <div style={{ fontSize: 6, lineHeight: 1.0 }}>{footer}</div>}
     </div>
+    </CardHover>
   );
 }
 

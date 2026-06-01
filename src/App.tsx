@@ -13,6 +13,7 @@ import {
   getDeckApi, saveDeckApi, formatRecord, type Profile, type LibraryCard,
 } from './profiles';
 import { connectEvm, connectSolana, shortAddr, type ConnectedWallet } from './wallet';
+import { CardHover } from './CardPreview';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 // Server base: in dev Vite proxies /games (lobby) and /socket.io to :8000.
@@ -814,7 +815,8 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
               const cap = isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC;
               const meta = COLOR_META[def.color];
               return (
-                <div key={def.id} style={{
+                <CardHover key={def.id} defId={def.id}>
+                <div style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '6px 8px',
                   background: '#0c0c12', borderRadius: 4,
@@ -840,6 +842,7 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
                     disabled={n >= cap || total >= DECK_SIZE}
                     style={tinyBtn}>+</button>
                 </div>
+                </CardHover>
               );
             })}
           </div>
