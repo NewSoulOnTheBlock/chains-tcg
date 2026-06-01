@@ -55,11 +55,11 @@ function Login({ onLogin }: { onLogin: (name: string) => void }) {
   );
 }
 
-// ── Background menu music (Landing + Profile only) ──────────────────────────
-function MenuMusic() {
+// ── Background music player (used for menu + battle tracks) ────────────────
+function BgMusic({ src, storageKey }: { src: string; storageKey: string }) {
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const [muted, setMuted] = useState<boolean>(() => {
-    try { return localStorage.getItem('musicMuted') === '1'; } catch { return false; }
+    try { return localStorage.getItem(storageKey) === '1'; } catch { return false; }
   });
 
   useEffect(() => {
@@ -69,7 +69,6 @@ function MenuMusic() {
     a.play().catch(() => { /* autoplay blocked until user gesture */ });
   }, [muted]);
 
-  // First user interaction anywhere — kick off playback if it was blocked.
   useEffect(() => {
     const kick = () => { audioRef.current?.play().catch(() => {}); };
     window.addEventListener('pointerdown', kick, { once: true });
@@ -79,14 +78,14 @@ function MenuMusic() {
   function toggle() {
     setMuted(m => {
       const next = !m;
-      try { localStorage.setItem('musicMuted', next ? '1' : '0'); } catch {}
+      try { localStorage.setItem(storageKey, next ? '1' : '0'); } catch {}
       return next;
     });
   }
 
   return (
     <>
-      <audio ref={audioRef} src="/menu-music.mp3" loop preload="auto" />
+      <audio ref={audioRef} src={src} loop preload="auto" />
       <button
         onClick={toggle}
         title={muted ? 'Unmute music' : 'Mute music'}
@@ -102,6 +101,9 @@ function MenuMusic() {
     </>
   );
 }
+
+function MenuMusic()   { return <BgMusic src="/menu-music.mp3"   storageKey="musicMuted" />; }
+function BattleMusic() { return <BgMusic src="/battle-music.mp3" storageKey="battleMuted" />; }
 
 // ── Landing screen (post-login hub) ─────────────────────────────────────────
 function Landing({
@@ -513,11 +515,14 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
           </div>
         </div>
       ) : (
-        <ChainsClient
-          matchID={seat.matchID}
-          playerID={seat.playerID}
-          credentials={seat.credentials}
-        />
+        <>
+          <BattleMusic />
+          <ChainsClient
+            matchID={seat.matchID}
+            playerID={seat.playerID}
+            credentials={seat.credentials}
+          />
+        </>
       )}
     </div>
   );
