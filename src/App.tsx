@@ -22,6 +22,23 @@ const COLOR_ORDER: Color[] = ['bnb', 'sol', 'hl', 'eth', 'xrp'];
 
 const lobby = new LobbyClient({ server: SERVER_BASE || undefined });
 
+// ── Responsive helper ──────────────────────────────────────────────────────
+function useIsMobile(breakpoint = 720) {
+  const [m, setM] = useState(() => typeof window !== 'undefined' && window.innerWidth <= breakpoint);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
+    const onChange = () => setM(mq.matches);
+    onChange();
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else mq.addListener(onChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', onChange);
+      else mq.removeListener(onChange);
+    };
+  }, [breakpoint]);
+  return m;
+}
+
 // ── Persistence helpers (sessionStorage so each tab can be a different player) ─
 const sess = {
   get<T>(k: string, def: T): T { try { const v = sessionStorage.getItem(k); return v ? JSON.parse(v) as T : def; } catch { return def; } },
@@ -384,6 +401,7 @@ function Table({ rows }: { rows: [string, string][] }) {
 function Landing({
   myName, onPlay, onProfile, onRules, onLogout,
 }: { myName: string; onPlay: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
+  const mobile = useIsMobile();
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#000', color: '#fff', fontFamily: 'system-ui' }}>
       <img
@@ -391,24 +409,34 @@ function Landing({
         alt=""
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0, imageRendering: 'pixelated' }}
       />
-      {/* Lighter overlay so the pixel-art title stays readable */}
       <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.1) 55%, rgba(0,0,0,0.75) 100%)', zIndex: 1 }} />
 
       {/* Top bar */}
-      <div style={{ position: 'relative', zIndex: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 22px' }}>
-        <div style={{ fontWeight: 800, fontSize: 18, letterSpacing: 1.5, textShadow: '0 2px 8px #000' }}>CHAINS TCG</div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 13, color: '#ddd', textShadow: '0 1px 4px #000' }}>Signed in as <b>{myName}</b></span>
+      <div style={{
+        position: 'relative', zIndex: 2,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: mobile ? '10px 12px' : '14px 22px',
+        gap: 8, flexWrap: 'wrap',
+      }}>
+        <div style={{ fontWeight: 800, fontSize: mobile ? 15 : 18, letterSpacing: 1.5, textShadow: '0 2px 8px #000' }}>CHAINS TCG</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: '#ddd', textShadow: '0 1px 4px #000' }}>Signed in as <b>{myName}</b></span>
           <button onClick={onLogout} style={ghostBtn}>Sign out</button>
         </div>
       </div>
 
-      {/* Title block — omitted; the artwork has its own title. */}
-
       {/* Action menu */}
       <div style={{
-        position: 'absolute', left: '8vw', bottom: '10vh', zIndex: 2,
-        display: 'flex', flexDirection: 'column', gap: 10, minWidth: 220,
+        position: 'absolute',
+        left: mobile ? '50%' : '8vw',
+        transform: mobile ? 'translateX(-50%)' : undefined,
+        right: mobile ? undefined : undefined,
+        bottom: mobile ? '6vh' : '10vh',
+        zIndex: 2,
+        display: 'flex', flexDirection: 'column', gap: 10,
+        width: mobile ? 'calc(100vw - 24px)' : undefined,
+        minWidth: mobile ? undefined : 220,
+        maxWidth: mobile ? 360 : undefined,
       }}>
         <MenuBtn primary onClick={onPlay}>▶  PLAY</MenuBtn>
         <MenuBtn onClick={onProfile}>👤  PROFILE</MenuBtn>
@@ -447,6 +475,7 @@ function MenuBtn({ children, onClick, primary }: { children: React.ReactNode; on
 
 // ── Profile page ────────────────────────────────────────────────────────────
 function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void }) {
+  const mobile = useIsMobile();
   const [prof, setProf] = useState<Profile | null>(null);
   const [bio, setBio] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
@@ -499,7 +528,13 @@ function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void })
       {loading ? (
         <div style={{ padding: 40, color: '#888' }}>Loading…</div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 280px) 1fr', gap: 24, padding: 24, maxWidth: 980, margin: '0 auto' }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: mobile ? '1fr' : 'minmax(220px, 280px) 1fr',
+          gap: mobile ? 16 : 24,
+          padding: mobile ? 14 : 24,
+          maxWidth: 980, margin: '0 auto',
+        }}>
           {/* Avatar + record */}
           <div>
             <div style={{
@@ -584,6 +619,7 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
 function Lobby({
   myName, onJoined, onBack,
 }: { myName: string; onJoined: (seat: Seat) => void; onBack: () => void }) {
+  const mobile = useIsMobile();
   const [matches, setMatches] = useState<any[]>([]);
   const [leaderboard, setLeaderboard] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(false);
@@ -719,7 +755,77 @@ function Lobby({
       right={<button onClick={onBack} style={ghostBtn}>← Back</button>}>
       {error && <Banner kind="error">{error}</Banner>}
 
-      {/* Castle-frame lobby */}
+      {/* Castle-frame lobby (desktop) — falls back to stacked layout on mobile */}
+      {mobile ? (
+        <div style={{
+          position: 'relative', width: '100%', borderRadius: 8, overflow: 'hidden',
+          background: '#0a0e1a', border: '1px solid rgba(180,150,80,0.35)',
+        }}>
+          <div style={{
+            backgroundImage: 'url(/lobby-bg.png)', backgroundSize: 'cover', backgroundPosition: 'center',
+            padding: '16px 14px', borderBottom: '1px solid rgba(180,150,80,0.45)',
+          }}>
+            <div style={{
+              fontFamily: 'serif', fontSize: 18, fontWeight: 800, color: '#f1e3a8',
+              letterSpacing: 2, textAlign: 'center', textShadow: '0 2px 6px #000', marginBottom: 10,
+            }}>Choose Your Chain</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {COLORS.map(c => {
+                const meta = COLOR_META[c];
+                const selected = myColor === c;
+                return (
+                  <button key={c} onClick={() => setMyColor(c)} style={{
+                    padding: '10px 12px', fontWeight: 800, fontSize: 14,
+                    background: selected ? `linear-gradient(90deg, ${meta.hex}, ${meta.hex}aa)` : 'rgba(10,12,20,0.78)',
+                    color: selected ? meta.ink : '#e9e4d0',
+                    border: `2px solid ${selected ? '#f1e3a8' : 'rgba(180,150,80,0.45)'}`,
+                    borderRadius: 4, cursor: 'pointer', textAlign: 'left',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}>
+                    <span>{meta.name}</span>
+                    <span style={{ fontSize: 10, opacity: 0.85 }}>{c.toUpperCase()}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{
+              display: 'flex', gap: 6, marginTop: 10, justifyContent: 'center',
+              background: 'rgba(10,12,20,0.7)', padding: '6px 10px',
+              border: '1px solid rgba(180,150,80,0.35)', borderRadius: 4,
+            }}>
+              <span style={{ fontSize: 11, color: '#c9b97a', alignSelf: 'center' }}>SEAT</span>
+              {(['0','1'] as const).map(s => (
+                <button key={s} onClick={() => setSeatChoice(s)} style={{
+                  padding: '4px 14px', fontWeight: 700, fontSize: 12,
+                  background: seatChoice === s ? '#f1e3a8' : 'transparent',
+                  color: seatChoice === s ? '#1a1408' : '#e9e4d0',
+                  border: '1px solid rgba(180,150,80,0.55)', borderRadius: 3, cursor: 'pointer',
+                }}>P{s}</button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button onClick={createAndJoin} style={{
+                flex: 1, padding: '10px 0',
+                background: 'linear-gradient(180deg,#d9b65a,#9a7a2c)',
+                color: '#1a1408', border: '1px solid #6a5520', borderRadius: 4,
+                fontWeight: 900, letterSpacing: 1, cursor: 'pointer', fontSize: 13,
+              }}>⚔ CREATE</button>
+              <button onClick={refresh} style={{
+                flex: 1, padding: '10px 0',
+                background: 'rgba(10,12,20,0.7)', color: '#f1e3a8',
+                border: '1px solid rgba(180,150,80,0.55)', borderRadius: 4,
+                fontWeight: 800, letterSpacing: 1, cursor: 'pointer', fontSize: 13,
+              }}>{loading ? '…' : `↻ REFRESH (${openMatches.length})`}</button>
+            </div>
+          </div>
+
+          <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={panelHeader}>Open Matches</div>
+            {openMatches.length === 0 && <div style={panelEmpty}>No open matches.</div>}
+            {openMatches.map(m => <MatchTile key={m.matchID} m={m} />)}
+          </div>
+        </div>
+      ) : (
       <div style={{
         position: 'relative', width: '100%', maxWidth: 1200, margin: '0 auto',
         aspectRatio: '1536 / 1024',
@@ -827,6 +933,7 @@ function Lobby({
           }}>{loading ? '…' : `↻ REFRESH (${openMatches.length})`}</button>
         </div>
       </div>
+      )}
 
       <Section title="Leaderboard">
         {leaderboard.length === 0 ? (
@@ -870,7 +977,8 @@ function Lobby({
         }}>
           <div onClick={e => e.stopPropagation()} style={{
             background: '#141418', border: '1px solid #2a2a32', borderRadius: 10,
-            padding: 24, minWidth: 420, maxWidth: 560, color: '#eee',
+            padding: 20, width: 'min(560px, calc(100vw - 24px))',
+            maxHeight: 'calc(100vh - 24px)', overflowY: 'auto', color: '#eee',
           }}>
             <h2 style={{ margin: '0 0 6px', fontSize: 20 }}>Accept match</h2>
             <p style={{ color: '#aaa', marginTop: 0, fontSize: 13 }}>
@@ -1037,10 +1145,11 @@ export default function App() {
 
 // ── Tiny UI primitives ──────────────────────────────────────────────────────
 function Screen({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+  const mobile = useIsMobile();
   return (
-    <div style={{ fontFamily: 'system-ui', background: '#000', minHeight: '100vh', padding: 24, color: '#eee' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h1 style={{ margin: 0, fontSize: 22 }}>{title}</h1>
+    <div style={{ fontFamily: 'system-ui', background: '#000', minHeight: '100vh', padding: mobile ? 12 : 24, color: '#eee' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 8, flexWrap: 'wrap' }}>
+        <h1 style={{ margin: 0, fontSize: mobile ? 18 : 22 }}>{title}</h1>
         <div>{right}</div>
       </div>
       {children}

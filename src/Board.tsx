@@ -11,6 +11,22 @@ import { recordResultApi, getProfileApi, formatRecord, type Profile } from './pr
 
 type Props = BoardProps<GState>;
 
+function useIsMobile(breakpoint = 720) {
+  const [m, setM] = useState(() => typeof window !== 'undefined' && window.innerWidth <= breakpoint);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
+    const onChange = () => setM(mq.matches);
+    onChange();
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else mq.addListener(onChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', onChange);
+      else mq.removeListener(onChange);
+    };
+  }, [breakpoint]);
+  return m;
+}
+
 const COLOR_BAR: React.CSSProperties = { display: 'flex', gap: 6, fontSize: 12, marginTop: 4 };
 
 function Pip({ c, n }: { c: Color; n: number }) {
@@ -44,12 +60,15 @@ function CardFace({
   selected?: boolean;
   faceDown?: boolean;
 }) {
+  const mobile = useIsMobile();
+  const W = mobile ? 84 : 110;
+  const H = mobile ? 122 : 160;
   if (faceDown) {
     return (
       <div style={{
-        width: 110, height: 160, margin: 2, borderRadius: 8,
+        width: W, height: H, margin: 2, borderRadius: 8,
         background: 'repeating-linear-gradient(45deg, #333 0 8px, #555 8px 16px)',
-        border: '1px solid #000',
+        border: '1px solid #000', flex: '0 0 auto',
       }} />
     );
   }
@@ -60,7 +79,7 @@ function CardFace({
   return (
     <div onClick={onClick}
       style={{
-        width: 110, height: 160, margin: 2, padding: 5, borderRadius: 8,
+        width: W, height: H, margin: 2, padding: 5, borderRadius: 8,
         background: meta.hex, color: meta.ink,
         border: selected ? '3px solid #ff0' : '1px solid #000',
         cursor: onClick ? 'pointer' : 'default',
@@ -69,7 +88,7 @@ function CardFace({
         opacity: dimmed && def.type === 'meme' ? 0.55 : 1,
         fontFamily: 'system-ui, sans-serif',
         display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-        position: 'relative',
+        position: 'relative', flex: '0 0 auto',
       }}>
       <div style={{ fontWeight: 700, fontSize: 10, lineHeight: 1.05 }}>{def.name}</div>
       <div style={{ fontSize: 8, opacity: 0.85, marginTop: 1, lineHeight: 1.1 }}>
@@ -103,6 +122,7 @@ export function ChainsBoard(props: Props) {
     matchID?: string;
     matchData?: Array<{ id: number; name?: string; isConnected?: boolean }>;
   };
+  const mobile = useIsMobile();
   const myId  = playerID ?? '0';
   const oppId = myId === '0' ? '1' : '0';
   const me   = G.players[myId];
@@ -198,10 +218,10 @@ export function ChainsBoard(props: Props) {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', padding: 8, color: '#eee', background: '#111', minHeight: '100vh' }}>
-      <h2 style={{ margin: '4px 0' }}>
+    <div style={{ fontFamily: 'system-ui, sans-serif', padding: mobile ? 6 : 8, color: '#eee', background: '#111', minHeight: '100vh' }}>
+      <h2 style={{ margin: '4px 0', fontSize: mobile ? 14 : 18 }}>
         Chains TCG — {myTurn ? <span style={{color:'#9f9'}}>your turn</span> : <span style={{color:'#f99'}}>opponent's turn</span>}
-        {' '}· turn {ctx.turn} · phase: {inBlockers ? 'declare blockers' : myTurn ? 'main' : 'waiting'}
+        {' '}· turn {ctx.turn} · {inBlockers ? 'block' : myTurn ? 'main' : 'wait'}
       </h2>
 
       <div style={{ fontSize: 12, color: '#aaa', margin: '0 0 6px' }}>
@@ -310,7 +330,12 @@ export function ChainsBoard(props: Props) {
       {/* Hand */}
       <div style={{ marginTop: 8 }}>
         <div style={{ fontSize: 12, opacity: 0.7 }}>Hand ({me.hand.length})</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+        <div style={{
+          display: 'flex', flexWrap: mobile ? 'nowrap' : 'wrap',
+          overflowX: mobile ? 'auto' : 'visible',
+          WebkitOverflowScrolling: 'touch',
+          paddingBottom: mobile ? 6 : 0,
+        }}>
           {me.hand.map((id, i) => (
             <CardFace
               key={i}
@@ -323,7 +348,7 @@ export function ChainsBoard(props: Props) {
       </div>
 
       {/* Action bar */}
-      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <GasBar gas={me.gas} />
         {myTurn && !inBlockers && (
           <>
