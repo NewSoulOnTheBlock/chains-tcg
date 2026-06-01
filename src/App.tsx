@@ -105,10 +105,149 @@ function BgMusic({ src, storageKey }: { src: string; storageKey: string }) {
 function MenuMusic()   { return <BgMusic src="/menu-music.mp3"   storageKey="musicMuted" />; }
 function BattleMusic() { return <BgMusic src="/battle-music.mp3" storageKey="battleMuted" />; }
 
+// ── Rules page ─────────────────────────────────────────────────────────────
+function RulesPage({ onBack }: { onBack: () => void }) {
+  return (
+    <div style={{ fontFamily: 'system-ui', background: '#0a0a0c', minHeight: '100vh', color: '#eee' }}>
+      <div style={{ padding: '14px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #222', position: 'sticky', top: 0, background: '#0a0a0c', zIndex: 5 }}>
+        <button onClick={onBack} style={ghostBtn}>← Back</button>
+        <div style={{ fontWeight: 800, letterSpacing: 1.5 }}>RULES</div>
+        <div style={{ width: 80 }} />
+      </div>
+
+      <div style={{ maxWidth: 820, margin: '0 auto', padding: '28px 22px 60px', lineHeight: 1.55 }}>
+        <H1>Chains TCG — Quick Rules</H1>
+
+        <H2>🎯 Goal</H2>
+        <P>Reduce your opponent's life from <B>20 → 0</B>. Last player standing wins.</P>
+
+        <H2>🛠️ Setup</H2>
+        <UL items={[
+          <>Each player picks one of <B>5 chains</B>: 🟠 <CC c="#f3ba2f">BnB</CC> · 🟣 <CC c="#9945ff">Solana</CC> · 🟢 <CC c="#50d2c1">Hyperliquid</CC> · ⚪ <CC c="#cfd8dc">Ethereum</CC> · ⚫ <CC c="#8a8a8a">XRP</CC></>,
+          <>Each gets a <B>60-card deck</B> in that color, shuffled.</>,
+          <>Draw <B>7 cards</B>. Start at <B>20 life</B>.</>,
+          <>Max hand size <B>7</B> at end of turn — discard down.</>,
+          <>The player going <B>first does not draw on turn 1</B>; everyone else draws 1 at the start of their turn.</>,
+        ]} />
+
+        <H2>🃏 The 4 Card Types</H2>
+        <Table rows={[
+          ['🟫 Node',    'Your "land". Free to play but only 1 per turn. Tap on a later turn to add 1 Gas of its color.'],
+          ['👹 Meme',    'Your creatures. Have Power / Toughness. Attack to deal damage to the opponent.'],
+          ['⚙️ Machine', 'Permanent ongoing effect (like an artifact/enchantment). Stays in play until destroyed.'],
+          ['⚡ Move',    'One-shot spell. Resolves immediately, then goes to the graveyard.'],
+        ]} />
+
+        <H2>⛽ Gas (the mana system)</H2>
+        <UL items={[
+          <><B>Nodes generate Gas. Cards cost Gas.</B></>,
+          <>Tap a Node → <B>+1 Gas</B> of its color.</>,
+          <>Gas in your pool <B>drains at end of your turn</B> — spend it or lose it.</>,
+          <>A cost can be all one color (e.g. 3 purple) or mixed.</>,
+        ]} />
+
+        <H2>🔄 A turn, step by step</H2>
+        <OL items={[
+          <><B>Untap</B> — your Nodes/Memes/Machines untap. Summoning sickness wears off.</>,
+          <><B>Draw 1</B> (skipped on the very first turn of the game).</>,
+          <>
+            <B>Main phase</B> — in any order:
+            <UL items={[
+              <>Play <B>one Node</B> (free).</>,
+              <>Tap Nodes for Gas.</>,
+              <>Cast Memes (they enter <B>summoning sick</B> — can't attack until your next turn unless they have haste).</>,
+              <>Cast Machines (they stay on the battlefield).</>,
+              <>Cast Moves (they resolve, then go to the graveyard).</>,
+            ]} />
+          </>,
+          <>
+            <B>Combat</B> — click your untapped, non-sick Memes to mark them as <B>attackers</B>, then press <i>Attack with N meme(s)</i>.
+            <UL items={[
+              <>Each attacking Meme <B>taps</B>.</>,
+              <>Opponent picks Memes to <B>block</B>. Each blocker must be untapped.</>,
+              <><B>Damage resolves simultaneously</B>: attacker and blocker deal their Power to each other. Damage ≥ toughness → destroyed (to graveyard).</>,
+              <>Any attacker that <B>isn't blocked</B> deals its Power directly to the opponent's <B>life</B>.</>,
+            ]} />
+          </>,
+          <><B>End turn</B> — unspent Gas evaporates, discard down to 7 cards.</>,
+        ]} />
+
+        <H2>⏱️ 30-second teach</H2>
+        <UL items={[
+          <>🟢 <B>Nodes = mana.</B> One per turn. Tap for gas.</>,
+          <>👹 <B>Memes = creatures.</B> Sick the turn they enter; can't attack.</>,
+          <>⚙️ <B>Machines = permanent passives.</B></>,
+          <>⚡ <B>Moves = one-shot effects.</B></>,
+          <>⚔️ <B>Combat:</B> attack with untapped memes → opponent blocks → damage swaps.</>,
+          <>💀 <B>Life = 20.</B> Hit zero, you lose.</>,
+          <>🔥 <B>Gas resets every turn — spend it.</B></>,
+        ]} />
+
+        <H2>🖱️ UI cheat-sheet</H2>
+        <UL items={[
+          <><B>Click an untapped node</B> = tap for gas.</>,
+          <><B>Click a card in hand</B> = play it (move spells then ask you to pick a target).</>,
+          <><B>Click your own untapped meme</B> during your main phase = mark as attacker. Press <i>Attack with N</i>.</>,
+          <>During <B>declare blockers</B> (when the opponent attacks), click your untapped meme then click the attacker you want to block.</>,
+          <>Press <B>End Turn</B> to pass.</>,
+        ]} />
+
+        <P style={{ marginTop: 28, fontSize: 13, color: '#888' }}>
+          That's the whole game. Have fun. 🎉
+        </P>
+      </div>
+    </div>
+  );
+}
+
+function H1({ children }: { children: React.ReactNode }) {
+  return <h1 style={{ fontSize: 30, margin: '0 0 18px', letterSpacing: -0.5 }}>{children}</h1>;
+}
+function H2({ children }: { children: React.ReactNode }) {
+  return <h2 style={{ fontSize: 18, margin: '26px 0 8px', color: '#ffd066', letterSpacing: 0.3 }}>{children}</h2>;
+}
+function P({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return <p style={{ margin: '6px 0', color: '#dcdcdc', ...style }}>{children}</p>;
+}
+function B({ children }: { children: React.ReactNode }) {
+  return <b style={{ color: '#fff' }}>{children}</b>;
+}
+function CC({ c, children }: { c: string; children: React.ReactNode }) {
+  return <span style={{ color: c, fontWeight: 700 }}>{children}</span>;
+}
+function UL({ items }: { items: React.ReactNode[] }) {
+  return (
+    <ul style={{ margin: '6px 0 6px 22px', padding: 0, color: '#dcdcdc' }}>
+      {items.map((it, i) => <li key={i} style={{ marginBottom: 4 }}>{it}</li>)}
+    </ul>
+  );
+}
+function OL({ items }: { items: React.ReactNode[] }) {
+  return (
+    <ol style={{ margin: '6px 0 6px 22px', padding: 0, color: '#dcdcdc' }}>
+      {items.map((it, i) => <li key={i} style={{ marginBottom: 8 }}>{it}</li>)}
+    </ol>
+  );
+}
+function Table({ rows }: { rows: [string, string][] }) {
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', margin: '8px 0' }}>
+      <tbody>
+        {rows.map(([k, v], i) => (
+          <tr key={i} style={{ borderTop: '1px solid #222' }}>
+            <td style={{ padding: '8px 10px', width: 140, fontWeight: 700, color: '#fff', verticalAlign: 'top' }}>{k}</td>
+            <td style={{ padding: '8px 10px', color: '#dcdcdc' }}>{v}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 // ── Landing screen (post-login hub) ─────────────────────────────────────────
 function Landing({
-  myName, onPlay, onProfile, onLogout,
-}: { myName: string; onPlay: () => void; onProfile: () => void; onLogout: () => void }) {
+  myName, onPlay, onProfile, onRules, onLogout,
+}: { myName: string; onPlay: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#000', color: '#fff', fontFamily: 'system-ui' }}>
       <img
@@ -137,6 +276,7 @@ function Landing({
       }}>
         <MenuBtn primary onClick={onPlay}>▶  PLAY</MenuBtn>
         <MenuBtn onClick={onProfile}>👤  PROFILE</MenuBtn>
+        <MenuBtn onClick={onRules}>📖  RULES</MenuBtn>
         <MenuBtn onClick={() => window.open('https://x.com/memecoindevvv', '_blank', 'noopener')}>📰  NEWS</MenuBtn>
       </div>
     </div>
@@ -529,7 +669,7 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
 }
 
 // ── Root ────────────────────────────────────────────────────────────────────
-type View = 'landing' | 'profile' | 'lobby';
+type View = 'landing' | 'profile' | 'rules' | 'lobby';
 
 export default function App() {
   const [name, setName] = useState<string>(() => sess.get<string>('myName', ''));
@@ -572,15 +712,17 @@ export default function App() {
 
   // Landing + Profile share the same audio element so music keeps playing
   // (and the user's mute state is preserved) when switching between them.
-  const showMusic = view === 'landing' || view === 'profile';
+  const showMusic = view === 'landing' || view === 'profile' || view === 'rules';
   return (
     <>
       {showMusic && <MenuMusic />}
       {view === 'profile'
         ? <ProfilePage myName={name} onBack={() => goto('landing')} />
-        : view === 'lobby'
-          ? <Lobby myName={name} onJoined={joinedSeat} onBack={() => goto('landing')} />
-          : <Landing myName={name} onPlay={() => goto('lobby')} onProfile={() => goto('profile')} onLogout={logout} />}
+        : view === 'rules'
+          ? <RulesPage onBack={() => goto('landing')} />
+          : view === 'lobby'
+            ? <Lobby myName={name} onJoined={joinedSeat} onBack={() => goto('landing')} />
+            : <Landing myName={name} onPlay={() => goto('lobby')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
     </>
   );
 }
