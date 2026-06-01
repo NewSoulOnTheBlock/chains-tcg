@@ -27,3 +27,9 @@ services:
         value: "1"            # Render Postgres requires SSL
       - key: ALLOW_ORIGIN
         sync: false           # set this to your public URL after first deploy, e.g. https://chains-tcg.onrender.com
+      - key: HELIUS_API_KEY
+        sync: false           # required to populate the Memetic Masters library — paste your Helius API key
+      - key: MEMETIC_MASTERS_COLLECTION
+        sync: false           # optional: Metaplex collection mint to filter on (recommended); leave unset to filter by name
+      - key: MEMETIC_MASTERS_NAME_MATCH
+        value: memetic master # fallback substring match when no collection mint is set

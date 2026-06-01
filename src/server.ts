@@ -35,6 +35,68 @@ async function readJson(ctx: any): Promise<any> {
   });
 }
 
+// ── Memetic Masters library (Helius DAS API) ────────────────────────────────
+type LibraryCard = {
+  id: string;        // NFT mint
+  name: string;
+  image: string;
+  collection?: string;
+};
+
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY ?? '';
+const MEMETIC_MASTERS_COLLECTION = process.env.MEMETIC_MASTERS_COLLECTION ?? '';
+const NAME_MATCH = (process.env.MEMETIC_MASTERS_NAME_MATCH ?? 'memetic master').toLowerCase();
+
+async function fetchMemeticMastersLibrary(walletAddress: string): Promise<LibraryCard[]> {
+  if (!walletAddress) return [];
+  // Heuristic: Solana base58 addresses are 32-44 chars and don't start with 0x.
+  if (walletAddress.startsWith('0x')) return [];
+  if (!HELIUS_API_KEY) {
+    console.warn('[library] HELIUS_API_KEY not set; returning empty library');
+    return [];
+  }
+  try {
+    const r = await fetch(`https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'memetic-masters',
+        method: 'getAssetsByOwner',
+        params: { ownerAddress: walletAddress, page: 1, limit: 1000 },
+      }),
+    });
+    if (!r.ok) {
+      console.warn('[library] helius http', r.status);
+      return [];
+    }
+    const j: any = await r.json();
+    const items: any[] = j?.result?.items ?? [];
+    const filtered = items.filter(it => {
+      const grouping: Array<{ group_key: string; group_value: string }> = it?.grouping ?? [];
+      if (MEMETIC_MASTERS_COLLECTION) {
+        return grouping.some(g => g.group_key === 'collection' && g.group_value === MEMETIC_MASTERS_COLLECTION);
+      }
+      const name: string = (it?.content?.metadata?.name ?? '').toLowerCase();
+      const collName: string = (it?.content?.metadata?.collection?.name ?? '').toLowerCase();
+      return name.includes(NAME_MATCH) || collName.includes(NAME_MATCH);
+    });
+    return filtered.map((it: any): LibraryCard => {
+      const links = it?.content?.links ?? {};
+      const files: Array<{ uri?: string }> = it?.content?.files ?? [];
+      return {
+        id: String(it?.id ?? ''),
+        name: String(it?.content?.metadata?.name ?? 'Untitled'),
+        image: String(links.image ?? files[0]?.uri ?? ''),
+        collection: it?.content?.metadata?.collection?.name,
+      };
+    }).filter(c => c.id);
+  } catch (e) {
+    console.warn('[library] helius error', e);
+    return [];
+  }
+}
+
 app.use(async (ctx, next) => {
   const url = ctx.request.url || '';
   const method = ctx.request.method;
@@ -81,6 +143,11 @@ app.use(async (ctx, next) => {
       if ('walletAddress' in body) patch.walletAddress = body.walletAddress == null ? null : String(body.walletAddress).slice(0, 128);
       if ('walletChain'   in body) patch.walletChain   = body.walletChain   == null ? null : String(body.walletChain).slice(0, 32);
       ctx.body = { profile: await updateProfile(String(body.name), patch) };
+      return;
+    }
+    if (method === 'GET' && url.startsWith('/api/library/')) {
+      const addr = decodeURIComponent(url.slice('/api/library/'.length));
+      ctx.body = { cards: await fetchMemeticMastersLibrary(addr) };
       return;
     }
     if (method === 'POST' && url === '/api/result') {

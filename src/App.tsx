@@ -9,7 +9,8 @@ import { ChainsTCG } from './Game';
 import { ChainsBoard } from './Board';
 import { COLOR_META, COLORS, type Color } from './cards';
 import {
-  listProfilesApi, getProfileApi, getProfileByWalletApi, upsertProfileApi, updateProfileApi, formatRecord, type Profile,
+  listProfilesApi, getProfileApi, getProfileByWalletApi, upsertProfileApi, updateProfileApi, getLibraryApi,
+  formatRecord, type Profile, type LibraryCard,
 } from './profiles';
 import { connectEvm, connectSolana, shortAddr, type ConnectedWallet } from './wallet';
 
@@ -602,6 +603,106 @@ function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void })
           </div>
         </div>
       )}
+
+      {!loading && <LibrarySection prof={prof} />}
+    </div>
+  );
+}
+
+// ── NFT library (Memetic Masters via Helius) ────────────────────────────────
+function LibrarySection({ prof }: { prof: Profile | null }) {
+  const mobile = useIsMobile();
+  const [cards, setCards] = useState<LibraryCard[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const wallet = prof?.walletAddress ?? '';
+  const isSol = !!wallet && !wallet.startsWith('0x');
+
+  const load = useCallback(async () => {
+    if (!wallet) return;
+    setLoading(true); setErr('');
+    try { setCards(await getLibraryApi(wallet)); }
+    catch (e: any) { setErr(String(e?.message ?? e)); }
+    finally { setLoading(false); }
+  }, [wallet]);
+
+  useEffect(() => { if (wallet && isSol) load(); }, [wallet, isSol, load]);
+
+  return (
+    <div style={{ maxWidth: 980, margin: '0 auto', padding: mobile ? '0 14px 30px' : '0 24px 40px' }}>
+      <div style={{
+        marginTop: 4, padding: 14,
+        background: '#101015', border: '1px solid #25252e', borderRadius: 8,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ fontWeight: 800, color: '#f1e3a8', letterSpacing: 1.5, fontSize: 14 }}>
+            📚 LIBRARY — MEMETIC MASTERS
+          </div>
+          {wallet && isSol && (
+            <button onClick={load} style={ghostBtn}>{loading ? '…' : '↻ Refresh'}</button>
+          )}
+        </div>
+
+        {!wallet && (
+          <div style={{ marginTop: 10, fontSize: 13, color: '#888' }}>
+            Connect a wallet from the home screen to see your collection.
+          </div>
+        )}
+        {wallet && !isSol && (
+          <div style={{ marginTop: 10, fontSize: 13, color: '#888' }}>
+            Memetic Masters live on Solana. Your linked wallet ({wallet.slice(0,6)}…) is EVM.
+            Link a Solana wallet to populate this library.
+          </div>
+        )}
+        {err && (
+          <div style={{ marginTop: 10, fontSize: 12, color: '#ef7373' }}>{err}</div>
+        )}
+        {wallet && isSol && !loading && cards && cards.length === 0 && !err && (
+          <div style={{ marginTop: 10, fontSize: 13, color: '#888' }}>
+            No Memetic Masters NFTs found in this wallet.
+          </div>
+        )}
+        {wallet && isSol && loading && (
+          <div style={{ marginTop: 10, fontSize: 13, color: '#888' }}>Scanning chain…</div>
+        )}
+
+        {cards && cards.length > 0 && (
+          <div style={{
+            marginTop: 12, display: 'grid',
+            gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 110 : 140}px, 1fr))`,
+            gap: 10,
+          }}>
+            {cards.map(c => <LibraryCardTile key={c.id} card={c} />)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LibraryCardTile({ card }: { card: LibraryCard }) {
+  return (
+    <div style={{
+      borderRadius: 8, overflow: 'hidden',
+      background: '#181820', border: '1px solid #2a2a32',
+      display: 'flex', flexDirection: 'column',
+    }}>
+      <div style={{ aspectRatio: '1', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {card.image
+          ? <img src={card.image} alt={card.name} loading="lazy"
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          : <div style={{ fontSize: 28, color: '#444' }}>🎴</div>}
+      </div>
+      <div style={{ padding: '6px 8px' }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#eee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {card.name}
+        </div>
+        {card.collection && (
+          <div style={{ fontSize: 10, color: '#888', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {card.collection}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -68,6 +68,18 @@ export async function recordResultApi(
   return status;
 }
 
+export type LibraryCard = {
+  id: string;
+  name: string;
+  image: string;
+  collection?: string;
+};
+
+export async function getLibraryApi(walletAddress: string): Promise<LibraryCard[]> {
+  const { cards } = await http<{ cards: LibraryCard[] }>(`/api/library/${encodeURIComponent(walletAddress)}`);
+  return cards;
+}
+
 export function formatRecord(p: Profile | null | undefined): string {
   if (!p) return '0-0';
   return p.draws > 0 ? `${p.wins}-${p.losses}-${p.draws}` : `${p.wins}-${p.losses}`;
