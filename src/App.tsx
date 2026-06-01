@@ -55,6 +55,54 @@ function Login({ onLogin }: { onLogin: (name: string) => void }) {
   );
 }
 
+// ── Background menu music (Landing + Profile only) ──────────────────────────
+function MenuMusic() {
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const [muted, setMuted] = useState<boolean>(() => {
+    try { return localStorage.getItem('musicMuted') === '1'; } catch { return false; }
+  });
+
+  useEffect(() => {
+    const a = audioRef.current; if (!a) return;
+    a.volume = 0.35;
+    a.muted = muted;
+    a.play().catch(() => { /* autoplay blocked until user gesture */ });
+  }, [muted]);
+
+  // First user interaction anywhere — kick off playback if it was blocked.
+  useEffect(() => {
+    const kick = () => { audioRef.current?.play().catch(() => {}); };
+    window.addEventListener('pointerdown', kick, { once: true });
+    return () => window.removeEventListener('pointerdown', kick);
+  }, []);
+
+  function toggle() {
+    setMuted(m => {
+      const next = !m;
+      try { localStorage.setItem('musicMuted', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  }
+
+  return (
+    <>
+      <audio ref={audioRef} src="/menu-music.mp3" loop preload="auto" />
+      <button
+        onClick={toggle}
+        title={muted ? 'Unmute music' : 'Mute music'}
+        style={{
+          position: 'fixed', right: 14, bottom: 14, zIndex: 1000,
+          width: 44, height: 44, borderRadius: '50%',
+          background: 'rgba(20,20,20,0.75)', color: '#fff',
+          border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
+          fontSize: 18, backdropFilter: 'blur(6px)',
+          boxShadow: '0 4px 14px rgba(0,0,0,0.6)',
+        }}
+      >{muted ? '🔇' : '🔊'}</button>
+    </>
+  );
+}
+
 // ── Landing screen (post-login hub) ─────────────────────────────────────────
 function Landing({
   myName, onPlay, onProfile, onLogout,
@@ -516,9 +564,20 @@ export default function App() {
 
   if (!name) return <Login onLogin={login} />;
   if (seat) return <MatchSeat seat={seat} onLeave={leftSeat} />;
-  if (view === 'profile') return <ProfilePage myName={name} onBack={() => goto('landing')} />;
-  if (view === 'lobby')   return <Lobby myName={name} onJoined={joinedSeat} onBack={() => goto('landing')} />;
-  return <Landing myName={name} onPlay={() => goto('lobby')} onProfile={() => goto('profile')} onLogout={logout} />;
+
+  // Landing + Profile share the same audio element so music keeps playing
+  // (and the user's mute state is preserved) when switching between them.
+  const showMusic = view === 'landing' || view === 'profile';
+  return (
+    <>
+      {showMusic && <MenuMusic />}
+      {view === 'profile'
+        ? <ProfilePage myName={name} onBack={() => goto('landing')} />
+        : view === 'lobby'
+          ? <Lobby myName={name} onJoined={joinedSeat} onBack={() => goto('landing')} />
+          : <Landing myName={name} onPlay={() => goto('lobby')} onProfile={() => goto('profile')} onLogout={logout} />}
+    </>
+  );
 }
 
 // ── Tiny UI primitives ──────────────────────────────────────────────────────
