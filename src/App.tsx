@@ -9,8 +9,9 @@ import { ChainsTCG } from './Game';
 import { ChainsBoard } from './Board';
 import { COLOR_META, type Color } from './cards';
 import {
-  listProfilesApi, getProfileApi, upsertProfileApi, updateProfileApi, formatRecord, type Profile,
+  listProfilesApi, getProfileApi, getProfileByWalletApi, upsertProfileApi, updateProfileApi, formatRecord, type Profile,
 } from './profiles';
+import { connectEvm, connectSolana, shortAddr, type ConnectedWallet } from './wallet';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 // Server base: in dev Vite proxies /games (lobby) and /socket.io to :8000.
@@ -31,25 +32,160 @@ const sess = {
 type Seat = { matchID: string; playerID: string; credentials: string; playerName: string };
 
 // ── Login screen ────────────────────────────────────────────────────────────
-function Login({ onLogin }: { onLogin: (name: string) => void }) {
+function Login({ onLogin, onFirstTime }: {
+  onLogin: (name: string) => void;
+  onFirstTime: (wallet: ConnectedWallet) => void;
+}) {
   const [name, setName] = useState(sess.get<string>('lastName', ''));
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState<'evm' | 'sol' | null>(null);
+
+  async function doConnect(kind: 'evm' | 'sol') {
+    setErr(''); setBusy(kind);
+    try {
+      const w = kind === 'evm' ? await connectEvm() : await connectSolana();
+      const existing = await getProfileByWalletApi(w.address);
+      if (existing) onLogin(existing.name);
+      else onFirstTime(w);
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
+    } finally { setBusy(null); }
+  }
+
   return (
     <Screen title="Chains TCG — Sign In">
-      <p style={{ color: '#aaa' }}>Pick a profile name. Your W/L is tracked globally.</p>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <input
-          value={name}
-          onChange={e => setName(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && name.trim()) onLogin(name.trim()); }}
-          placeholder="your name"
-          autoFocus
-          style={inputStyle}
-        />
-        <button
-          onClick={() => name.trim() && onLogin(name.trim())}
-          disabled={!name.trim()}
-          style={primaryBtn(!!name.trim())}
-        >Continue</button>
+      <p style={{ color: '#aaa', marginTop: 0 }}>Connect your wallet to play. Your W/L is tracked globally.</p>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 380 }}>
+        <button onClick={() => doConnect('evm')} disabled={!!busy}
+          style={{ ...primaryBtn(true), background: 'linear-gradient(90deg,#f6851b,#e2761b)', padding: '14px 18px', fontSize: 14, letterSpacing: 0.5 }}>
+          {busy === 'evm' ? 'Connecting…' : '🦊  Connect EVM Wallet (MetaMask / Rabby / Coinbase)'}
+        </button>
+        <button onClick={() => doConnect('sol')} disabled={!!busy}
+          style={{ ...primaryBtn(true), background: 'linear-gradient(90deg,#9945ff,#14f195)', padding: '14px 18px', fontSize: 14, letterSpacing: 0.5 }}>
+          {busy === 'sol' ? 'Connecting…' : '👻  Connect Phantom (Solana)'}
+        </button>
+      </div>
+
+      {err && <Banner kind="error">{err}</Banner>}
+
+      <div style={{ marginTop: 30, paddingTop: 18, borderTop: '1px solid #222' }}>
+        <div style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>or continue as guest</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && name.trim()) onLogin(name.trim()); }}
+            placeholder="display name"
+            style={inputStyle}
+          />
+          <button
+            onClick={() => name.trim() && onLogin(name.trim())}
+            disabled={!name.trim()}
+            style={primaryBtn(!!name.trim())}
+          >Continue</button>
+        </div>
+      </div>
+    </Screen>
+  );
+}
+
+// ── First-time profile creation (after wallet connect with no existing profile) ─
+function FirstTimeProfile({ wallet, onCreated, onCancel }: {
+  wallet: ConnectedWallet;
+  onCreated: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [bio, setBio] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
+  const [err, setErr] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return;
+    if (f.size > 600 * 1024) { setErr('Image too large — must be under 600 KB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => setAvatarUrl(String(reader.result || ''));
+    reader.readAsDataURL(f);
+  }
+
+  async function create() {
+    const trimmed = name.trim();
+    if (!trimmed) { setErr('Pick a display name.'); return; }
+    setErr(''); setSaving(true);
+    try {
+      // Make sure the name isn't already in use.
+      const taken = await getProfileApi(trimmed);
+      if (taken && (taken.walletAddress || '').toLowerCase() !== wallet.address.toLowerCase()) {
+        setErr(`The name "${trimmed}" is already taken. Pick another.`);
+        setSaving(false); return;
+      }
+      await upsertProfileApi(trimmed);
+      await updateProfileApi(trimmed, {
+        walletAddress: wallet.address,
+        walletChain: wallet.chain,
+        bio: bio.trim() || null,
+        avatarUrl: avatarUrl.trim() || null,
+      });
+      onCreated(trimmed);
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <Screen title="Welcome — Create your profile"
+      right={<button onClick={onCancel} style={ghostBtn}>Cancel</button>}>
+      <Banner kind="info">
+        Wallet connected: <b style={{ color: '#fff' }}>{shortAddr(wallet.address)}</b>{' '}
+        <span style={{ color: '#888' }}>({wallet.chain.toUpperCase()})</span>. Set up your profile to continue.
+      </Banner>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(200px,260px) 1fr', gap: 24, marginTop: 20 }}>
+        <div>
+          <div style={{
+            width: '100%', aspectRatio: '1', borderRadius: 12, overflow: 'hidden',
+            background: '#181820', border: '1px solid #2a2a32',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {avatarUrl
+              ? <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : <div style={{ fontSize: 56, color: '#444' }}>👤</div>}
+          </div>
+          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ ...ghostBtn, display: 'inline-block', textAlign: 'center', cursor: 'pointer' }}>
+              Upload picture
+              <input type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} />
+            </label>
+            <input value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)}
+              placeholder="...or paste image URL" style={inputStyle} />
+          </div>
+        </div>
+
+        <div>
+          <div style={labelStyle}>DISPLAY NAME *</div>
+          <input value={name} onChange={e => setName(e.target.value)} autoFocus
+            placeholder="how others see you"
+            style={{ ...inputStyle, fontSize: 16 }} />
+
+          <div style={{ marginTop: 14 }}>
+            <div style={labelStyle}>BIO</div>
+            <textarea value={bio} onChange={e => setBio(e.target.value.slice(0, 500))} rows={5}
+              placeholder="Tell the chain about yourself…"
+              style={{ ...inputStyle, width: '100%', resize: 'vertical', minHeight: 100, fontFamily: 'system-ui' }} />
+            <div style={{ fontSize: 11, color: '#666', textAlign: 'right' }}>{bio.length}/500</div>
+          </div>
+
+          {err && <Banner kind="error">{err}</Banner>}
+
+          <div style={{ marginTop: 14 }}>
+            <button onClick={create} disabled={saving || !name.trim()}
+              style={primaryBtn(!saving && !!name.trim())}>
+              {saving ? 'Creating…' : 'Create profile & enter game'}
+            </button>
+          </div>
+        </div>
       </div>
     </Screen>
   );
@@ -675,6 +811,7 @@ export default function App() {
   const [name, setName] = useState<string>(() => sess.get<string>('myName', ''));
   const [seat, setSeat] = useState<Seat | null>(() => sess.get<Seat | null>('seat', null));
   const [view, setView] = useState<View>(() => sess.get<View>('view', 'landing'));
+  const [pendingWallet, setPendingWallet] = useState<ConnectedWallet | null>(null);
 
   // Deep-link: ?match=ID auto-joins (or shows lobby with prefill).
   useEffect(() => {
@@ -699,15 +836,25 @@ export default function App() {
 
   function login(n: string) {
     sess.set('myName', n); sess.set('lastName', n); setName(n);
+    setPendingWallet(null);
     upsertProfileApi(n).catch(() => {});
     goto('landing');
   }
-  function logout() { sess.del('myName'); sess.del('seat'); sess.del('view'); setName(''); setSeat(null); setView('landing'); }
+  function logout() { sess.del('myName'); sess.del('seat'); sess.del('view'); setName(''); setSeat(null); setPendingWallet(null); setView('landing'); }
   function joinedSeat(s: Seat) { sess.set('seat', s); setSeat(s); }
   function leftSeat() { sess.del('seat'); setSeat(null); goto('landing'); }
   function goto(v: View) { sess.set('view', v); setView(v); }
 
-  if (!name) return <Login onLogin={login} />;
+  if (!name) {
+    if (pendingWallet) {
+      return <FirstTimeProfile
+        wallet={pendingWallet}
+        onCreated={login}
+        onCancel={() => setPendingWallet(null)}
+      />;
+    }
+    return <Login onLogin={login} onFirstTime={setPendingWallet} />;
+  }
   if (seat) return <MatchSeat seat={seat} onLeave={leftSeat} />;
 
   // Landing + Profile share the same audio element so music keeps playing

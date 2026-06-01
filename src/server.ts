@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { Server, Origins } from 'boardgame.io/server';
 import serveStatic from 'koa-static';
 import { ChainsTCG } from './Game';
-import { initDb, upsertProfile, updateProfile, getProfile, listProfiles, recordMatch } from './db';
+import { initDb, upsertProfile, updateProfile, getProfile, getProfileByWallet, listProfiles, recordMatch } from './db';
 
 const distDir = path.resolve(__dirname, '..', 'dist');
 
@@ -67,12 +67,19 @@ app.use(async (ctx, next) => {
       ctx.body = { profile: await upsertProfile(String(body.name)) };
       return;
     }
+    if (method === 'GET' && url.startsWith('/api/profile-by-wallet/')) {
+      const addr = decodeURIComponent(url.slice('/api/profile-by-wallet/'.length));
+      ctx.body = { profile: await getProfileByWallet(addr) };
+      return;
+    }
     if (method === 'POST' && url === '/api/profile/update') {
       const body = await readJson(ctx);
       if (!body?.name) { ctx.status = 400; ctx.body = { error: 'name required' }; return; }
-      const patch: { avatarUrl?: string | null; bio?: string | null } = {};
-      if ('avatarUrl' in body) patch.avatarUrl = body.avatarUrl == null ? null : String(body.avatarUrl);
-      if ('bio'       in body) patch.bio       = body.bio       == null ? null : String(body.bio).slice(0, 500);
+      const patch: { avatarUrl?: string | null; bio?: string | null; walletAddress?: string | null; walletChain?: string | null } = {};
+      if ('avatarUrl' in body)     patch.avatarUrl     = body.avatarUrl     == null ? null : String(body.avatarUrl);
+      if ('bio'       in body)     patch.bio           = body.bio           == null ? null : String(body.bio).slice(0, 500);
+      if ('walletAddress' in body) patch.walletAddress = body.walletAddress == null ? null : String(body.walletAddress).slice(0, 128);
+      if ('walletChain'   in body) patch.walletChain   = body.walletChain   == null ? null : String(body.walletChain).slice(0, 32);
       ctx.body = { profile: await updateProfile(String(body.name), patch) };
       return;
     }

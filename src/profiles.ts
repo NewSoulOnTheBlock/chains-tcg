@@ -9,6 +9,8 @@ export type Profile = {
   createdAt: number;
   avatarUrl: string | null;
   bio: string | null;
+  walletAddress: string | null;
+  walletChain: string | null;
 };
 
 // API base: in dev Vite proxies /api → :8000; in prod the React build is served by the same server.
@@ -33,6 +35,11 @@ export async function getProfileApi(name: string): Promise<Profile | null> {
   return profile;
 }
 
+export async function getProfileByWalletApi(addr: string): Promise<Profile | null> {
+  const { profile } = await http<{ profile: Profile | null }>(`/api/profile-by-wallet/${encodeURIComponent(addr)}`);
+  return profile;
+}
+
 export async function upsertProfileApi(name: string): Promise<Profile> {
   const { profile } = await http<{ profile: Profile }>('/api/profile', {
     method: 'POST', body: JSON.stringify({ name }),
@@ -41,7 +48,8 @@ export async function upsertProfileApi(name: string): Promise<Profile> {
 }
 
 export async function updateProfileApi(
-  name: string, patch: { avatarUrl?: string | null; bio?: string | null },
+  name: string,
+  patch: { avatarUrl?: string | null; bio?: string | null; walletAddress?: string | null; walletChain?: string | null },
 ): Promise<Profile> {
   const { profile } = await http<{ profile: Profile }>('/api/profile/update', {
     method: 'POST', body: JSON.stringify({ name, ...patch }),

@@ -11,6 +11,8 @@ export type Profile = {
   createdAt: number;
   avatarUrl: string | null;
   bio: string | null;
+  walletAddress: string | null;
+  walletChain: string | null;
 };
 
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -40,12 +42,17 @@ export async function initDb() {
       draws      INTEGER NOT NULL DEFAULT 0,
       created_at BIGINT  NOT NULL,
       avatar_url TEXT,
-      bio        TEXT
+      bio        TEXT,
+      wallet_address TEXT,
+      wallet_chain   TEXT
     );
   `);
-  // Migrate older deployments that pre-date avatar_url/bio columns.
+  // Migrate older deployments that pre-date avatar_url/bio/wallet columns.
   await pool.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT;`);
   await pool.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS bio TEXT;`);
+  await pool.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS wallet_address TEXT;`);
+  await pool.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS wallet_chain TEXT;`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS profiles_wallet_idx ON profiles (LOWER(wallet_address)) WHERE wallet_address IS NOT NULL;`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS recorded_matches (
       match_id   TEXT PRIMARY KEY,
@@ -71,6 +78,8 @@ function rowToProfile(r: any): Profile {
     createdAt: Number(r.created_at),
     avatarUrl: r.avatar_url ?? null,
     bio: r.bio ?? null,
+    walletAddress: r.wallet_address ?? null,
+    walletChain: r.wallet_chain ?? null,
   };
 }
 
@@ -80,7 +89,7 @@ export async function upsertProfile(name: string): Promise<Profile> {
   const k = key(n);
   if (!pool) {
     let p = memProfiles.get(k);
-    if (!p) { p = { name: n, wins: 0, losses: 0, draws: 0, createdAt: Date.now(), avatarUrl: null, bio: null }; memProfiles.set(k, p); }
+    if (!p) { p = { name: n, wins: 0, losses: 0, draws: 0, createdAt: Date.now(), avatarUrl: null, bio: null, walletAddress: null, walletChain: null }; memProfiles.set(k, p); }
     return p;
   }
   const { rows } = await pool.query(
@@ -93,25 +102,47 @@ export async function upsertProfile(name: string): Promise<Profile> {
   return rowToProfile(rows[0]);
 }
 
-/** Update editable profile fields (avatar URL + bio). Creates the row if it doesn't exist. */
+/** Update editable profile fields (avatar URL, bio, wallet). Creates the row if it doesn't exist. */
 export async function updateProfile(
-  name: string, patch: { avatarUrl?: string | null; bio?: string | null },
+  name: string,
+  patch: { avatarUrl?: string | null; bio?: string | null; walletAddress?: string | null; walletChain?: string | null },
 ): Promise<Profile> {
   const existing = await upsertProfile(name);
   const k = key(name);
   const nextAvatar = patch.avatarUrl === undefined ? existing.avatarUrl : (patch.avatarUrl || null);
   const nextBio    = patch.bio       === undefined ? existing.bio       : (patch.bio       || null);
+  const nextWallet = patch.walletAddress === undefined ? existing.walletAddress : (patch.walletAddress || null);
+  const nextChain  = patch.walletChain   === undefined ? existing.walletChain   : (patch.walletChain   || null);
   if (!pool) {
     const p = memProfiles.get(k)!;
     p.avatarUrl = nextAvatar;
     p.bio = nextBio;
+    p.walletAddress = nextWallet;
+    p.walletChain = nextChain;
     return p;
   }
   const { rows } = await pool.query(
-    `UPDATE profiles SET avatar_url = $2, bio = $3 WHERE name_key = $1 RETURNING *`,
-    [k, nextAvatar, nextBio],
+    `UPDATE profiles SET avatar_url = $2, bio = $3, wallet_address = $4, wallet_chain = $5 WHERE name_key = $1 RETURNING *`,
+    [k, nextAvatar, nextBio, nextWallet, nextChain],
   );
   return rowToProfile(rows[0]);
+}
+
+/** Look up profile by linked wallet address (case-insensitive). */
+export async function getProfileByWallet(addr: string): Promise<Profile | null> {
+  const a = (addr || '').trim().toLowerCase();
+  if (!a) return null;
+  if (!pool) {
+    for (const p of memProfiles.values()) {
+      if (p.walletAddress && p.walletAddress.toLowerCase() === a) return p;
+    }
+    return null;
+  }
+  const { rows } = await pool.query(
+    `SELECT * FROM profiles WHERE LOWER(wallet_address) = $1 LIMIT 1`,
+    [a],
+  );
+  return rows[0] ? rowToProfile(rows[0]) : null;
 }
 
 export async function getProfile(name: string): Promise<Profile | null> {
