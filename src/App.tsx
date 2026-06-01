@@ -7,7 +7,7 @@ import { SocketIO } from 'boardgame.io/multiplayer';
 import { LobbyClient } from 'boardgame.io/client';
 import { ChainsTCG } from './Game';
 import { ChainsBoard } from './Board';
-import { COLOR_META, type Color } from './cards';
+import { COLOR_META, COLORS, type Color } from './cards';
 import {
   listProfilesApi, getProfileApi, getProfileByWalletApi, upsertProfileApi, updateProfileApi, formatRecord, type Profile,
 } from './profiles';
@@ -659,70 +659,174 @@ function Lobby({
     } catch (e: any) { setError(String(e?.message ?? e)); }
   }
 
+  // Split available matches between the two side panels of the art frame.
+  const openMatches = matches.filter(m => (m.players as Array<{ name?: string }>).some(p => !p.name));
+  const leftMatches = openMatches.filter((_, i) => i % 2 === 0);
+  const rightMatches = openMatches.filter((_, i) => i % 2 === 1);
+
+  const panelHeader: React.CSSProperties = {
+    fontFamily: 'serif', fontSize: 13, fontWeight: 800, letterSpacing: 2,
+    color: '#f1e3a8', textAlign: 'center', textShadow: '0 1px 4px #000',
+    padding: '4px 0', borderBottom: '1px solid rgba(180,150,80,0.45)', marginBottom: 4,
+  };
+  const panelEmpty: React.CSSProperties = {
+    fontSize: 11, color: '#a59a78', textAlign: 'center', padding: 8, fontStyle: 'italic',
+  };
+
+  function MatchTile({ m }: { m: any }) {
+    const players = (m.players as Array<{ id: number; name?: string }>);
+    const filled = players.filter(p => p.name).length;
+    const colors = (m.setupData?.colors ?? [null, null]) as Array<Color | null>;
+    const inProgress = filled === players.length;
+    const creator = players.find(p => p.name);
+    const creatorCol = creator ? colors[creator.id] : null;
+    return (
+      <div style={{
+        background: 'rgba(8,14,26,0.78)', border: '1px solid rgba(180,150,80,0.45)',
+        borderRadius: 6, padding: 10, color: '#e9e4d0', boxShadow: '0 2px 10px rgba(0,0,0,0.45)',
+      }}>
+        <div style={{ fontSize: 12, color: '#c9b97a', letterSpacing: 1, textTransform: 'uppercase' }}>
+          Match {m.matchID.slice(0, 6)}
+        </div>
+        <div style={{ fontWeight: 700, marginTop: 2, fontSize: 14 }}>
+          {creator?.name ?? 'Open'}
+          {creatorCol && (
+            <span style={{ color: COLOR_META[creatorCol].hex, marginLeft: 6 }}>
+              ({COLOR_META[creatorCol].name})
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: '#a59a78', marginTop: 2 }}>
+          {filled}/{players.length} seated
+        </div>
+        <button
+          onClick={() => openJoin(m)}
+          disabled={inProgress}
+          style={{
+            marginTop: 8, width: '100%', padding: '6px 0',
+            background: inProgress ? '#33312a' : 'linear-gradient(180deg,#d9b65a,#9a7a2c)',
+            color: inProgress ? '#777' : '#1a1408', border: '1px solid #6a5520',
+            borderRadius: 4, fontWeight: 800, fontSize: 12,
+            cursor: inProgress ? 'not-allowed' : 'pointer',
+          }}
+        >{inProgress ? 'Full' : 'Accept'}</button>
+      </div>
+    );
+  }
+
   return (
     <Screen title={`Choose your deck — ${myName}`}
       right={<button onClick={onBack} style={ghostBtn}>← Back</button>}>
       {error && <Banner kind="error">{error}</Banner>}
 
-      <Section title="Create match">
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <ColorChooser label="Your chain" value={myColor} onChange={setMyColor} />
-          <div>
-            <div style={labelStyle}>Your seat</div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {(['0','1'] as const).map(s => (
-                <button key={s} onClick={() => setSeatChoice(s)}
-                  style={seatChoice === s ? primaryBtn(true) : ghostBtn}>P{s}</button>
-              ))}
-            </div>
-          </div>
-          <button onClick={createAndJoin} style={primaryBtn(true)}>Create & Join</button>
-          <div style={{ fontSize: 11, color: '#777', flex: 1 }}>
-            Your opponent picks their own chain when they accept the match.
-          </div>
+      {/* Castle-frame lobby */}
+      <div style={{
+        position: 'relative', width: '100%', maxWidth: 1200, margin: '0 auto',
+        aspectRatio: '1536 / 1024',
+        backgroundImage: 'url(/lobby-bg.png)',
+        backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat',
+        borderRadius: 8, overflow: 'hidden',
+      }}>
+        {/* Left panel — available matches */}
+        <div style={{
+          position: 'absolute', left: '3.5%', top: '9.5%', width: '18.5%', height: '56%',
+          padding: '10px 8px', overflowY: 'auto',
+          display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
+          <div style={panelHeader}>Open Matches</div>
+          {leftMatches.length === 0 && rightMatches.length === 0 && (
+            <div style={panelEmpty}>No open matches.<br/>Create one from the altar.</div>
+          )}
+          {leftMatches.map(m => <MatchTile key={m.matchID} m={m} />)}
         </div>
-      </Section>
 
-      <Section title={`Open matches (${matches.length})`} right={<button onClick={refresh} style={ghostBtn}>{loading ? '…' : 'Refresh'}</button>}>
-        {matches.length === 0 && <div style={{ color: '#777', fontSize: 13 }}>No matches yet — create one above.</div>}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {matches.map(m => {
-            const players = (m.players as Array<{ id: number; name?: string }>);
-            const filled = players.filter(p => p.name).length;
-            const setup = m.setupData ?? {};
-            const colors = (setup.colors ?? ['?', '?']) as [string, string];
-            const inProgress = filled === players.length;
-            return (
-              <div key={m.matchID} style={cardStyle}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, color: '#eee' }}>
-                    Match <span style={{ color: '#888', fontFamily: 'monospace' }}>{m.matchID.slice(0, 8)}</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: '#aaa', marginTop: 2 }}>
-                    {players.map((p, i) => {
-                      const col = colors[i] as Color | null | undefined;
-                      return (
-                        <span key={i} style={{ marginRight: 12 }}>
-                          P{i}: <b style={{ color: '#fff' }}>{p.name ?? <i style={{ color: '#777' }}>open</i>}</b>
-                          {' '}
-                          {col
-                            ? <span style={{ color: COLOR_META[col].hex }}>({COLOR_META[col].name})</span>
-                            : <span style={{ color: '#777' }}>(picks on accept)</span>}
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
-                <button
-                  onClick={() => openJoin(m)}
-                  disabled={inProgress}
-                  style={inProgress ? disabledBtn : primaryBtn(true)}
-                >{inProgress ? 'Full' : 'Accept'}</button>
-              </div>
-            );
-          })}
+        {/* Right panel — available matches */}
+        <div style={{
+          position: 'absolute', right: '3.5%', top: '9.5%', width: '18.5%', height: '56%',
+          padding: '10px 8px', overflowY: 'auto',
+          display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
+          <div style={panelHeader}>Joinable</div>
+          {rightMatches.map(m => <MatchTile key={m.matchID} m={m} />)}
+          {rightMatches.length === 0 && leftMatches.length > 0 && (
+            <div style={panelEmpty}>—</div>
+          )}
         </div>
-      </Section>
+
+        {/* Center — chain picker + create */}
+        <div style={{
+          position: 'absolute', left: '28%', top: '12%', width: '44%',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+        }}>
+          <div style={{
+            fontFamily: 'serif', fontSize: 22, fontWeight: 800,
+            color: '#f1e3a8', letterSpacing: 2, textShadow: '0 2px 6px #000',
+          }}>Choose Your Chain</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 220 }}>
+            {COLORS.map(c => {
+              const meta = COLOR_META[c];
+              const selected = myColor === c;
+              return (
+                <button key={c} onClick={() => setMyColor(c)} style={{
+                  padding: '8px 12px', fontWeight: 800, fontSize: 14,
+                  background: selected
+                    ? `linear-gradient(90deg, ${meta.hex}, ${meta.hex}aa)`
+                    : 'rgba(10,12,20,0.7)',
+                  color: selected ? meta.ink : '#e9e4d0',
+                  border: `2px solid ${selected ? '#f1e3a8' : 'rgba(180,150,80,0.45)'}`,
+                  borderRadius: 4, cursor: 'pointer', textAlign: 'left',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  textShadow: selected ? 'none' : '0 1px 2px #000',
+                }}>
+                  <span>{meta.name}</span>
+                  <span style={{ fontSize: 10, opacity: 0.85 }}>{c.toUpperCase()}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{
+            display: 'flex', gap: 6, marginTop: 4,
+            background: 'rgba(10,12,20,0.7)', padding: '6px 10px',
+            border: '1px solid rgba(180,150,80,0.35)', borderRadius: 4,
+          }}>
+            <span style={{ fontSize: 11, color: '#c9b97a', alignSelf: 'center' }}>SEAT</span>
+            {(['0','1'] as const).map(s => (
+              <button key={s} onClick={() => setSeatChoice(s)} style={{
+                padding: '4px 12px', fontWeight: 700, fontSize: 12,
+                background: seatChoice === s ? '#f1e3a8' : 'transparent',
+                color: seatChoice === s ? '#1a1408' : '#e9e4d0',
+                border: '1px solid rgba(180,150,80,0.55)', borderRadius: 3, cursor: 'pointer',
+              }}>P{s}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Bottom-left banner — create button */}
+        <div style={{
+          position: 'absolute', left: '4.5%', bottom: '5%', width: '18%', height: '7%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px',
+        }}>
+          <button onClick={createAndJoin} style={{
+            width: '100%', height: '80%',
+            background: 'linear-gradient(180deg,#d9b65a,#9a7a2c)',
+            color: '#1a1408', border: '1px solid #6a5520', borderRadius: 4,
+            fontWeight: 900, letterSpacing: 1, cursor: 'pointer',
+          }}>⚔ CREATE MATCH</button>
+        </div>
+
+        {/* Bottom-right banner — refresh */}
+        <div style={{
+          position: 'absolute', right: '4.5%', bottom: '5%', width: '18%', height: '7%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px',
+        }}>
+          <button onClick={refresh} style={{
+            width: '100%', height: '80%',
+            background: 'rgba(10,12,20,0.7)', color: '#f1e3a8',
+            border: '1px solid rgba(180,150,80,0.55)', borderRadius: 4,
+            fontWeight: 800, letterSpacing: 1, cursor: 'pointer',
+          }}>{loading ? '…' : `↻ REFRESH (${openMatches.length})`}</button>
+        </div>
+      </div>
 
       <Section title="Leaderboard">
         {leaderboard.length === 0 ? (
