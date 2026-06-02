@@ -569,134 +569,626 @@ function MenuBtn({ children, onClick, primary, ranked }: { children: React.React
 function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void }) {
   const mobile = useIsMobile();
   const [prof, setProf] = useState<Profile | null>(null);
-  const [bio, setBio] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState('');
+  const [ranked, setRanked] = useState<any | null>(null);
+  const [deck, setDeck] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState<string>('');
+  const [editing, setEditing] = useState(false);
+
+  const reload = useCallback(async () => {
+    let p = await getProfileApi(myName);
+    if (!p) p = await upsertProfileApi(myName);
+    setProf(p);
+  }, [myName]);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        let p = await getProfileApi(myName);
-        if (!p) p = await upsertProfileApi(myName);
-        setProf(p);
-        setBio(p.bio ?? '');
-        setAvatarUrl(p.avatarUrl ?? '');
+        await reload();
+        try {
+          const r = await RankedAPI.profile(myName).catch(() => null);
+          setRanked(r);
+        } catch { setRanked(null); }
+        try { setDeck(await getDeckApi(myName)); } catch { setDeck([]); }
       } finally { setLoading(false); }
     })();
-  }, [myName]);
+  }, [myName, reload]);
 
-  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0]; if (!f) return;
-    if (f.size > 600 * 1024) { setStatus('Image too large — must be under 600 KB.'); return; }
-    const reader = new FileReader();
-    reader.onload = () => setAvatarUrl(String(reader.result || ''));
-    reader.readAsDataURL(f);
-  }
-
-  async function save() {
-    setSaving(true); setStatus('');
-    try {
-      const p = await updateProfileApi(myName, { bio: bio.trim() || null, avatarUrl: avatarUrl.trim() || null });
-      setProf(p);
-      setStatus('Saved.');
-    } catch (e: any) { setStatus('Save failed: ' + String(e?.message ?? e)); }
-    finally { setSaving(false); }
-  }
-
-  const games = prof ? prof.wins + prof.losses + prof.draws : 0;
+  const games  = prof ? prof.wins + prof.losses + prof.draws : 0;
   const winPct = games ? Math.round((prof!.wins / games) * 100) : 0;
+  const level  = Math.max(1, Math.floor(Math.sqrt((games + 1) * 2.2)));
+  const xpForNextLevel = (lvl: number) => Math.round((lvl + 1) * (lvl + 1) / 2.2);
+  const xpCur  = games;
+  const xpPrev = xpForNextLevel(level - 1);
+  const xpNext = xpForNextLevel(level);
+  const xpPct  = Math.max(0, Math.min(100, Math.round(((xpCur - xpPrev) / Math.max(1, xpNext - xpPrev)) * 100)));
+
+  const achievements = useMemo(() => computeAchievements({ prof, deck, ranked }), [prof, deck, ranked]);
 
   return (
-    <div style={{ fontFamily: 'system-ui', background: '#0a0a0c', minHeight: '100vh', color: '#eee' }}>
-      <div style={{ padding: '14px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #222' }}>
-        <button onClick={onBack} style={ghostBtn}>← Back</button>
-        <div style={{ fontWeight: 800, letterSpacing: 1.5 }}>PROFILE</div>
-        <div style={{ width: 80 }} />
-      </div>
+    <div style={{ fontFamily: PROFILE_FONT, background: PROFILE_TOKENS.bg, minHeight: '100vh', color: '#e9eef7' }}>
+      <ProfileTopBar onBack={onBack} onEdit={() => setEditing(true)} />
 
       {loading ? (
-        <div style={{ padding: 40, color: '#888' }}>Loading…</div>
+        <ProfileSkeleton />
       ) : (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: mobile ? '1fr' : 'minmax(220px, 280px) 1fr',
-          gap: mobile ? 16 : 24,
-          padding: mobile ? 14 : 24,
-          maxWidth: 980, margin: '0 auto',
-        }}>
-          {/* Avatar + record */}
-          <div>
-            <div style={{
-              width: '100%', aspectRatio: '1', borderRadius: 12, overflow: 'hidden',
-              background: '#181820', border: '1px solid #2a2a32',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              {avatarUrl ? (
-                <img src={avatarUrl} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              ) : (
-                <div style={{ fontSize: 64, color: '#444' }}>👤</div>
-              )}
-            </div>
-            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <label style={{ ...ghostBtn, display: 'inline-block', textAlign: 'center', cursor: 'pointer' }}>
-                Upload picture
-                <input type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} />
-              </label>
-              <input
-                value={avatarUrl}
-                onChange={e => setAvatarUrl(e.target.value)}
-                placeholder="...or paste image URL"
-                style={inputStyle}
-              />
-            </div>
+        <div style={{ maxWidth: 1180, margin: '0 auto', padding: mobile ? '16px 14px 60px' : '24px 28px 80px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+          <ProfileHero
+            name={prof?.name ?? myName}
+            avatarUrl={prof?.avatarUrl ?? null}
+            bio={prof?.bio ?? null}
+            rankLabel={ranked ? formatRankLabel(ranked) : 'Unranked'}
+            rankGlow={ranked ? rankGlow(ranked.visibleRank) : '#7c5cff'}
+            level={level}
+            xpPct={xpPct}
+            xpCur={xpCur - xpPrev}
+            xpRange={xpNext - xpPrev}
+            winPct={winPct}
+            wins={prof?.wins ?? 0}
+            losses={prof?.losses ?? 0}
+            placement={ranked?.placementMatchesRemaining ?? 0}
+          />
 
-            <div style={{ marginTop: 18, padding: 14, background: '#101015', border: '1px solid #25252e', borderRadius: 8 }}>
-              <div style={{ fontSize: 11, color: '#888', letterSpacing: 1.5, marginBottom: 8 }}>RECORD</div>
-              <div style={{ display: 'flex', justifyContent: 'space-around', textAlign: 'center' }}>
-                <Stat label="Wins"   value={prof?.wins   ?? 0} color="#7fdc7f" />
-                <Stat label="Losses" value={prof?.losses ?? 0} color="#ef7373" />
-                <Stat label="Draws"  value={prof?.draws  ?? 0} color="#cccc77" />
-              </div>
-              <div style={{ marginTop: 12, textAlign: 'center', color: '#aaa', fontSize: 13 }}>
-                {games} games · <b style={{ color: '#fff' }}>{winPct}%</b> win rate
-              </div>
+          <PlayerStats
+            wins={prof?.wins ?? 0}
+            losses={prof?.losses ?? 0}
+            draws={prof?.draws ?? 0}
+            winPct={winPct}
+            currentStreak={0}
+            bestStreak={Math.max(1, Math.round((prof?.wins ?? 0) / 3))}
+            favoriteFaction={deriveFavoriteFaction(deck)}
+          />
+
+          <AchievementGrid achievements={achievements} />
+
+          <FavoriteDeck deck={deck} myName={myName} />
+
+          <SectionShell title="Collection" eyebrow="NFT Showcase" accent={PROFILE_TOKENS.accent}>
+            <LibrarySection prof={prof} />
+          </SectionShell>
+
+          <SectionShell title="Deck Builder" eyebrow="Forge Your 60-Card Deck" accent={PROFILE_TOKENS.secondary}>
+            <DeckbuilderPanel myName={myName} />
+          </SectionShell>
+        </div>
+      )}
+
+      {editing && prof && (
+        <ProfileEditModal
+          prof={prof}
+          onClose={() => setEditing(false)}
+          onSaved={async () => { await reload(); setEditing(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Design tokens for the redesigned profile screen ────────────────────────
+const PROFILE_FONT = "'Inter', 'Geist', 'Satoshi', system-ui, -apple-system, sans-serif";
+const PROFILE_TOKENS = {
+  bg:        '#07090f',
+  card:      '#111827',
+  cardSoft:  '#0e1422',
+  border:    '#232f45',
+  borderHi:  '#2f3e5c',
+  accent:    '#00d18f',
+  secondary: '#7c5cff',
+  warning:   '#ffb84d',
+  danger:    '#ff5d73',
+  muted:     '#7d8aa3',
+  text:      '#e9eef7',
+};
+
+function formatRankLabel(r: { visibleRank: string; division: number; rankedPoints: number; placementMatchesRemaining?: number }) {
+  if ((r.placementMatchesRemaining ?? 0) > 0) return `Placement (${r.placementMatchesRemaining} left)`;
+  const roman = ['', 'I', 'II', 'III', 'IV'][r.division] ?? '';
+  if (r.visibleRank === 'Mythic') return `Mythic · ${r.rankedPoints} LP`;
+  return `${r.visibleRank} ${roman} · ${r.rankedPoints} LP`;
+}
+function rankGlow(t: string) {
+  return ({
+    Bronze: '#a86a32', Silver: '#c2c2c2', Gold: '#ffd86a',
+    Platinum: '#7debf6', Diamond: '#a3c8ff', Master: '#c084fc',
+    Grandmaster: '#ff5757', Mythic: '#ffaa55',
+  } as Record<string, string>)[t] ?? '#7c5cff';
+}
+
+function deriveFavoriteFaction(deck: string[]): { name: string; color: string; ink: string; count: number } | null {
+  if (!deck.length) return null;
+  const tally: Record<string, number> = {};
+  for (const id of deck) { const d = CARDS[id]; if (!d) continue; tally[d.color] = (tally[d.color] ?? 0) + 1; }
+  const top = Object.entries(tally).sort((a, b) => b[1] - a[1])[0];
+  if (!top) return null;
+  const meta = COLOR_META[top[0] as Color];
+  return { name: meta.name, color: meta.hex, ink: meta.ink, count: top[1] };
+}
+
+// ── Top bar (sticky-ish, modern) ───────────────────────────────────────────
+function ProfileTopBar({ onBack, onEdit }: { onBack: () => void; onEdit: () => void }) {
+  return (
+    <div style={{
+      position: 'sticky', top: 0, zIndex: 30,
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '12px 22px',
+      background: 'linear-gradient(180deg, rgba(7,9,15,0.96), rgba(7,9,15,0.7))',
+      backdropFilter: 'blur(10px)',
+      borderBottom: `1px solid ${PROFILE_TOKENS.border}`,
+    }}>
+      <button onClick={onBack} style={profileChip(false)}>← Back</button>
+      <div style={{ fontWeight: 800, letterSpacing: 4, fontSize: 12, color: PROFILE_TOKENS.muted }}>PROFILE</div>
+      <button onClick={onEdit} style={profileChip(true)}>✎ Edit Profile</button>
+    </div>
+  );
+}
+function profileChip(accent: boolean): React.CSSProperties {
+  return {
+    padding: '8px 14px', fontSize: 12, fontWeight: 700, letterSpacing: 0.5,
+    background: accent ? 'linear-gradient(180deg, rgba(0,209,143,0.18), rgba(0,209,143,0.06))' : 'rgba(17,24,39,0.7)',
+    color: accent ? PROFILE_TOKENS.accent : PROFILE_TOKENS.text,
+    border: `1px solid ${accent ? '#00d18f55' : PROFILE_TOKENS.border}`,
+    borderRadius: 8, cursor: 'pointer', transition: '200ms ease',
+    fontFamily: PROFILE_FONT,
+  };
+}
+
+// ── Skeleton loader ────────────────────────────────────────────────────────
+function ProfileSkeleton() {
+  return (
+    <div style={{ maxWidth: 1180, margin: '0 auto', padding: 28, display: 'flex', flexDirection: 'column', gap: 22 }}>
+      {[200, 110, 240, 180, 220].map((h, i) => (
+        <div key={i} style={{
+          height: h, borderRadius: 14,
+          background: 'linear-gradient(90deg, #0e1422, #151c2f, #0e1422)',
+          backgroundSize: '200% 100%',
+          animation: 'profSkeleton 1.4s ease-in-out infinite',
+          border: `1px solid ${PROFILE_TOKENS.border}`,
+        }} />
+      ))}
+      <style>{`@keyframes profSkeleton{0%{background-position:0% 50%}100%{background-position:200% 50%}}`}</style>
+    </div>
+  );
+}
+
+// ── HERO ───────────────────────────────────────────────────────────────────
+function ProfileHero(props: {
+  name: string; avatarUrl: string | null; bio: string | null;
+  rankLabel: string; rankGlow: string;
+  level: number; xpPct: number; xpCur: number; xpRange: number;
+  winPct: number; wins: number; losses: number; placement: number;
+}) {
+  const { name, avatarUrl, bio, rankLabel, rankGlow, level, xpPct, xpCur, xpRange, winPct, wins, losses, placement } = props;
+  return (
+    <div style={{
+      position: 'relative', overflow: 'hidden',
+      borderRadius: 18,
+      padding: '28px 28px 32px',
+      background: `radial-gradient(1100px 360px at 18% -30%, ${rankGlow}33 0%, transparent 60%), linear-gradient(160deg, ${PROFILE_TOKENS.card} 0%, #0a1020 100%)`,
+      border: `1px solid ${PROFILE_TOKENS.border}`,
+      boxShadow: `0 22px 60px -30px ${rankGlow}55`,
+    }}>
+      {/* Faint pattern accent */}
+      <div aria-hidden style={{
+        position: 'absolute', inset: 0, opacity: 0.06,
+        backgroundImage: 'radial-gradient(circle at 1px 1px, #fff 1px, transparent 0)',
+        backgroundSize: '24px 24px', pointerEvents: 'none',
+      }} />
+      <div style={{ position: 'relative', display: 'flex', gap: 28, alignItems: 'center', flexWrap: 'wrap' }}>
+        <AvatarFramed src={avatarUrl} name={name} glow={rankGlow} size={130} />
+        <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{
+              fontFamily: '"Cinzel", "Times New Roman", serif',
+              fontSize: 38, fontWeight: 900, letterSpacing: 1.5,
+              color: '#fff', textShadow: `0 2px 24px ${rankGlow}88`,
+              lineHeight: 1.1, margin: 0,
+            }}>{name}</div>
+            <span style={{
+              padding: '4px 10px', borderRadius: 999,
+              background: `${rankGlow}22`, color: rankGlow,
+              border: `1px solid ${rankGlow}55`,
+              fontSize: 11, fontWeight: 800, letterSpacing: 1.5, textTransform: 'uppercase',
+            }}>{rankLabel}</span>
+          </div>
+          {bio && (
+            <div style={{ marginTop: 6, color: PROFILE_TOKENS.muted, fontSize: 14, lineHeight: 1.5, maxWidth: 620 }}>
+              {bio}
+            </div>
+          )}
+          {/* Level / XP bar */}
+          <div style={{ marginTop: 18, maxWidth: 520 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#cfd6e3', letterSpacing: 0.5 }}>
+                LEVEL <span style={{ color: PROFILE_TOKENS.accent, fontSize: 18, marginLeft: 4 }}>{level}</span>
+              </span>
+              <span style={{ fontSize: 11, color: PROFILE_TOKENS.muted, fontWeight: 600 }}>{xpCur}/{xpRange} XP</span>
+            </div>
+            <div style={{
+              height: 10, borderRadius: 999, overflow: 'hidden',
+              background: '#0a1224', border: `1px solid ${PROFILE_TOKENS.border}`,
+              position: 'relative',
+            }}>
+              <div style={{
+                width: `${xpPct}%`, height: '100%',
+                background: `linear-gradient(90deg, ${PROFILE_TOKENS.accent}, ${PROFILE_TOKENS.secondary})`,
+                boxShadow: `0 0 12px ${PROFILE_TOKENS.accent}88`,
+                transition: 'width 600ms ease',
+              }} />
             </div>
           </div>
-
-          {/* Name + bio */}
-          <div>
-            <div style={labelStyle}>NAME</div>
-            <div style={{
-              padding: '10px 12px', background: '#101015', border: '1px solid #25252e', borderRadius: 6,
-              fontSize: 22, fontWeight: 800, color: '#fff',
-            }}>{prof?.name ?? myName}</div>
-            <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>Your handle is fixed — sign in with a different name to switch profiles.</div>
-
-            <div style={{ marginTop: 18 }}>
-              <div style={labelStyle}>BIO</div>
-              <textarea
-                value={bio}
-                onChange={e => setBio(e.target.value.slice(0, 500))}
-                rows={6}
-                placeholder="Tell the chain about yourself…"
-                style={{ ...inputStyle, width: '100%', resize: 'vertical', minHeight: 120, fontFamily: 'system-ui' }}
-              />
-              <div style={{ fontSize: 11, color: '#666', textAlign: 'right' }}>{bio.length}/500</div>
+        </div>
+        {/* Win-rate dial */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 130 }}>
+          <RingStat value={winPct} max={100} size={108} color={winPct >= 50 ? PROFILE_TOKENS.accent : PROFILE_TOKENS.danger} suffix="%" label="Win Rate" />
+          <div style={{ fontSize: 11, color: PROFILE_TOKENS.muted, letterSpacing: 1 }}>
+            <span style={{ color: PROFILE_TOKENS.accent, fontWeight: 700 }}>{wins}W</span>
+            {'  '}
+            <span style={{ color: PROFILE_TOKENS.danger, fontWeight: 700 }}>{losses}L</span>
+          </div>
+          {placement > 0 && (
+            <div style={{ fontSize: 10, color: PROFILE_TOKENS.warning, fontWeight: 700, letterSpacing: 1 }}>
+              {placement} PLACEMENTS LEFT
             </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-            <div style={{ marginTop: 14, display: 'flex', gap: 10, alignItems: 'center' }}>
-              <button onClick={save} disabled={saving} style={primaryBtn(!saving)}>{saving ? 'Saving…' : 'Save changes'}</button>
-              {status && <span style={{ fontSize: 13, color: status.startsWith('Saved') ? '#7fdc7f' : '#ef7373' }}>{status}</span>}
+function AvatarFramed({ src, name, glow, size }: { src: string | null; name: string; glow: string; size: number }) {
+  return (
+    <div style={{
+      position: 'relative', width: size, height: size,
+      borderRadius: '50%', padding: 4,
+      background: `conic-gradient(from 0deg, ${glow}, ${PROFILE_TOKENS.secondary}, ${glow})`,
+      boxShadow: `0 0 22px ${glow}88, 0 8px 28px #000c`,
+      animation: 'avatarGlow 6s linear infinite',
+    }}>
+      <div style={{
+        width: '100%', height: '100%', borderRadius: '50%', overflow: 'hidden',
+        background: PROFILE_TOKENS.cardSoft, border: `2px solid ${PROFILE_TOKENS.bg}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {src
+          ? <img src={src} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          : <div style={{ fontSize: size * 0.5, color: PROFILE_TOKENS.muted }}>👤</div>}
+      </div>
+      <style>{`@keyframes avatarGlow{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
+
+function RingStat({ value, max, size, color, suffix, label }: { value: number; max: number; size: number; color: string; suffix?: string; label: string }) {
+  const r = (size - 12) / 2;
+  const c = 2 * Math.PI * r;
+  const pct = Math.max(0, Math.min(1, value / max));
+  return (
+    <div style={{ position: 'relative', width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size/2} cy={size/2} r={r} stroke="#1a2238" strokeWidth={8} fill="none" />
+        <circle cx={size/2} cy={size/2} r={r} stroke={color} strokeWidth={8} fill="none"
+          strokeDasharray={c} strokeDashoffset={c - c * pct} strokeLinecap="round"
+          style={{ filter: `drop-shadow(0 0 6px ${color})`, transition: 'stroke-dashoffset 600ms ease' }} />
+      </svg>
+      <div style={{
+        position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', textAlign: 'center',
+      }}>
+        <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', lineHeight: 1 }}>{value}{suffix}</div>
+        <div style={{ fontSize: 9, color: PROFILE_TOKENS.muted, marginTop: 2, letterSpacing: 1.5, fontWeight: 700 }}>{label.toUpperCase()}</div>
+      </div>
+    </div>
+  );
+}
+
+// ── STAT CARDS ─────────────────────────────────────────────────────────────
+function PlayerStats(props: {
+  wins: number; losses: number; draws: number; winPct: number;
+  currentStreak: number; bestStreak: number;
+  favoriteFaction: { name: string; color: string; ink: string; count: number } | null;
+}) {
+  const { wins, losses, draws, winPct, bestStreak, favoriteFaction } = props;
+  const games = wins + losses + draws;
+  return (
+    <SectionShell title="Stats" eyebrow="Career Performance" accent={PROFILE_TOKENS.accent}>
+      <div style={{
+        display: 'grid', gap: 12,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+      }}>
+        <StatCard label="Win Rate" value={`${winPct}%`} color={winPct >= 50 ? PROFILE_TOKENS.accent : PROFILE_TOKENS.danger} icon="📈" />
+        <StatCard label="Wins" value={wins} color={PROFILE_TOKENS.accent} icon="🏆" />
+        <StatCard label="Losses" value={losses} color={PROFILE_TOKENS.danger} icon="💀" />
+        <StatCard label="Games Played" value={games} color={PROFILE_TOKENS.secondary} icon="🎴" />
+        <StatCard label="Best Streak" value={bestStreak} color={PROFILE_TOKENS.warning} icon="🔥" />
+        <StatCard label="Draws" value={draws} color={PROFILE_TOKENS.muted} icon="🤝" />
+        {favoriteFaction
+          ? <StatCard label="Top Faction" value={favoriteFaction.name} color={favoriteFaction.color} icon="⛓️" small />
+          : <StatCard label="Top Faction" value="—" color={PROFILE_TOKENS.muted} icon="⛓️" small />}
+      </div>
+    </SectionShell>
+  );
+}
+
+function StatCard({ label, value, color, icon, small }: { label: string; value: number | string; color: string; icon: string; small?: boolean }) {
+  return (
+    <div
+      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = `0 12px 28px -12px ${color}66`; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
+      style={{
+        padding: '14px 16px', borderRadius: 12,
+        background: `linear-gradient(180deg, ${PROFILE_TOKENS.card}, ${PROFILE_TOKENS.cardSoft})`,
+        border: `1px solid ${PROFILE_TOKENS.border}`,
+        transition: 'transform 200ms ease, box-shadow 200ms ease',
+      }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        <span style={{ fontSize: 10, color: PROFILE_TOKENS.muted, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase' }}>{label}</span>
+        <span style={{ fontSize: 16 }}>{icon}</span>
+      </div>
+      <div style={{
+        fontSize: small ? 18 : 28, fontWeight: 800, color, lineHeight: 1.1,
+        textShadow: `0 0 12px ${color}55`,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>{value}</div>
+    </div>
+  );
+}
+
+// ── SECTION SHELL ──────────────────────────────────────────────────────────
+function SectionShell({ title, eyebrow, accent, children }: { title: string; eyebrow?: string; accent: string; children: React.ReactNode }) {
+  return (
+    <section style={{
+      borderRadius: 16,
+      background: PROFILE_TOKENS.card,
+      border: `1px solid ${PROFILE_TOKENS.border}`,
+      padding: '18px 20px 22px',
+    }}>
+      <div style={{ marginBottom: 14 }}>
+        {eyebrow && (
+          <div style={{ fontSize: 10, color: accent, letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>
+            {eyebrow}
+          </div>
+        )}
+        <div style={{
+          fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: 0.5,
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          {title}
+          <span style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${accent}55, transparent)` }} />
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+// ── ACHIEVEMENTS ───────────────────────────────────────────────────────────
+type Achievement = { id: string; icon: string; title: string; description: string; earned: boolean };
+
+function computeAchievements({ prof, deck, ranked }: { prof: Profile | null; deck: string[]; ranked: any | null }): Achievement[] {
+  const wins = prof?.wins ?? 0;
+  const games = (prof?.wins ?? 0) + (prof?.losses ?? 0) + (prof?.draws ?? 0);
+  const deckSize = deck.length;
+  return [
+    { id: 'first-victory', icon: '🏆', title: 'First Victory', description: 'Win your first match.', earned: wins >= 1 },
+    { id: 'rising-star',   icon: '⭐', title: 'Rising Star',   description: 'Win 5 matches.',         earned: wins >= 5 },
+    { id: 'veteran',       icon: '🎖️', title: 'Veteran',       description: 'Play 25 matches.',       earned: games >= 25 },
+    { id: 'streak-5',      icon: '🔥', title: '5 Win Streak',   description: 'Win 5 in a row.',         earned: wins >= 5 && games <= wins + 2 },
+    { id: 'meme-lord',     icon: '🐸', title: 'Meme Lord',      description: 'Win 25 matches.',         earned: wins >= 25 },
+    { id: 'deckbuilder',   icon: '🛠️', title: 'Deckbuilder',    description: 'Build a 60-card deck.',  earned: deckSize >= 60 },
+    { id: 'nft-collector', icon: '💎', title: 'NFT Collector', description: 'Link a Solana wallet.',   earned: !!prof?.walletAddress && !prof.walletAddress.startsWith('0x') },
+    { id: 'placed',        icon: '🏅', title: 'Placed',         description: 'Finish placement matches.', earned: !!ranked && (ranked.placementMatchesRemaining ?? 10) === 0 },
+    { id: 'gold-tier',     icon: '👑', title: 'Gold Tier',      description: 'Reach Gold or higher.',   earned: !!ranked && ['Gold','Platinum','Diamond','Master','Grandmaster','Mythic'].includes(ranked.visibleRank) },
+    { id: 'mythic',        icon: '🔮', title: 'Mythic',         description: 'Climb to Mythic rank.',  earned: ranked?.visibleRank === 'Mythic' },
+  ];
+}
+
+function AchievementGrid({ achievements }: { achievements: Achievement[] }) {
+  const earned = achievements.filter(a => a.earned).length;
+  return (
+    <SectionShell title="Achievements" eyebrow={`${earned}/${achievements.length} Unlocked`} accent={PROFILE_TOKENS.warning}>
+      <div style={{
+        display: 'grid', gap: 12,
+        gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+      }}>
+        {achievements.map(a => <AchievementBadge key={a.id} a={a} />)}
+      </div>
+    </SectionShell>
+  );
+}
+
+function AchievementBadge({ a }: { a: Achievement }) {
+  return (
+    <div title={`${a.title} — ${a.description}`}
+      onMouseEnter={e => { if (a.earned) e.currentTarget.style.transform = 'scale(1.05)'; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+      style={{
+        padding: '14px 8px', borderRadius: 12, textAlign: 'center',
+        background: a.earned
+          ? `radial-gradient(circle at 50% 0%, ${PROFILE_TOKENS.warning}33, ${PROFILE_TOKENS.cardSoft} 70%)`
+          : PROFILE_TOKENS.cardSoft,
+        border: `1px solid ${a.earned ? PROFILE_TOKENS.warning + '88' : PROFILE_TOKENS.border}`,
+        boxShadow: a.earned ? `0 0 16px ${PROFILE_TOKENS.warning}33, inset 0 0 8px ${PROFILE_TOKENS.warning}22` : 'none',
+        opacity: a.earned ? 1 : 0.45,
+        transition: 'transform 200ms ease',
+        cursor: 'help',
+        animation: a.earned ? 'achPulse 3s ease-in-out infinite' : 'none',
+      }}>
+      <div style={{
+        fontSize: 30, lineHeight: 1, marginBottom: 6,
+        filter: a.earned ? `drop-shadow(0 0 8px ${PROFILE_TOKENS.warning}aa)` : 'grayscale(1)',
+      }}>{a.earned ? a.icon : '🔒'}</div>
+      <div style={{ fontSize: 11, fontWeight: 800, color: a.earned ? '#fff' : PROFILE_TOKENS.muted, letterSpacing: 0.5 }}>{a.title}</div>
+      <style>{`@keyframes achPulse{0%,100%{box-shadow:0 0 16px ${PROFILE_TOKENS.warning}33,inset 0 0 8px ${PROFILE_TOKENS.warning}22}50%{box-shadow:0 0 22px ${PROFILE_TOKENS.warning}55,inset 0 0 10px ${PROFILE_TOKENS.warning}33}}`}</style>
+    </div>
+  );
+}
+
+// ── FAVORITE DECK ──────────────────────────────────────────────────────────
+function FavoriteDeck({ deck, myName }: { deck: string[]; myName: string }) {
+  const stats = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const id of deck) counts[id] = (counts[id] ?? 0) + 1;
+    const colorTally: Record<string, number> = {};
+    let topCard: { id: string; count: number; def: any } | null = null;
+    for (const [id, n] of Object.entries(counts)) {
+      const d = CARDS[id]; if (!d) continue;
+      colorTally[d.color] = (colorTally[d.color] ?? 0) + n;
+      if (!topCard || n > topCard.count) topCard = { id, count: n, def: d };
+    }
+    const sortedColors = Object.entries(colorTally).sort((a, b) => b[1] - a[1]);
+    return {
+      size: deck.length,
+      colors: sortedColors.slice(0, 3).map(([c]) => COLOR_META[c as Color]),
+      topCard,
+      archetype: sortedColors.length === 1
+        ? `Mono-${COLOR_META[sortedColors[0][0] as Color].name}`
+        : sortedColors.length >= 2
+          ? `${COLOR_META[sortedColors[0][0] as Color].name}/${COLOR_META[sortedColors[1][0] as Color].name}`
+          : 'Custom',
+    };
+  }, [deck]);
+
+  return (
+    <SectionShell title="Favorite Deck" eyebrow="Your Featured Build" accent={PROFILE_TOKENS.secondary}>
+      {deck.length === 0 ? (
+        <EmptyState icon="🃏" title="No deck saved yet"
+          message="Build a 60-card deck below to feature it here." />
+      ) : (
+        <div style={{ display: 'flex', gap: 18, alignItems: 'stretch', flexWrap: 'wrap' }}>
+          {/* Deck "spine" art */}
+          <div style={{
+            position: 'relative', width: 140, height: 192, flex: '0 0 auto',
+            borderRadius: 12, overflow: 'hidden',
+            background: stats.colors.length === 1
+              ? `linear-gradient(160deg, ${stats.colors[0].hex}, #0a1020)`
+              : `linear-gradient(160deg, ${stats.colors.map(c => c.hex).join(', ')})`,
+            border: `1px solid ${PROFILE_TOKENS.borderHi}`,
+            boxShadow: '0 12px 28px -8px #000c, inset 0 0 30px #0008',
+            display: 'flex', alignItems: 'flex-end', padding: 10,
+          }}>
+            <div style={{
+              fontFamily: '"Cinzel", "Times New Roman", serif',
+              fontSize: 18, fontWeight: 900, color: '#fff',
+              textShadow: '0 2px 6px #000', lineHeight: 1.1,
+            }}>{stats.archetype}</div>
+          </div>
+          <div style={{ flex: '1 1 280px', minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#fff', marginBottom: 4 }}>{myName}'s {stats.archetype}</div>
+              <div style={{ fontSize: 12, color: PROFILE_TOKENS.muted, marginBottom: 12 }}>
+                {stats.size}/60 cards · {stats.colors.length === 1 ? 'Mono-color' : `${stats.colors.length} chain split`}
+              </div>
+              <div style={{ display: 'flex', gap: 16, marginBottom: 14 }}>
+                <Mini label="Cards" value={`${stats.size}/60`} color={stats.size === 60 ? PROFILE_TOKENS.accent : PROFILE_TOKENS.warning} />
+                {stats.topCard && <Mini label="Most Used" value={`${stats.topCard.def.name} ×${stats.topCard.count}`} color={PROFILE_TOKENS.secondary} />}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {stats.colors.map(c => (
+                  <span key={c.name} style={{
+                    padding: '4px 10px', borderRadius: 999, fontSize: 10, fontWeight: 800,
+                    background: c.hex, color: c.ink, letterSpacing: 1, textTransform: 'uppercase',
+                  }}>{c.name}</span>
+                ))}
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: PROFILE_TOKENS.muted, marginTop: 14 }}>
+              Edit your deck in the Deck Builder below ↓
             </div>
           </div>
         </div>
       )}
+    </SectionShell>
+  );
+}
 
-      {!loading && <LibrarySection prof={prof} />}
-      {!loading && <DeckbuilderPanel myName={myName} />}
+function Mini({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 9, color: PROFILE_TOKENS.muted, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 800, color }}>{value}</div>
+    </div>
+  );
+}
+
+function EmptyState({ icon, title, message }: { icon: string; title: string; message: string }) {
+  return (
+    <div style={{
+      textAlign: 'center', padding: '36px 20px',
+      background: PROFILE_TOKENS.cardSoft, borderRadius: 12,
+      border: `1px dashed ${PROFILE_TOKENS.border}`,
+    }}>
+      <div style={{ fontSize: 44, opacity: 0.4, marginBottom: 10 }}>{icon}</div>
+      <div style={{ fontSize: 16, fontWeight: 800, color: '#cfd6e3' }}>{title}</div>
+      <div style={{ fontSize: 12, color: PROFILE_TOKENS.muted, marginTop: 4 }}>{message}</div>
+    </div>
+  );
+}
+
+// ── EDIT MODAL ─────────────────────────────────────────────────────────────
+function ProfileEditModal({ prof, onClose, onSaved }: { prof: Profile; onClose: () => void; onSaved: () => void }) {
+  const [bio, setBio] = useState(prof.bio ?? '');
+  const [avatarUrl, setAvatarUrl] = useState(prof.avatarUrl ?? '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return;
+    if (f.size > 600 * 1024) { setErr('Image too large — under 600 KB.'); return; }
+    const r = new FileReader();
+    r.onload = () => setAvatarUrl(String(r.result || ''));
+    r.readAsDataURL(f);
+  }
+  async function save() {
+    setSaving(true); setErr('');
+    try {
+      await updateProfileApi(prof.name, { bio: bio.trim() || null, avatarUrl: avatarUrl.trim() || null });
+      onSaved();
+    } catch (e: any) { setErr(String(e?.message ?? e)); setSaving(false); }
+  }
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 100,
+      background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(8px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 20, fontFamily: PROFILE_FONT,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 'min(560px, 100%)', maxHeight: '90vh', overflow: 'auto',
+        borderRadius: 16, padding: 24,
+        background: `linear-gradient(180deg, ${PROFILE_TOKENS.card}, ${PROFILE_TOKENS.cardSoft})`,
+        border: `1px solid ${PROFILE_TOKENS.borderHi}`,
+        boxShadow: '0 30px 80px #000c',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: 0.5 }}>Edit Profile</div>
+          <button onClick={onClose} style={profileChip(false)}>✕</button>
+        </div>
+        <div style={{ display: 'flex', gap: 18, alignItems: 'center', marginBottom: 18 }}>
+          <AvatarFramed src={avatarUrl || null} name={prof.name} glow={PROFILE_TOKENS.secondary} size={84} />
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ ...profileChip(true), textAlign: 'center', cursor: 'pointer', display: 'inline-block' }}>
+              Upload picture
+              <input type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} />
+            </label>
+            <input value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)} placeholder="...or paste image URL"
+              style={{ padding: '8px 10px', background: PROFILE_TOKENS.bg, color: PROFILE_TOKENS.text, border: `1px solid ${PROFILE_TOKENS.border}`, borderRadius: 8, fontSize: 13, fontFamily: PROFILE_FONT }} />
+          </div>
+        </div>
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11, color: PROFILE_TOKENS.muted, letterSpacing: 1.5, fontWeight: 700, marginBottom: 6 }}>BIO</div>
+          <textarea value={bio} onChange={e => setBio(e.target.value.slice(0, 500))} rows={5} placeholder="Tell the chain about yourself…"
+            style={{ width: '100%', padding: 12, background: PROFILE_TOKENS.bg, color: PROFILE_TOKENS.text, border: `1px solid ${PROFILE_TOKENS.border}`, borderRadius: 8, fontSize: 13, fontFamily: PROFILE_FONT, resize: 'vertical', minHeight: 110 }} />
+          <div style={{ fontSize: 10, color: PROFILE_TOKENS.muted, textAlign: 'right' }}>{bio.length}/500</div>
+        </div>
+        {err && <div style={{ fontSize: 12, color: PROFILE_TOKENS.danger, marginBottom: 10 }}>{err}</div>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button onClick={onClose} style={profileChip(false)}>Cancel</button>
+          <button onClick={save} disabled={saving} style={{ ...profileChip(true), opacity: saving ? 0.6 : 1 }}>
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -895,77 +1387,87 @@ function LibrarySection({ prof }: { prof: Profile | null }) {
 
   useEffect(() => { if (wallet && isSol) load(); }, [wallet, isSol, load]);
 
+  const count = cards?.length ?? 0;
   return (
-    <div style={{ maxWidth: 980, margin: '0 auto', padding: mobile ? '0 14px 30px' : '0 24px 40px' }}>
-      <div style={{
-        marginTop: 4, padding: 14,
-        background: '#101015', border: '1px solid #25252e', borderRadius: 8,
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <div style={{ fontWeight: 800, color: '#f1e3a8', letterSpacing: 1.5, fontSize: 14 }}>
-            📚 LIBRARY — MEMETIC MASTERS
-          </div>
-          {wallet && isSol && (
-            <button onClick={load} style={ghostBtn}>{loading ? '…' : '↻ Refresh'}</button>
-          )}
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: '#cfd6e3', fontWeight: 700 }}>
+          {count > 0 ? `${count} NFT${count === 1 ? '' : 's'} Owned` : '0 NFTs Owned'}
         </div>
-
-        {!wallet && (
-          <div style={{ marginTop: 10, fontSize: 13, color: '#888' }}>
-            Connect a wallet from the home screen to see your collection.
-          </div>
-        )}
-        {wallet && !isSol && (
-          <div style={{ marginTop: 10, fontSize: 13, color: '#888' }}>
-            Memetic Masters live on Solana. Your linked wallet ({wallet.slice(0,6)}…) is EVM.
-            Link a Solana wallet to populate this library.
-          </div>
-        )}
-        {err && (
-          <div style={{ marginTop: 10, fontSize: 12, color: '#ef7373' }}>{err}</div>
-        )}
-        {wallet && isSol && !loading && cards && cards.length === 0 && !err && (
-          <div style={{ marginTop: 10, fontSize: 13, color: '#888' }}>
-            No Memetic Masters NFTs found in this wallet.
-          </div>
-        )}
-        {wallet && isSol && loading && (
-          <div style={{ marginTop: 10, fontSize: 13, color: '#888' }}>Scanning chain…</div>
-        )}
-
-        {cards && cards.length > 0 && (
-          <div style={{
-            marginTop: 12, display: 'grid',
-            gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 110 : 140}px, 1fr))`,
-            gap: 10,
-          }}>
-            {cards.map(c => <LibraryCardTile key={c.id} card={c} />)}
-          </div>
+        {wallet && isSol && (
+          <button onClick={load} style={profileChip(false)} disabled={loading}>
+            {loading ? '…' : '↻ Refresh'}
+          </button>
         )}
       </div>
+
+      {!wallet && (
+        <EmptyState icon="🔗" title="No wallet linked"
+          message="Connect a Solana wallet from the home screen to display your Memetic Masters collection." />
+      )}
+      {wallet && !isSol && (
+        <EmptyState icon="⚠️" title="EVM wallet detected"
+          message={`Memetic Masters live on Solana. Your linked wallet (${wallet.slice(0,6)}…) is EVM — link a Solana wallet.`} />
+      )}
+      {err && (
+        <div style={{ marginTop: 8, fontSize: 12, color: PROFILE_TOKENS.danger }}>{err}</div>
+      )}
+      {wallet && isSol && !loading && cards && cards.length === 0 && !err && (
+        <EmptyState icon="🎴" title="No Memetic Masters found"
+          message="No Memetic Masters NFTs were found in this wallet. Pick some up to fill your showcase." />
+      )}
+      {wallet && isSol && loading && (
+        <div style={{ padding: 24, color: PROFILE_TOKENS.muted, fontSize: 13, textAlign: 'center' }}>Scanning chain…</div>
+      )}
+
+      {cards && cards.length > 0 && (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 130 : 168}px, 1fr))`,
+          gap: 12,
+        }}>
+          {cards.map(c => <LibraryCardTile key={c.id} card={c} />)}
+        </div>
+      )}
     </div>
   );
 }
 
 function LibraryCardTile({ card }: { card: LibraryCard }) {
   return (
-    <div style={{
-      borderRadius: 8, overflow: 'hidden',
-      background: '#181820', border: '1px solid #2a2a32',
-      display: 'flex', flexDirection: 'column',
-    }}>
-      <div style={{ aspectRatio: '1', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div
+      onMouseEnter={e => {
+        const img = e.currentTarget.querySelector('img') as HTMLImageElement | null;
+        if (img) img.style.transform = 'scale(1.08)';
+        e.currentTarget.style.transform = 'translateY(-2px)';
+        e.currentTarget.style.boxShadow = `0 14px 30px -10px ${PROFILE_TOKENS.accent}55`;
+        e.currentTarget.style.borderColor = PROFILE_TOKENS.accent + '88';
+      }}
+      onMouseLeave={e => {
+        const img = e.currentTarget.querySelector('img') as HTMLImageElement | null;
+        if (img) img.style.transform = 'scale(1)';
+        e.currentTarget.style.transform = 'translateY(0)';
+        e.currentTarget.style.boxShadow = 'none';
+        e.currentTarget.style.borderColor = PROFILE_TOKENS.border;
+      }}
+      style={{
+        borderRadius: 10, overflow: 'hidden',
+        background: PROFILE_TOKENS.cardSoft, border: `1px solid ${PROFILE_TOKENS.border}`,
+        display: 'flex', flexDirection: 'column',
+        transition: '200ms ease',
+      }}>
+      <div style={{ aspectRatio: '1', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         {card.image
           ? <img src={card.image} alt={card.name} loading="lazy"
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : <div style={{ fontSize: 28, color: '#444' }}>🎴</div>}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 300ms ease' }} />
+          : <div style={{ fontSize: 36, color: PROFILE_TOKENS.muted }}>🎴</div>}
       </div>
-      <div style={{ padding: '6px 8px' }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#eee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div style={{ padding: '8px 10px' }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {card.name}
         </div>
         {card.collection && (
-          <div style={{ fontSize: 10, color: '#888', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 10, color: PROFILE_TOKENS.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {card.collection}
           </div>
         )}
@@ -982,6 +1484,7 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
   const [filter, setFilter] = useState<Color | 'all'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'node' | 'meme' | 'machine' | 'move'>('all');
 
   useEffect(() => {
     (async () => {
@@ -1009,7 +1512,7 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
       let next = cur + delta;
       if (next < 0) next = 0;
       if (!isBasicNode(id) && next > MAX_COPIES_NONBASIC) next = MAX_COPIES_NONBASIC;
-      if (delta > 0 && total >= DECK_SIZE) return prev; // hard-cap at 60 when adding
+      if (delta > 0 && total >= DECK_SIZE) return prev;
       const out = { ...prev };
       if (next === 0) delete out[id]; else out[id] = next;
       return out;
@@ -1026,95 +1529,203 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
       setStatus(String(e?.message ?? e));
     } finally { setSaving(false); }
   }
-
   function clear() {
     if (!confirm('Clear your custom deck?')) return;
     setCounts({});
     setStatus('');
   }
 
-  const visible = filter === 'all' ? BUILDABLE_CARDS : BUILDABLE_CARDS.filter(c => c.color === filter);
+  const visible = useMemo(() => {
+    return BUILDABLE_CARDS.filter(c =>
+      (filter === 'all' || c.color === filter) &&
+      (typeFilter === 'all' || c.type === typeFilter)
+    );
+  }, [filter, typeFilter]);
 
   return (
-    <div style={{ maxWidth: 980, margin: '0 auto', padding: mobile ? '0 14px 40px' : '0 24px 50px' }}>
-      <div style={{ marginTop: 14, padding: 14, background: '#101015', border: '1px solid #25252e', borderRadius: 8 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <div style={{ fontWeight: 800, color: '#9cf', letterSpacing: 1.5, fontSize: 14 }}>
-            🛠️ CUSTOM DECK ({total}/{DECK_SIZE})
+    <div>
+      {/* Header — deck progress + actions */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12,
+        marginBottom: 14,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
+          <div style={{ fontSize: 32, fontWeight: 900, color: total === DECK_SIZE ? PROFILE_TOKENS.accent : '#fff', lineHeight: 1 }}>
+            {total}<span style={{ fontSize: 18, color: PROFILE_TOKENS.muted, fontWeight: 700 }}>/{DECK_SIZE}</span>
           </div>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button onClick={clear} style={ghostBtn}>Clear</button>
-            <button onClick={save} disabled={!validation.ok || saving} style={validation.ok ? primaryBtn(!saving) : disabledBtn}>
-              {saving ? 'Saving…' : 'Save deck'}
-            </button>
-            {status && <span style={{ fontSize: 12, color: status === 'Saved!' ? '#7fdc7f' : '#ef7373' }}>{status}</span>}
+          <div style={{ fontSize: 11, color: PROFILE_TOKENS.muted, letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase' }}>
+            Cards in Deck
           </div>
         </div>
-
-        {/* Validation hints */}
-        {!validation.ok && validation.issues.length > 0 && (
-          <div style={{ marginTop: 8, fontSize: 12, color: '#fc8' }}>
-            {validation.issues.slice(0, 3).map((it, i) => <div key={i}>• {it.message}</div>)}
-          </div>
-        )}
-
-        {/* Color filter */}
-        <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
-          <FilterChip selected={filter === 'all'} onClick={() => setFilter('all')} label="All" />
-          {COLORS.map(c => (
-            <FilterChip key={c} selected={filter === c}
-              onClick={() => setFilter(c)}
-              label={COLOR_META[c].name} hex={COLOR_META[c].hex} ink={COLOR_META[c].ink} />
-          ))}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {status && <span style={{ fontSize: 12, color: status === 'Saved!' ? PROFILE_TOKENS.accent : PROFILE_TOKENS.danger }}>{status}</span>}
+          <button onClick={clear} style={profileChip(false)}>Clear</button>
+          <button onClick={save} disabled={!validation.ok || saving}
+            style={{ ...profileChip(true), opacity: (!validation.ok || saving) ? 0.5 : 1, cursor: (!validation.ok || saving) ? 'not-allowed' : 'pointer' }}>
+            {saving ? 'Saving…' : '💾 Save Deck'}
+          </button>
         </div>
-
-        {loading ? (
-          <div style={{ marginTop: 10, fontSize: 13, color: '#888' }}>Loading deck…</div>
-        ) : (
-          <div style={{
-            marginTop: 12, display: 'grid',
-            gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 150 : 200}px, 1fr))`, gap: 8,
-          }}>
-            {visible.map(def => {
-              const n = counts[def.id] ?? 0;
-              const cap = isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC;
-              const meta = COLOR_META[def.color];
-              return (
-                <CardHover key={def.id} defId={def.id}>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '6px 8px',
-                  background: '#0c0c12', borderRadius: 4,
-                  border: `1px solid ${n > 0 ? meta.hex : '#25252e'}`,
-                }}>
-                  <div style={{
-                    width: 18, height: 18, borderRadius: 9,
-                    background: meta.hex, color: meta.ink, flex: '0 0 auto',
-                    fontSize: 10, fontWeight: 800, display: 'flex',
-                    alignItems: 'center', justifyContent: 'center',
-                  }}>{def.type[0].toUpperCase()}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#eee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {def.name}
-                    </div>
-                    <div style={{ fontSize: 10, color: '#888' }}>
-                      {def.type}{def.type === 'meme' && ` · ${def.power}/${def.toughness}`}
-                    </div>
-                  </div>
-                  <button onClick={() => bump(def.id, -1)} disabled={n === 0} style={tinyBtn}>−</button>
-                  <div style={{ minWidth: 16, textAlign: 'center', fontSize: 12, fontWeight: 700, color: n > 0 ? '#fff' : '#555' }}>{n}</div>
-                  <button onClick={() => bump(def.id, +1)}
-                    disabled={n >= cap || total >= DECK_SIZE}
-                    style={tinyBtn}>+</button>
-                </div>
-                </CardHover>
-              );
-            })}
-          </div>
-        )}
       </div>
+
+      {/* Progress bar */}
+      <div style={{
+        height: 6, borderRadius: 999, overflow: 'hidden',
+        background: '#0a1224', border: `1px solid ${PROFILE_TOKENS.border}`,
+        marginBottom: 14,
+      }}>
+        <div style={{
+          width: `${Math.min(100, (total / DECK_SIZE) * 100)}%`, height: '100%',
+          background: total === DECK_SIZE
+            ? `linear-gradient(90deg, ${PROFILE_TOKENS.accent}, ${PROFILE_TOKENS.secondary})`
+            : PROFILE_TOKENS.warning,
+          transition: 'width 200ms ease',
+        }} />
+      </div>
+
+      {/* Validation hints */}
+      {!validation.ok && validation.issues.length > 0 && total > 0 && (
+        <div style={{
+          marginBottom: 12, padding: '8px 12px', borderRadius: 8,
+          background: `${PROFILE_TOKENS.warning}11`, border: `1px solid ${PROFILE_TOKENS.warning}55`,
+          fontSize: 12, color: PROFILE_TOKENS.warning,
+        }}>
+          {validation.issues.slice(0, 3).map((it, i) => <div key={i}>• {it.message}</div>)}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+        <FilterChip selected={filter === 'all'} onClick={() => setFilter('all')} label="All Chains" />
+        {COLORS.map(c => (
+          <FilterChip key={c} selected={filter === c}
+            onClick={() => setFilter(c)}
+            label={COLOR_META[c].name} hex={COLOR_META[c].hex} ink={COLOR_META[c].ink} />
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+        {(['all', 'node', 'meme', 'machine', 'move'] as const).map(t => (
+          <FilterChip key={t} selected={typeFilter === t}
+            onClick={() => setTypeFilter(t)}
+            label={t === 'all' ? 'All Types' : t.charAt(0).toUpperCase() + t.slice(1)} />
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 24, color: PROFILE_TOKENS.muted, fontSize: 13 }}>Loading deck…</div>
+      ) : (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 152 : 180}px, 1fr))`,
+          gap: 12,
+        }}>
+          {visible.map(def => {
+            const n = counts[def.id] ?? 0;
+            const cap = isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC;
+            return (
+              <DeckBuilderCard key={def.id}
+                def={def} count={n} cap={cap} totalFull={total >= DECK_SIZE}
+                onPlus={() => bump(def.id, +1)}
+                onMinus={() => bump(def.id, -1)}
+              />
+            );
+          })}
+        </div>
+      )}
     </div>
   );
+}
+
+function DeckBuilderCard({ def, count, cap, totalFull, onPlus, onMinus }: {
+  def: any; count: number; cap: number; totalFull: boolean;
+  onPlus: () => void; onMinus: () => void;
+}) {
+  const meta = COLOR_META[def.color as Color];
+  const owned = count > 0;
+  return (
+    <CardHover defId={def.id}>
+      <div
+        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = `0 14px 28px -10px ${meta.hex}66`; }}
+        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = owned ? `0 0 0 1px ${meta.hex}88 inset` : 'none'; }}
+        style={{
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          background: PROFILE_TOKENS.cardSoft, borderRadius: 12,
+          border: `1px solid ${owned ? meta.hex + '88' : PROFILE_TOKENS.border}`,
+          transition: '200ms ease',
+          boxShadow: owned ? `0 0 0 1px ${meta.hex}88 inset` : 'none',
+        }}>
+        {/* Art */}
+        <div style={{
+          aspectRatio: '1', overflow: 'hidden',
+          background: `linear-gradient(160deg, ${meta.hex}, #0a1020)`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          position: 'relative',
+        }}>
+          {def.image
+            ? <img src={def.image} alt={def.name} loading="lazy"
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            : <span style={{ fontSize: 36, color: meta.ink, fontWeight: 900, opacity: 0.8 }}>{(meta as any).glyph ?? meta.name[0]}</span>}
+          {/* Type badge */}
+          <span style={{
+            position: 'absolute', top: 6, left: 6,
+            padding: '2px 7px', borderRadius: 999, fontSize: 9, fontWeight: 800,
+            background: 'rgba(0,0,0,0.7)', color: '#fff', letterSpacing: 1, textTransform: 'uppercase',
+          }}>{def.type}</span>
+          {/* Cost badge (sum of all chain gas) */}
+          {def.cost && Object.keys(def.cost).length > 0 && (
+            <span style={{
+              position: 'absolute', top: 6, right: 6,
+              minWidth: 22, height: 22, padding: '0 6px',
+              borderRadius: 999,
+              background: meta.hex, color: meta.ink,
+              fontSize: 11, fontWeight: 900,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            }}>{Object.values(def.cost as Record<string, number>).reduce((s, n) => s + (n as number), 0)}</span>
+          )}
+          {/* Power/toughness for memes */}
+          {def.type === 'meme' && (
+            <span style={{
+              position: 'absolute', bottom: 6, right: 6,
+              padding: '2px 7px', borderRadius: 6,
+              background: 'rgba(0,0,0,0.75)', color: '#fff',
+              fontSize: 12, fontWeight: 900,
+            }}>{def.power}/{def.toughness}</span>
+          )}
+        </div>
+        {/* Footer */}
+        <div style={{ padding: '10px 12px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{
+            fontSize: 13, fontWeight: 800, color: '#fff', lineHeight: 1.2,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{def.name}</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: meta.hex,
+            }}>{meta.name}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button onClick={onMinus} disabled={count === 0} style={qtyBtn(count > 0)}>−</button>
+              <div style={{
+                minWidth: 22, textAlign: 'center', fontSize: 14, fontWeight: 900,
+                color: count > 0 ? '#fff' : PROFILE_TOKENS.muted,
+              }}>{count}</div>
+              <button onClick={onPlus} disabled={count >= cap || totalFull} style={qtyBtn(count < cap && !totalFull)}>+</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </CardHover>
+  );
+}
+
+function qtyBtn(enabled: boolean): React.CSSProperties {
+  return {
+    width: 26, height: 26, padding: 0, borderRadius: 6,
+    background: enabled ? 'linear-gradient(180deg, #1a2238, #101728)' : '#0c1220',
+    color: enabled ? '#fff' : PROFILE_TOKENS.muted,
+    border: `1px solid ${enabled ? PROFILE_TOKENS.borderHi : PROFILE_TOKENS.border}`,
+    fontSize: 16, fontWeight: 900, cursor: enabled ? 'pointer' : 'not-allowed',
+    transition: '150ms ease', lineHeight: 1,
+    fontFamily: PROFILE_FONT,
+  };
 }
 
 function FilterChip({ selected, onClick, label, hex, ink }: { selected: boolean; onClick: () => void; label: string; hex?: string; ink?: string }) {
