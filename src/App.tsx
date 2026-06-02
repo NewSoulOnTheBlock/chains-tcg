@@ -4531,7 +4531,17 @@ function RankedHub({
     if (!deckOk) { setError('Save a valid 60-card deck on your profile before queueing.'); return; }
     setBusy(true); setError('');
     try {
-      const r = await RankedAPI.queueJoin(myName, region);
+      // Forward the player's saved deck as the queue payload. Until the Deck
+      // Library lands this is the single stored custom deck. The server
+      // validates again before enqueueing.
+      let deckPayload: string | undefined;
+      try {
+        const cards = await getDeckApi(myName);
+        if (Array.isArray(cards) && cards.length > 0) {
+          deckPayload = JSON.stringify(cards);
+        }
+      } catch { /* server will fall back to stored deck */ }
+      const r = await RankedAPI.queueJoin(myName, region, deckPayload);
       if (!('ok' in r) || !r.ok) {
         setError((r as any).error || 'queue failed');
       } else {

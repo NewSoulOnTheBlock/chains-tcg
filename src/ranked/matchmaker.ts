@@ -73,6 +73,20 @@ async function collectRegions(): Promise<string[]> {
 }
 
 async function onPairFound([a, b]: [RankedQueueEntry, RankedQueueEntry], region: string) {
+  // Decks were stored as JSON-stringified card lists in selectedDeckId by the
+  // queue service. Parse + pass them into setupData so the Game's setup() can
+  // seat each player with their chosen deck (instead of falling back to the
+  // default starter colour).
+  const parseDeck = (raw: string | undefined): string[] | undefined => {
+    if (!raw) return undefined;
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.map(String) : undefined;
+    } catch { return undefined; }
+  };
+  const deckA = parseDeck(a.selectedDeckId);
+  const deckB = parseDeck(b.selectedDeckId);
+
   // Create a boardgame.io match if a lobby client is configured. Otherwise
   // produce a synthetic match id; the integration layer can hand it off.
   let matchId: string;
@@ -84,6 +98,7 @@ async function onPairFound([a, b]: [RankedQueueEntry, RankedQueueEntry], region:
           ranked: true,
           seasonId: a.seasonId,
           mode: 'ranked',
+          decks: [deckA, deckB],
         } as any,
       });
       matchId = res.matchID;
