@@ -444,8 +444,10 @@ export function ChainsBoard(props: Props) {
           mulliganCount={myMulliganCount}
           done={myMulliganDone}
           oppDone={oppMulliganDone}
+          deadline={G.mulligan?.deadline ?? 0}
           onKeep={() => moves.keepHand()}
           onMulligan={() => moves.mulligan()}
+          onForceEnd={() => moves.forceKeepOpponent()}
         />
       )}
 
@@ -1518,17 +1520,38 @@ function LifeBadge({
 /** Top-of-screen turn banner with chain-color glow + pulse. */
 // ─────────────────────────────────────────────────────────────────────────────
 function MulliganModal({
-  hand, mulliganCount, done, oppDone, onKeep, onMulligan,
+  hand, mulliganCount, done, oppDone, deadline, onKeep, onMulligan, onForceEnd,
 }: {
   hand: string[];
   mulliganCount: number;
   done: boolean;
   oppDone: boolean;
+  deadline: number;
   onKeep: () => void;
   onMulligan: () => void;
+  onForceEnd: () => void;
 }) {
   const nextSize = mulliganDrawCount(mulliganCount + 1);
   const atFloor = hand.length <= MULLIGAN_FLOOR;
+  // Live countdown tick.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, []);
+  const remainingMs = deadline > 0 ? Math.max(0, deadline - now) : 0;
+  const remainingS  = Math.ceil(remainingMs / 1000);
+  const waitingOnOpp = done && !oppDone;
+  const expired = deadline > 0 && now >= deadline;
+  // Auto-fire the escape hatch once the deadline lapses while we're waiting
+  // on the opponent. Only fires once thanks to the guard.
+  const firedRef = useRef(false);
+  useEffect(() => {
+    if (waitingOnOpp && expired && !firedRef.current) {
+      firedRef.current = true;
+      try { onForceEnd(); } catch { /* INVALID_MOVE is fine */ }
+    }
+  }, [waitingOnOpp, expired, onForceEnd]);
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 150,
@@ -1597,7 +1620,30 @@ function MulliganModal({
               opacity: (done || atFloor) ? 0.5 : 1,
               boxShadow: (done || atFloor) ? 'none' : '0 0 12px rgba(240,179,42,0.4)',
             }}>🔄 MULLIGAN ({nextSize})</button>
+          {waitingOnOpp && expired && (
+            <button
+              onClick={onForceEnd}
+              title="Opponent ran out of time — start the match anyway."
+              style={{
+                background: 'linear-gradient(180deg, #ef4444, #7a1d1d)',
+                color: '#fff', border: '1px solid #7a1d1d',
+                padding: '10px 24px', borderRadius: 8,
+                cursor: 'pointer',
+                fontWeight: 800, fontSize: 14, letterSpacing: 1,
+                boxShadow: '0 0 12px rgba(239,68,68,0.5)',
+              }}>⚡ START MATCH</button>
+          )}
         </div>
+
+        {waitingOnOpp && deadline > 0 && (
+          <div style={{
+            textAlign: 'center', fontSize: 11, color: expired ? '#ef4444' : '#aab', letterSpacing: 1,
+          }}>
+            {expired
+              ? '⏰ Opponent timed out — click Start Match to begin.'
+              : `Auto-starting in ${remainingS}s if opponent doesn't respond…`}
+          </div>
+        )}
 
         <div style={{
           display: 'flex', justifyContent: 'center', gap: 18,

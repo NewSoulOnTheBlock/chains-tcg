@@ -59,14 +59,18 @@ export interface GState {
   ranked?: { seasonId: string; startedAt: number };
   /** Pre-game mulligan state. London mulligan, simplified: first mull free, then -1 each, floor 4. */
   mulligan: {
-    counts: Record<string, number>;
-    done:   Record<string, boolean>;
+    counts:   Record<string, number>;
+    done:     Record<string, boolean>;
+    /** Unix ms after which either player may force-keep the other. 0 = no deadline yet. */
+    deadline: number;
   };
 }
 
 /** Mulligan tuning. First mull is free (redraw to 7); subsequent draw 1 fewer, floor at 4. */
 export const MULLIGAN_INITIAL_HAND = 7;
 export const MULLIGAN_FLOOR = 4;
+/** How long a player has to choose keep/mull before either side may force-end. */
+export const MULLIGAN_TIMEOUT_MS = 60_000;
 export function mulliganDrawCount(counts: number): number {
   // counts = times the player has mulliganed (including the one they just took)
   // 1st mull → draw 7, 2nd → 6, 3rd → 5, 4th+ → 4
@@ -527,6 +531,23 @@ const keepHand: Move<GState> = ({ G, playerID }) => {
   G.log.push(`Player ${playerID} keeps their opening hand (${G.players[playerID].hand.length}).`);
 };
 
+/**
+ * Escape hatch: if the deadline has passed, either side may force-keep any
+ * undecided opponent so a stuck/disconnected player can't freeze the match.
+ */
+const forceKeepOpponent: Move<GState> = ({ G }) => {
+  if (!G.mulligan.deadline || Date.now() < G.mulligan.deadline) return INVALID_MOVE;
+  let changed = false;
+  for (const pid of Object.keys(G.mulligan.done)) {
+    if (!G.mulligan.done[pid]) {
+      G.mulligan.done[pid] = true;
+      G.log.push(`Player ${pid} auto-kept their opening hand (mulligan timeout).`);
+      changed = true;
+    }
+  }
+  if (!changed) return INVALID_MOVE;
+};
+
 /** Player mulligans: hand back to top of deck, shuffle, redraw 7 - (counts-1), floor 4. */
 const mulligan: Move<GState> = ({ G, playerID, random }) => {
   if (playerID == null) return INVALID_MOVE;
@@ -546,6 +567,8 @@ const mulligan: Move<GState> = ({ G, playerID, random }) => {
   p.hand = shuffled.slice(0, safeTarget);
   G.secret.decks[playerID] = shuffled.slice(safeTarget);
   G.log.push(`Player ${playerID} mulligans → new hand of ${p.hand.length} (mulligan #${G.mulligan.counts[playerID]}).`);
+  // Reset deadline: opponent gets a fresh window every time the situation changes.
+  G.mulligan.deadline = Date.now() + MULLIGAN_TIMEOUT_MS;
 };
 
 /** Skip directly from main to end (no attacks this turn). */
@@ -635,8 +658,9 @@ export const ChainsTCG: Game<GState> = {
         ? { seasonId: String(setupData.seasonId), startedAt: Date.now() }
         : undefined,
       mulligan: {
-        counts: Object.fromEntries(Array.from({ length: ctx.numPlayers }, (_, i) => [String(i), 0])),
-        done:   Object.fromEntries(Array.from({ length: ctx.numPlayers }, (_, i) => [String(i), false])),
+        counts:   Object.fromEntries(Array.from({ length: ctx.numPlayers }, (_, i) => [String(i), 0])),
+        done:     Object.fromEntries(Array.from({ length: ctx.numPlayers }, (_, i) => [String(i), false])),
+        deadline: 0,
       },
     };
   },
@@ -678,6 +702,7 @@ export const ChainsTCG: Game<GState> = {
     chooseColor,
     keepHand,
     mulligan,
+    forceKeepOpponent,
   },
 
   phases: {
@@ -692,7 +717,11 @@ export const ChainsTCG: Game<GState> = {
       next: 'mulligan',
     },
     mulligan: {
-      moves: { keepHand, mulligan },
+      moves: { keepHand, mulligan, forceKeepOpponent },
+      onBegin: ({ G }) => {
+        // Start the auto-keep deadline as soon as the mulligan phase opens.
+        G.mulligan.deadline = Date.now() + MULLIGAN_TIMEOUT_MS;
+      },
       turn: {
         // Both players mulligan simultaneously.
         activePlayers: ActivePlayers.ALL,
