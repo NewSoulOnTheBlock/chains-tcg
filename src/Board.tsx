@@ -397,8 +397,19 @@ export function ChainsBoard(props: Props) {
       {/* Combat zone display */}
       <CombatStrip G={G} ctx={ctx} myId={myId} />
 
-      {/* Playmat with positioned zones */}
-      <Playmat
+      {/* Playmat with positioned zones, flanked by rules panels on desktop */}
+      <div style={{
+        display: 'flex',
+        flexDirection: mobile ? 'column' : 'row',
+        gap: mobile ? 0 : 10,
+        alignItems: 'flex-start',
+        justifyContent: 'center',
+        margin: '8px auto',
+        maxWidth: mobile ? '100%' : 1500,
+      }}>
+        {!mobile && <RulesPanel side="left" />}
+        <div style={{ flex: '1 1 1100px', maxWidth: 1100, minWidth: 0 }}>
+          <Playmat
         me={me} opp={opp} myId={myId} oppId={oppId}
         myDeckCount={(G as any).deckCounts?.[myId]  ?? 0}
         oppDeckCount={(G as any).deckCounts?.[oppId] ?? 0}
@@ -438,6 +449,9 @@ export function ChainsBoard(props: Props) {
         }}
         onMachineClick={uid => { if (targetMode?.kind === 'machine') pickTarget(uid); }}
       />
+        </div>
+        {!mobile && <RulesPanel side="right" />}
+      </div>
 
       {/* Hand */}
       <div style={{ marginTop: 8 }}>
@@ -601,6 +615,124 @@ function PlayerHeaderTargetable({ label, clickable, onClick }: { label: string; 
 }
 
 // ── Playmat — positions zones over the splash mat image ─────────────────────
+/**
+ * Beginner rules columns shown either side of the playmat on desktop.
+ * Two halves so each side fits a roughly 1100px-tall playmat without scrolling.
+ */
+function RulesPanel({ side }: { side: 'left' | 'right' }) {
+  const sections: Array<{ heading: string; body: React.ReactNode }> = side === 'left'
+    ? [
+        {
+          heading: '🎯 Goal',
+          body: 'Reduce your opponent\u2019s life from 20 to 0. You win when they hit zero (or run out of cards in their deck and can\u2019t draw).',
+        },
+        {
+          heading: '🪙 Gas (mana)',
+          body: 'Every non-Node card has a cost shown by colored pips: Orange\u00A0BnB, Purple\u00A0Solana, Green\u00A0Hyperliquid, White\u00A0Ethereum, Black\u00A0XRP. You pay that cost by tapping your Nodes.',
+        },
+        {
+          heading: '🗼 Nodes',
+          body: 'Nodes are your land. Once per turn you may play one Node from hand — it enters untapped. Click it any time on your turn to tap it for 1 gas of its color. Nodes untap at the start of your next turn.',
+        },
+        {
+          heading: '🃏 The 4 card types',
+          body: (
+            <>
+              <div><b>Node</b> — land, generates 1 gas of its color when tapped.</div>
+              <div><b>Meme</b> — creature with Power/Toughness. Attacks and blocks.</div>
+              <div><b>Machine</b> — artifact. Stays in play and gives a constant effect.</div>
+              <div><b>Move</b> — single-use spell. Resolves once then goes to graveyard.</div>
+            </>
+          ),
+        },
+        {
+          heading: '😴 Summoning sickness',
+          body: 'Memes you just played CAN\u2019T attack the turn they enter. They can block right away though. A small SICK badge marks them.',
+        },
+        {
+          heading: '🔄 Turn order',
+          body: (
+            <>
+              <div>1. <b>Untap</b> — your Nodes and Memes untap.</div>
+              <div>2. <b>Draw</b> — draw 1 card.</div>
+              <div>3. <b>Main</b> — play 1 Node, summon Memes, deploy Machines, cast Moves, tap Nodes for gas.</div>
+              <div>4. <b>Combat</b> — pick attackers, opponent picks blockers, damage resolves.</div>
+              <div>5. <b>End</b> — press <i>Pass Turn</i>.</div>
+            </>
+          ),
+        },
+      ]
+    : [
+        {
+          heading: '⚔️ Attacking',
+          body: 'During your turn click an untapped, non-sick meme to add it to the attack. Press the Attack button to swing — attackers tap.',
+        },
+        {
+          heading: '🛡️ Blocking',
+          body: 'When opponent attacks, click ONE of your untapped memes to select it as a blocker, then click the attacker you want it to block. Repeat for each block. Press Confirm Blocks when done.',
+        },
+        {
+          heading: '💥 Damage',
+          body: 'In a fight, both memes deal their Power to each other. If a meme takes damage ≥ its Toughness it dies and goes to the graveyard. Unblocked attackers hit the defender\u2019s life total directly.',
+        },
+        {
+          heading: '🎴 Hand limit',
+          body: 'No hand size limit during your turn. Drawing from an empty deck means you lose. Start with 7 cards.',
+        },
+        {
+          heading: '⚙️ Machines',
+          body: 'Machines are permanent. As long as one is on the battlefield, its effect is active — e.g. "your memes get +1/+1." Stack multiple for stronger effects.',
+        },
+        {
+          heading: '🔥 Moves',
+          body: 'Casting a Move resolves its effect right away, then sends it to the graveyard. Targeted Moves will ask you to click a target (meme, machine, or player).',
+        },
+        {
+          heading: '💡 First-game tips',
+          body: (
+            <>
+              <div>• Play a Node every turn if you can — gas is everything.</div>
+              <div>• Don\u2019t over-extend into removal Moves; keep one defender back.</div>
+              <div>• Hover any card to see a big preview with its full text.</div>
+              <div>• Tap multiple nodes BEFORE casting so you can afford the spell.</div>
+            </>
+          ),
+        },
+      ];
+
+  return (
+    <aside style={{
+      flex: '0 0 200px',
+      maxWidth: 220,
+      alignSelf: 'stretch',
+      padding: 10,
+      background: 'rgba(15, 15, 22, 0.85)',
+      border: '1px solid #2a2a36',
+      borderRadius: 8,
+      color: '#dcdce4',
+      fontSize: 11.5,
+      lineHeight: 1.4,
+      fontFamily: 'system-ui, sans-serif',
+      maxHeight: '1100px',
+      overflowY: 'auto',
+    }}>
+      <div style={{
+        fontWeight: 800, fontSize: 13, letterSpacing: 1,
+        color: '#ffd479', textTransform: 'uppercase',
+        borderBottom: '1px solid #3a3a48', paddingBottom: 6, marginBottom: 8,
+      }}>
+        {side === 'left' ? 'How to Play · Part 1' : 'How to Play · Part 2'}
+      </div>
+      {sections.map((s, i) => (
+        <div key={i} style={{ marginBottom: 10 }}>
+          <div style={{ fontWeight: 700, color: '#f0c674', marginBottom: 3 }}>{s.heading}</div>
+          <div style={{ color: '#bcbcc8' }}>{s.body}</div>
+        </div>
+      ))}
+    </aside>
+  );
+}
+
 function Playmat(props: {
   me: GState['players'][string];
   opp: GState['players'][string];
