@@ -422,6 +422,11 @@ export function ChainsBoard(props: Props) {
         onOpenRules={() => setShowRules(true)}
         onEndTurn={() => moves.passTurn()}
         canEndTurn={myTurn && !inBlockers && !ctx.gameover}
+        attackerCount={G.combat.attackers.length}
+        onConfirmAttackers={() => moves.confirmAttackers()}
+        canAttack={myTurn && !inBlockers && !ctx.gameover}
+        inBlockers={inBlockers}
+        onConfirmBlocks={() => moves.confirmBlocks()}
       />
 
       {/* Floating Rules drawer */}
@@ -1381,6 +1386,8 @@ function LifeBadge({
 function TurnBanner({
   myTurn, turn, phase, myName, oppName, myProfile, oppProfile, onOpenRules,
   onEndTurn, canEndTurn,
+  attackerCount, onConfirmAttackers, canAttack,
+  inBlockers, onConfirmBlocks,
 }: {
   myTurn: boolean; turn: number; phase: string;
   myName: string; oppName: string;
@@ -1388,6 +1395,11 @@ function TurnBanner({
   onOpenRules: () => void;
   onEndTurn: () => void;
   canEndTurn: boolean;
+  attackerCount: number;
+  onConfirmAttackers: () => void;
+  canAttack: boolean;
+  inBlockers: boolean;
+  onConfirmBlocks: () => void;
 }) {
   const dotColor = myTurn ? '#48d97a' : '#e85c5c';
   const headline = myTurn ? 'YOUR TURN' : "OPPONENT'S TURN";
@@ -1457,6 +1469,27 @@ function TurnBanner({
         <span style={{ fontSize: 11, color: '#9aa', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           <b style={{ color: '#fff' }}>{myName}</b> <span style={{ opacity: 0.6 }}>({formatRecord(myProfile)})</span>
         </span>
+        {canAttack && attackerCount > 0 && (
+          <button onClick={onConfirmAttackers} title="Swing with selected attackers"
+            style={{
+              background: 'linear-gradient(180deg, #ff7e5f, #c43e1c)',
+              color: '#fff', border: '1px solid #7a2510',
+              borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
+              fontWeight: 800, fontSize: 12, letterSpacing: 1,
+              boxShadow: '0 0 10px #ff5d3388',
+              animation: 'pulse-dot 1.6s ease-in-out infinite',
+            }}>⚔ ATTACK ({attackerCount})</button>
+        )}
+        {inBlockers && (
+          <button onClick={onConfirmBlocks} title="Lock in blockers and resolve combat"
+            style={{
+              background: 'linear-gradient(180deg, #5fcfff, #1c75c4)',
+              color: '#fff', border: '1px solid #103a6a',
+              borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
+              fontWeight: 800, fontSize: 12, letterSpacing: 1,
+              boxShadow: '0 0 10px #5fcfff88',
+            }}>🛡 CONFIRM BLOCKS</button>
+        )}
         {canEndTurn && (
           <button onClick={onEndTurn} title="End your turn (auto-ends at 0s)"
             style={{
