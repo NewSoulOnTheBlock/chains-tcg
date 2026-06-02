@@ -1816,8 +1816,8 @@ function ColorChooser({ label, value, onChange }: { label: string; value: Color;
               style={{
                 padding: '6px 10px',
                 background: sel ? meta.hex : '#181818',
-                color: sel ? (c === 'eth' ? '#000' : '#fff') : meta.hex,
-                border: `2px solid ${meta.hex}`,
+                color: sel ? (c === 'eth' ? '#000' : '#fff') : (c === 'xrp' ? '#fff' : meta.hex),
+                border: `2px solid ${c === 'xrp' ? '#fff' : meta.hex}`,
                 borderRadius: 4, fontWeight: 700, cursor: 'pointer', fontSize: 12,
               }}>{meta.name}</button>
           );
