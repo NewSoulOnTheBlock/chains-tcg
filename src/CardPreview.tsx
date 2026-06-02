@@ -8,8 +8,8 @@ const PREVIEW_W = 280;
 const PREVIEW_H = 400;
 
 export function CardPreview({ def }: { def: CardDef }) {
-  if (def.color === 'hl') return <HyperliquidPreview def={def} />;
   const meta = COLOR_META[def.color];
+  if (meta.template) return <TemplatedPreview def={def} />;
   return (
     <div style={{
       width: PREVIEW_W, height: PREVIEW_H,
@@ -77,15 +77,16 @@ export function CardPreview({ def }: { def: CardDef }) {
 }
 
 /**
- * Hyperliquid template — renders content into the slots of the green MTG-style
- * frame in /public/template-hl.jpg. Used for any card whose color is 'hl'.
+ * Templated frame preview — renders content into the slots of a MTG-style
+ * frame image (currently used by Hyperliquid and BnB). Selected via
+ * COLOR_META[color].template.
  */
-export function HyperliquidPreview({ def }: { def: CardDef }) {
+export function TemplatedPreview({ def }: { def: CardDef }) {
   const meta = COLOR_META[def.color];
   return (
     <div style={{
       position: 'relative', width: PREVIEW_W, height: PREVIEW_H,
-      backgroundImage: 'url(/template-hl.jpg)',
+      backgroundImage: `url(${meta.template})`,
       backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat',
       borderRadius: 10, boxShadow: '0 12px 40px rgba(0,0,0,0.75)',
       fontFamily: 'system-ui, sans-serif', color: '#1a1a1a',
@@ -126,7 +127,7 @@ export function HyperliquidPreview({ def }: { def: CardDef }) {
         color: meta.ink,
       }}>
         <div style={{ fontWeight: 900, fontSize: 56, letterSpacing: 4, textShadow: '0 3px 10px #000' }}>
-          HL
+          {meta.glyph ?? meta.name}
         </div>
       </div>
 

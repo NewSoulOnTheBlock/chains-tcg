@@ -5,12 +5,12 @@ export type Color = 'bnb' | 'sol' | 'hl' | 'eth' | 'xrp';
 
 export const COLORS: Color[] = ['bnb', 'sol', 'hl', 'eth', 'xrp'];
 
-export const COLOR_META: Record<Color, { name: string; hex: string; ink: string }> = {
-  bnb: { name: 'BnB',         hex: '#f3ba2f', ink: '#000' },  // orange/gold
-  sol: { name: 'Solana',      hex: '#9945ff', ink: '#fff' },  // purple
-  hl:  { name: 'Hyperliquid', hex: '#50d2c1', ink: '#022' },  // green/teal
-  eth: { name: 'Ethereum',    hex: '#f5f5f5', ink: '#222' },  // white
-  xrp: { name: 'XRP',         hex: '#1a1a1a', ink: '#fff' },  // black
+export const COLOR_META: Record<Color, { name: string; hex: string; ink: string; template?: string; glyph?: string }> = {
+  bnb: { name: 'BnB',         hex: '#f3ba2f', ink: '#000', template: '/template-bnb.jpg', glyph: 'BNB' },
+  sol: { name: 'Solana',      hex: '#9945ff', ink: '#fff' },
+  hl:  { name: 'Hyperliquid', hex: '#50d2c1', ink: '#022', template: '/template-hl.jpg',  glyph: 'HL' },
+  eth: { name: 'Ethereum',    hex: '#f5f5f5', ink: '#222' },
+  xrp: { name: 'XRP',         hex: '#1a1a1a', ink: '#fff' },
 };
 
 export type CardType = 'node' | 'meme' | 'machine' | 'move';

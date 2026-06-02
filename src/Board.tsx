@@ -77,18 +77,18 @@ function CardFace({
   if (!def) return null;
   const meta = COLOR_META[def.color];
   const dimmed = instance?.summoningSick || instance?.tapped;
-  const isHl = def.color === 'hl';
+  const tpl = meta.template;
   return (
     <CardHover defId={defId}>
     <div onClick={onClick}
       style={{
-        width: W, height: H, margin: 2, padding: isHl ? 0 : 5, borderRadius: 8,
-        background: isHl ? undefined : meta.hex,
-        backgroundImage: isHl ? 'url(/template-hl.jpg)' : undefined,
-        backgroundSize: isHl ? '100% 100%' : undefined,
+        width: W, height: H, margin: 2, padding: tpl ? 0 : 5, borderRadius: 8,
+        background: tpl ? undefined : meta.hex,
+        backgroundImage: tpl ? `url(${tpl})` : undefined,
+        backgroundSize: tpl ? '100% 100%' : undefined,
         backgroundRepeat: 'no-repeat',
         color: meta.ink,
-        border: selected ? '3px solid #ff0' : (isHl ? 'none' : '1px solid #000'),
+        border: selected ? '3px solid #ff0' : (tpl ? 'none' : '1px solid #000'),
         cursor: onClick ? 'pointer' : 'default',
         boxShadow: instance?.tapped ? 'inset 0 0 0 4px #0008' : undefined,
         transform: instance?.tapped ? 'rotate(8deg)' : undefined,
@@ -97,7 +97,7 @@ function CardFace({
         display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
         position: 'relative', flex: '0 0 auto',
       }}>
-      {isHl ? <HlCardFaceContent def={def} instance={instance} footer={footer} /> : <>
+      {tpl ? <TemplatedCardFaceContent def={def} instance={instance} footer={footer} /> : <>
       <div style={{ fontWeight: 700, fontSize: 10, lineHeight: 1.05 }}>{def.name}</div>
       <div style={{ fontSize: 8, opacity: 0.85, marginTop: 1, lineHeight: 1.1 }}>
         {def.type.toUpperCase()}
@@ -118,8 +118,8 @@ function CardFace({
   );
 }
 
-/** Content placed inside the Hyperliquid green frame template. */
-function HlCardFaceContent({ def, instance, footer }: { def: CardDef; instance?: Instance; footer?: React.ReactNode }) {
+/** Content placed inside a templated MTG-style frame (per-color via COLOR_META.template). */
+function TemplatedCardFaceContent({ def, instance, footer }: { def: CardDef; instance?: Instance; footer?: React.ReactNode }) {
   const meta = COLOR_META[def.color];
   return (
     <>
@@ -156,7 +156,7 @@ function HlCardFaceContent({ def, instance, footer }: { def: CardDef; instance?:
         color: meta.ink, fontWeight: 900, fontSize: 18, letterSpacing: 2,
         textShadow: '0 2px 6px #000',
       }}>
-        HL
+        {meta.glyph ?? meta.name}
         {instance?.summoningSick && <span style={{ marginLeft: 3, color: '#000', background: '#ffeb3b', padding: '0 3px', borderRadius: 2, fontSize: 6 }}>SICK</span>}
         {instance?.tapped && !instance?.summoningSick && <span style={{ marginLeft: 3, color: '#000', background: '#aaa', padding: '0 3px', borderRadius: 2, fontSize: 6 }}>TAP</span>}
       </div>
