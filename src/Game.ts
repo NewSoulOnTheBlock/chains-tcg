@@ -57,6 +57,20 @@ export interface GState {
   wager?: { kind: 'free' | 'master'; amount?: number; onchainId?: string };
   /** Ranked-mode metadata. When present, the board should report results to /api/ranked. */
   ranked?: { seasonId: string; startedAt: number };
+  /** Pre-game mulligan state. London mulligan, simplified: first mull free, then -1 each, floor 4. */
+  mulligan: {
+    counts: Record<string, number>;
+    done:   Record<string, boolean>;
+  };
+}
+
+/** Mulligan tuning. First mull is free (redraw to 7); subsequent draw 1 fewer, floor at 4. */
+export const MULLIGAN_INITIAL_HAND = 7;
+export const MULLIGAN_FLOOR = 4;
+export function mulliganDrawCount(counts: number): number {
+  // counts = times the player has mulliganed (including the one they just took)
+  // 1st mull → draw 7, 2nd → 6, 3rd → 5, 4th+ → 4
+  return Math.max(MULLIGAN_FLOOR, MULLIGAN_INITIAL_HAND - Math.max(0, counts - 1));
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -503,6 +517,37 @@ const chooseColor: Move<GState> = ({ G, playerID, random }, color: Color, custom
   );
 };
 
+// ── Mulligan moves ───────────────────────────────────────────────────────────
+
+/** Player accepts their current opening hand. Once both keep, phase ends. */
+const keepHand: Move<GState> = ({ G, playerID }) => {
+  if (playerID == null) return INVALID_MOVE;
+  if (G.mulligan.done[playerID]) return INVALID_MOVE;
+  G.mulligan.done[playerID] = true;
+  G.log.push(`Player ${playerID} keeps their opening hand (${G.players[playerID].hand.length}).`);
+};
+
+/** Player mulligans: hand back to top of deck, shuffle, redraw 7 - (counts-1), floor 4. */
+const mulligan: Move<GState> = ({ G, playerID, random }) => {
+  if (playerID == null) return INVALID_MOVE;
+  if (G.mulligan.done[playerID]) return INVALID_MOVE;
+  const p = G.players[playerID];
+  if (!p) return INVALID_MOVE;
+  // Floor protection: if already at minimum hand size, force keep instead of infinite mulligans.
+  if (G.mulligan.counts[playerID] >= MULLIGAN_INITIAL_HAND - MULLIGAN_FLOOR + 1) {
+    return INVALID_MOVE;
+  }
+  // Put hand back into the deck and reshuffle.
+  G.mulligan.counts[playerID] = (G.mulligan.counts[playerID] || 0) + 1;
+  const combined = [...p.hand, ...G.secret.decks[playerID]];
+  const shuffled = random!.Shuffle(combined);
+  const target = mulliganDrawCount(G.mulligan.counts[playerID]);
+  const safeTarget = Math.min(target, shuffled.length);  // empty-deck guard
+  p.hand = shuffled.slice(0, safeTarget);
+  G.secret.decks[playerID] = shuffled.slice(safeTarget);
+  G.log.push(`Player ${playerID} mulligans → new hand of ${p.hand.length} (mulligan #${G.mulligan.counts[playerID]}).`);
+};
+
 /** Skip directly from main to end (no attacks this turn). */
 const passTurn: Move<GState> = ({ G, ctx, playerID, events }) => {
   if (playerID == null || ctx.currentPlayer !== playerID) return INVALID_MOVE;
@@ -589,6 +634,10 @@ export const ChainsTCG: Game<GState> = {
       ranked: (setupData?.ranked || setupData?.mode === 'ranked') && setupData?.seasonId
         ? { seasonId: String(setupData.seasonId), startedAt: Date.now() }
         : undefined,
+      mulligan: {
+        counts: Object.fromEntries(Array.from({ length: ctx.numPlayers }, (_, i) => [String(i), 0])),
+        done:   Object.fromEntries(Array.from({ length: ctx.numPlayers }, (_, i) => [String(i), false])),
+      },
     };
   },
 
@@ -627,6 +676,8 @@ export const ChainsTCG: Game<GState> = {
     passTurn,
     goToCombat,
     chooseColor,
+    keepHand,
+    mulligan,
   },
 
   phases: {
@@ -638,6 +689,15 @@ export const ChainsTCG: Game<GState> = {
         activePlayers: ActivePlayers.ALL,
       },
       endIf: ({ G }) => !pickingPending(G),
+      next: 'mulligan',
+    },
+    mulligan: {
+      moves: { keepHand, mulligan },
+      turn: {
+        // Both players mulligan simultaneously.
+        activePlayers: ActivePlayers.ALL,
+      },
+      endIf: ({ G }) => Object.values(G.mulligan.done).every(Boolean),
       next: 'play',
     },
     play: {

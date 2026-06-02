@@ -7,6 +7,7 @@ import {
   type Color, type CardDef,
 } from './cards';
 import type { GState, Instance } from './Game';
+import { mulliganDrawCount, MULLIGAN_FLOOR, MULLIGAN_INITIAL_HAND } from './Game';
 import { recordResultApi, getProfileApi, formatRecord, type Profile } from './profiles';
 import { CardHover } from './CardPreview';
 
@@ -231,6 +232,10 @@ export function ChainsBoard(props: Props) {
   const inBlockers = ctx.activePlayers?.[myId] === 'blockers';
   const pickPhase = !!me?.needsColorPick || !!opp?.needsColorPick;
   const iMustPick = !!me?.needsColorPick;
+  const mulliganPhase = ctx.phase === 'mulligan';
+  const myMulliganDone = !!G.mulligan?.done?.[myId];
+  const oppMulliganDone = !!G.mulligan?.done?.[oppId];
+  const myMulliganCount = G.mulligan?.counts?.[myId] ?? 0;
 
   // Auto-apply the joiner's stashed deck choice from the lobby modal, once.
   const pickAppliedRef = useRef(false);
@@ -421,16 +426,28 @@ export function ChainsBoard(props: Props) {
         myProfile={myProfile} oppProfile={oppProfile}
         onOpenRules={() => setShowRules(true)}
         onEndTurn={() => moves.passTurn()}
-        canEndTurn={myTurn && !inBlockers && !ctx.gameover}
+        canEndTurn={myTurn && !inBlockers && !ctx.gameover && !mulliganPhase}
         attackerCount={G.combat.attackers.length}
         onConfirmAttackers={() => moves.confirmAttackers()}
-        canAttack={myTurn && !inBlockers && !ctx.gameover}
+        canAttack={myTurn && !inBlockers && !ctx.gameover && !mulliganPhase}
         inBlockers={inBlockers}
         onConfirmBlocks={() => moves.confirmBlocks()}
       />
 
       {/* Floating Rules drawer */}
       {showRules && <RulesDrawer onClose={() => setShowRules(false)} />}
+
+      {/* Pre-game mulligan overlay */}
+      {mulliganPhase && !iMustPick && (
+        <MulliganModal
+          hand={me.hand}
+          mulliganCount={myMulliganCount}
+          done={myMulliganDone}
+          oppDone={oppMulliganDone}
+          onKeep={() => moves.keepHand()}
+          onMulligan={() => moves.mulligan()}
+        />
+      )}
 
       {/* Deck-pick overlay — second player picks here if they arrived without a stashed color */}
       {iMustPick && (
@@ -1383,6 +1400,105 @@ function LifeBadge({
 }
 
 /** Top-of-screen turn banner with chain-color glow + pulse. */
+// ─────────────────────────────────────────────────────────────────────────────
+function MulliganModal({
+  hand, mulliganCount, done, oppDone, onKeep, onMulligan,
+}: {
+  hand: string[];
+  mulliganCount: number;
+  done: boolean;
+  oppDone: boolean;
+  onKeep: () => void;
+  onMulligan: () => void;
+}) {
+  const nextSize = mulliganDrawCount(mulliganCount + 1);
+  const atFloor = hand.length <= MULLIGAN_FLOOR;
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 150,
+      background: 'rgba(4,6,12,0.86)', backdropFilter: 'blur(8px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 20,
+    }}>
+      <div style={{
+        width: 'min(960px, 100%)', maxHeight: '92dvh', overflow: 'auto',
+        background: 'linear-gradient(180deg, rgba(28,18,52,0.96), rgba(10,8,22,0.96))',
+        border: '1px solid rgba(143,92,255,0.55)',
+        boxShadow: '0 0 32px rgba(143,92,255,0.35)',
+        borderRadius: 12, padding: 24,
+        display: 'flex', flexDirection: 'column', gap: 16,
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontFamily: '"Cinzel", serif', fontSize: 22, fontWeight: 800, letterSpacing: 2, color: '#fff' }}>
+            ⏳ MULLIGAN
+          </div>
+          <div style={{ fontSize: 12, color: '#aab', marginTop: 4 }}>
+            {done
+              ? oppDone
+                ? 'Both players ready — starting…'
+                : 'Waiting for opponent to keep or mulligan…'
+              : `Your opening hand (${hand.length} cards). Keep it, or mulligan to redraw ${nextSize} card${nextSize === 1 ? '' : 's'}.`}
+          </div>
+          <div style={{ fontSize: 11, color: '#7a8', marginTop: 6, fontStyle: 'italic' }}>
+            London mulligan · 1st free · −1 each redraw · floor {MULLIGAN_FLOOR}
+            {mulliganCount > 0 && ` · mull #${mulliganCount}`}
+          </div>
+        </div>
+
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: 8,
+          justifyContent: 'center', padding: 12,
+          background: 'rgba(0,0,0,0.35)', borderRadius: 8,
+        }}>
+          {hand.map((defId, i) => (
+            <CardFace key={i} defId={defId} />
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button
+            onClick={onKeep}
+            disabled={done}
+            style={{
+              background: done ? 'rgba(255,255,255,0.08)' : 'linear-gradient(180deg, #56d97a, #1e7a3a)',
+              color: '#fff', border: '1px solid #1e7a3a',
+              padding: '10px 24px', borderRadius: 8,
+              cursor: done ? 'default' : 'pointer',
+              fontWeight: 800, fontSize: 14, letterSpacing: 1,
+              opacity: done ? 0.5 : 1,
+              boxShadow: done ? 'none' : '0 0 12px rgba(86,217,122,0.4)',
+            }}>✓ KEEP HAND</button>
+          <button
+            onClick={onMulligan}
+            disabled={done || atFloor}
+            title={atFloor ? `Already at floor (${MULLIGAN_FLOOR} cards).` : `Redraw to ${nextSize} cards.`}
+            style={{
+              background: (done || atFloor) ? 'rgba(255,255,255,0.08)' : 'linear-gradient(180deg, #f0b32a, #c46a1c)',
+              color: '#fff', border: '1px solid #7a4010',
+              padding: '10px 24px', borderRadius: 8,
+              cursor: (done || atFloor) ? 'default' : 'pointer',
+              fontWeight: 800, fontSize: 14, letterSpacing: 1,
+              opacity: (done || atFloor) ? 0.5 : 1,
+              boxShadow: (done || atFloor) ? 'none' : '0 0 12px rgba(240,179,42,0.4)',
+            }}>🔄 MULLIGAN ({nextSize})</button>
+        </div>
+
+        <div style={{
+          display: 'flex', justifyContent: 'center', gap: 18,
+          fontSize: 11, color: '#9aa', letterSpacing: 1,
+        }}>
+          <span style={{ color: done ? '#56d97a' : '#aab' }}>● You {done ? 'ready' : 'choosing…'}</span>
+          <span style={{ color: oppDone ? '#56d97a' : '#aab' }}>● Opponent {oppDone ? 'ready' : 'choosing…'}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Suppress unused-warning for the constant on initial scaffolding.
+void MULLIGAN_INITIAL_HAND;
+
+// ─────────────────────────────────────────────────────────────────────────────
 function TurnBanner({
   myTurn, turn, phase, myName, oppName, myProfile, oppProfile, onOpenRules,
   onEndTurn, canEndTurn,
