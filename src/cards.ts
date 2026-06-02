@@ -15,7 +15,7 @@ export const COLOR_META: Record<Color, { name: string; hex: string; ink: string;
 
 export type CardType = 'node' | 'meme' | 'machine' | 'move';
 
-export type GasCost = Partial<Record<Color, number>>;
+export type GasCost = Partial<Record<Color | 'any', number>>;
 
 /** Mechanical effect identifiers — Game.ts implements them. */
 export type EffectId =
@@ -193,11 +193,46 @@ const N = (color: Color): CardDef => ({
   text: `Tap: add 1 ${COLOR_META[color].name} gas.`,
 });
 
+/**
+ * Multicolor-friendly cost split.
+ * Every non-Node card costs N total gas, of which a "colored" portion must be paid
+ * in its own chain's gas, and the rest is "any" (payable from any chain's pool).
+ *
+ * Ramp: 1 → 1C, 2 → 1C+1, 3 → 2C+1, 4 → 2C+2, 5 → 3C+2, 6 → 3C+3, 7+ → 3C+(N-3).
+ * Result: every card needs at most 3 of its own color, but heavy bombs still
+ * demand bigger boards. Splash-friendly across decks.
+ */
+function splitCost(total: number): { colored: number; any: number } {
+  const t = Math.max(0, Math.floor(total));
+  if (t <= 1) return { colored: t, any: 0 };
+  if (t === 2) return { colored: 1, any: 1 };
+  if (t === 3) return { colored: 2, any: 1 };
+  if (t === 4) return { colored: 2, any: 2 };
+  if (t === 5) return { colored: 3, any: 2 };
+  return { colored: 3, any: t - 3 };
+}
+
+function makeCost(color: Color, total: number): GasCost {
+  const { colored, any } = splitCost(total);
+  const out: GasCost = {};
+  if (colored > 0) out[color] = colored;
+  if (any > 0)     out.any   = any;
+  return out;
+}
+
+/** Total mana value of a cost (sum of colored + any). Used for display/sorting. */
+export function costTotal(cost?: GasCost): number {
+  if (!cost) return 0;
+  let n = 0;
+  for (const k of Object.keys(cost) as Array<Color | 'any'>) n += cost[k] ?? 0;
+  return n;
+}
+
 const M = (
   id: string, color: Color, name: string, cost: number, power: number, toughness: number, text = ''
 ): CardDef => ({
   id, name, type: 'meme', color,
-  cost: { [color]: cost } as GasCost,
+  cost: makeCost(color, cost),
   power, toughness,
   text: text || `${power}/${toughness}`,
 });
@@ -206,7 +241,7 @@ const A = (
   id: string, color: Color, name: string, cost: number, effect: EffectId, text: string
 ): CardDef => ({
   id, name, type: 'machine', color,
-  cost: { [color]: cost } as GasCost,
+  cost: makeCost(color, cost),
   text, effect,
 });
 
@@ -214,7 +249,7 @@ const X = (
   id: string, color: Color, name: string, cost: number, effect: EffectId, text: string
 ): CardDef => ({
   id, name, type: 'move', color,
-  cost: { [color]: cost } as GasCost,
+  cost: makeCost(color, cost),
   text, effect,
 });
 

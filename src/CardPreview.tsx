@@ -27,9 +27,9 @@ export function CardPreview({ def }: { def: CardDef }) {
         <div style={{ fontWeight: 800, fontSize: 18, lineHeight: 1.1 }}>{def.name}</div>
         {def.cost && (
           <div style={{ display: 'flex', gap: 4 }}>
-            {COLORS.map(c => {
+            {(['any', ...COLORS] as const).map(c => {
               const n = def.cost?.[c] ?? 0; if (!n) return null;
-              const cm = COLOR_META[c];
+              const cm = c === 'any' ? { hex: '#c8c8d0', ink: '#1a1a1a' } : COLOR_META[c];
               return (
                 <span key={c} style={{
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -105,9 +105,9 @@ export function TemplatedPreview({ def, tpl }: { def: CardDef; tpl: { url: strin
         </div>
         {def.cost && (
           <div style={{ display: 'flex', gap: 3 }}>
-            {COLORS.map(c => {
+            {(['any', ...COLORS] as const).map(c => {
               const n = def.cost?.[c] ?? 0; if (!n) return null;
-              const cm = COLOR_META[c];
+              const cm = c === 'any' ? { hex: '#c8c8d0', ink: '#1a1a1a' } : COLOR_META[c];
               return (
                 <span key={c} style={{
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',

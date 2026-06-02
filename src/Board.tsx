@@ -31,13 +31,16 @@ function useIsMobile(breakpoint = 720) {
 
 const COLOR_BAR: React.CSSProperties = { display: 'flex', gap: 6, fontSize: 12, marginTop: 4 };
 
-function Pip({ c, n }: { c: Color; n: number }) {
+function Pip({ c, n }: { c: Color | 'any'; n: number }) {
   if (!n) return null;
+  const meta = c === 'any'
+    ? { hex: '#c8c8d0', ink: '#1a1a1a' }
+    : COLOR_META[c];
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       width: 18, height: 18, borderRadius: 9,
-      background: COLOR_META[c].hex, color: COLOR_META[c].ink,
+      background: meta.hex, color: meta.ink,
       fontWeight: 700, fontSize: 11, border: '1px solid #0003',
     }}>{n}</span>
   );
@@ -47,6 +50,7 @@ function CostPips({ def }: { def: CardDef }) {
   if (!def.cost) return null;
   return (
     <div style={COLOR_BAR}>
+      <Pip c="any" n={def.cost.any ?? 0} />
       {COLORS.map(c => <Pip key={c} c={c} n={def.cost?.[c] ?? 0} />)}
     </div>
   );
@@ -134,9 +138,9 @@ function TemplatedCardFaceContent({ def, instance, footer, tpl }: { def: CardDef
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.name}</span>
         {def.cost && (
           <span style={{ display: 'flex', gap: 1 }}>
-            {COLORS.map(c => {
+            {(['any', ...COLORS] as const).map(c => {
               const n = def.cost?.[c] ?? 0; if (!n) return null;
-              const cm = COLOR_META[c];
+              const cm = c === 'any' ? { hex: '#c8c8d0', ink: '#1a1a1a' } : COLOR_META[c];
               return (
                 <span key={c} style={{
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -301,10 +305,16 @@ export function ChainsBoard(props: Props) {
       if (!def) return false;
       if (def.type === 'node') return nodesLeft > 0;
       const cost = def.cost ?? {};
+      // Colored requirement
+      let leftover = 0;
+      let okColored = true;
       for (const c of COLORS) {
-        if ((cost[c] ?? 0) > (avail[c] ?? 0)) return false;
+        const need = cost[c] ?? 0;
+        if (need > (avail[c] ?? 0)) { okColored = false; break; }
+        leftover += (avail[c] ?? 0) - need;
       }
-      return true;
+      if (!okColored) return false;
+      return (cost.any ?? 0) <= leftover;
     });
 
     if (!canPlayAnything && !hasReadyAttacker) {

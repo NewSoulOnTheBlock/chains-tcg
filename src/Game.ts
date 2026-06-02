@@ -104,31 +104,56 @@ function totalGas(p: PlayerState): number {
   return COLORS.reduce((s, c) => s + p.gas[c], 0);
 }
 
-/** Discount applied by your machines to your moves (e.g. 'gas_discount_color'). */
+/** Discount applied by your machines to your moves (e.g. 'gas_discount_color').
+ *  Discount eats colored first, then 'any', floor 0. */
 function discountForMove(p: PlayerState, def: CardDef): GasCost {
   const out: GasCost = { ...(def.cost ?? {}) };
   if (def.type !== 'move') return out;
   for (const m of p.machines) {
     const md = CARDS[m.defId];
-    if (md.effect === 'gas_discount_color' && out[md.color]) {
+    if (md.effect !== 'gas_discount_color') continue;
+    if ((out[md.color] ?? 0) > 0) {
       out[md.color] = Math.max(0, (out[md.color] ?? 0) - 1);
+    } else if ((out.any ?? 0) > 0) {
+      out.any = Math.max(0, (out.any ?? 0) - 1);
     }
   }
   return out;
 }
 
-/** Can we pay `cost` with the player's gas pool? */
+/** Can we pay `cost` with the player's gas pool?
+ *  Colored requirement must be met by matching-color gas; the remaining "any"
+ *  cost must be coverable from total leftover gas after colored is spent. */
 function canPay(p: PlayerState, cost: GasCost): boolean {
+  // Colored portion first.
   for (const c of COLORS) {
     if ((cost[c] ?? 0) > p.gas[c]) return false;
   }
-  return true;
+  // Then the any/colorless portion against the *remaining* pool.
+  const anyNeeded = cost.any ?? 0;
+  if (anyNeeded <= 0) return true;
+  let leftover = 0;
+  for (const c of COLORS) leftover += p.gas[c] - (cost[c] ?? 0);
+  return leftover >= anyNeeded;
 }
 function pay(p: PlayerState, cost: GasCost) {
+  // Spend colored portion from matching-color gas.
   for (const c of COLORS) p.gas[c] -= (cost[c] ?? 0);
+  // Spend the "any" portion greedily — drain colors with the most gas first
+  // so we leave the player flexible to play other-colored cards next.
+  let any = cost.any ?? 0;
+  while (any > 0) {
+    let best: Color | null = null;
+    for (const c of COLORS) {
+      if (p.gas[c] > 0 && (best == null || p.gas[c] > p.gas[best])) best = c;
+    }
+    if (!best) break;  // should be guarded by canPay; safety belt.
+    p.gas[best] -= 1;
+    any -= 1;
+  }
 }
 
-type GasCost = Partial<Record<Color, number>>;
+type GasCost = Partial<Record<Color | 'any', number>>;
 
 function drawCard(G: GState, pid: string, n = 1) {
   const p = G.players[pid];
