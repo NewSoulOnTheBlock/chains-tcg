@@ -123,7 +123,7 @@ const IMAGES: Record<string, string> = {
   xrp_xpunks:   '/cards/xpunks.png?v=1',
   xrp_oze:      cmc(34221),
   xrp_army:     cmc(33966),
-  xrp_coreum:   cmc(24411),
+  xrp_xmen:     '/cards/xmen.png?v=1',
 
   // ── BnB machines/moves ──
   bnb_farm:     emo('1f916'), // 🤖 robot (Volume Bot)
@@ -324,7 +324,7 @@ reg(
   M('xrp_xpunks',  'xrp', 'XPUNKS',            3, 3, 4, 'XRPL punk energy.'),
   M('xrp_oze',     'xrp', 'OZE',               3, 4, 2, 'Ozempic season. Cutting fat.'),
   M('xrp_army',    'xrp', 'ARMY',              4, 5, 3, 'The XRP Army marches.'),
-  M('xrp_coreum',  'xrp', 'COREUM',            5, 5, 5, 'Enterprise-grade dump.'),
+  M('xrp_xmen',    'xrp', 'XRP-MEN',           5, 5, 5, 'Mutant ledger heroes assemble.'),
   // Machines
   A('xrp_ledger',  'xrp', 'Indexer Daemon',    3, 'on_meme_etb_draw',      'When a Meme enters under you, draw a card (once per turn).'),
   A('xrp_lifelink','xrp', 'AMM Pool',          2, 'lifelink_all',          'Damage your Memes deal also heals you.'),
