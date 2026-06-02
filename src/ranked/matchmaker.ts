@@ -11,7 +11,11 @@ const TICK_MS = 2000;
 
 let timer: NodeJS.Timeout | null = null;
 let lobbyClient: LobbyClient | null = null;
-let pendingMatches: PendingMatch[] = [];
+// Per-player slot — each paired player has their OWN entry to claim. Without
+// this, the first poller would splice the match out and the second poller
+// would see `match: null` and fall back to "left queue", which prevented the
+// pairing from ever turning into an actual game.
+const pendingByPlayer = new Map<string, PendingMatch & { createdAt: number }>();
 
 export type PendingMatch = {
   matchId: string;
@@ -23,9 +27,9 @@ export type PendingMatch = {
 
 /** Allow callers (e.g. /api/ranked/match/claim) to fetch pairings for clients. */
 export function takePendingMatchFor(playerId: string): PendingMatch | null {
-  const idx = pendingMatches.findIndex(m => m.player0 === playerId || m.player1 === playerId);
-  if (idx < 0) return null;
-  const [m] = pendingMatches.splice(idx, 1);
+  const m = pendingByPlayer.get(playerId);
+  if (!m) return null;
+  pendingByPlayer.delete(playerId);
   return m;
 }
 
@@ -90,12 +94,9 @@ async function onPairFound([a, b]: [RankedQueueEntry, RankedQueueEntry], region:
   } else {
     matchId = `ranked-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
-  pendingMatches.push({
-    matchId, region,
-    player0: a.playerId, player1: b.playerId,
-    player0Deck: a.selectedDeckId, player1Deck: b.selectedDeckId,
-    createdAt: Date.now(),
-  });
+  pendingByPlayer.set(a.playerId, { matchId, region, player0: a.playerId, player1: b.playerId, player0Deck: a.selectedDeckId, player1Deck: b.selectedDeckId, createdAt: Date.now() });
+  pendingByPlayer.set(b.playerId, { matchId, region, player0: a.playerId, player1: b.playerId, player0Deck: a.selectedDeckId, player1Deck: b.selectedDeckId, createdAt: Date.now() });
+  console.log('[ranked/mm] paired', a.playerId, 'vs', b.playerId, '→', matchId);
   Telemetry.emit('match_started', {
     matchId, region,
     player0: a.playerId, player1: b.playerId,
@@ -107,5 +108,7 @@ async function onPairFound([a, b]: [RankedQueueEntry, RankedQueueEntry], region:
 /** GC stale pending matches (clients never claimed within 60s). */
 export function reapStalePending(maxAgeMs = 60_000) {
   const cutoff = Date.now() - maxAgeMs;
-  pendingMatches = pendingMatches.filter(m => m.createdAt >= cutoff);
+  for (const [k, v] of pendingByPlayer.entries()) {
+    if (v.createdAt < cutoff) pendingByPlayer.delete(k);
+  }
 }
