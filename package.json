@@ -16,12 +16,10 @@
     "@solana/web3.js": "^1.98.4",
     "anchor": "^1.4.2",
     "boardgame.io": "^0.50.2",
-    "bufferutil": "^4.0.1",
     "koa-static": "^5.0.0",
     "pg": "^8.13.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "utf-8-validate": "^6.0.6"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/koa-static": "^4.0.4",
@@ -33,6 +31,7 @@
     "tsx": "^4.16.5",
     "typescript": "^5.5.3",
     "vite": "^5.4.2",
+    "vite-plugin-node-polyfills": "^0.28.0",
     "vitest": "^2.0.5"
   }
 }
