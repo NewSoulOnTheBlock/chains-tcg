@@ -10,7 +10,7 @@ export const COLOR_META: Record<Color, { name: string; hex: string; ink: string;
   sol: { name: 'Solana',      hex: '#9945ff', ink: '#fff' },
   hl:  { name: 'Hyperliquid', hex: '#50d2c1', ink: '#022', template: '/template-hl.jpg',  glyph: 'HL' },
   eth: { name: 'Ethereum',    hex: '#f5f5f5', ink: '#222', template: '/template-eth.png', glyph: 'ETH' },
-  xrp: { name: 'XRP',         hex: '#1a1a1a', ink: '#fff' },
+  xrp: { name: 'XRP',         hex: '#1a1a1a', ink: '#fff', template: '/template-xrp.png', glyph: 'XRP' },
 };
 
 export type CardType = 'node' | 'meme' | 'machine' | 'move';
