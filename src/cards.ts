@@ -98,8 +98,8 @@ const IMAGES: Record<string, string> = {
   // Hyperliquid memes
   hl_buddy:     cmc(33718),
   hl_pip:       '/cards/pip.png?v=1',
-  hl_farm:      cmc(32196),
-  hl_jeff:      cmc(32196),
+  hl_farm:      '/cards/farm.png?v=1',
+  hl_jeff:      '/cards/jeff.jpg?v=1',
   hl_hpos:      cmc(26873),
   hl_hfun:      cmc(34103),
   hl_rage:      cmc(33952),
