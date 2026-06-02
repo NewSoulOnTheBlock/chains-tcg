@@ -62,8 +62,8 @@ function CardFace({
   faceDown?: boolean;
 }) {
   const mobile = useIsMobile();
-  const W = mobile ? 84 : 110;
-  const H = mobile ? 122 : 160;
+  const W = mobile ? 92 : 138;
+  const H = mobile ? 134 : 200;
   if (faceDown) {
     return (
       <div style={{
@@ -406,18 +406,20 @@ export function ChainsBoard(props: Props) {
   }, [ctx.gameover, matchID, myId, oppId, myName, oppName, refreshProfiles]);
 
   // ── Render ────────────────────────────────────────────────────────────────
+  const [showRules, setShowRules] = useState(false);
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', padding: mobile ? 6 : 8, color: '#eee', background: '#111', minHeight: '100vh' }}>
-      <h2 style={{ margin: '4px 0', fontSize: mobile ? 14 : 18 }}>
-        Memetic Masters TCG — {myTurn ? <span style={{color:'#9f9'}}>your turn</span> : <span style={{color:'#f99'}}>opponent's turn</span>}
-        {' '}· turn {ctx.turn} · {inBlockers ? 'block' : myTurn ? 'main' : 'wait'}
-      </h2>
+    <div style={{ fontFamily: 'system-ui, sans-serif', padding: mobile ? 6 : 8, color: '#eee', background: '#0a0a10', minHeight: '100vh' }}>
+      {/* Compact top status bar */}
+      <TurnBanner
+        myTurn={myTurn} turn={ctx.turn}
+        phase={inBlockers ? 'block' : myTurn ? 'main' : 'wait'}
+        myName={myName} oppName={oppName}
+        myProfile={myProfile} oppProfile={oppProfile}
+        onOpenRules={() => setShowRules(true)}
+      />
 
-      <div style={{ fontSize: 12, color: '#aaa', margin: '0 0 6px' }}>
-        <b style={{ color: '#fff' }}>{myName}</b> <span style={{ color: '#888' }}>({formatRecord(myProfile)})</span>
-        {' vs '}
-        <b style={{ color: '#fff' }}>{oppName}</b> <span style={{ color: '#888' }}>({formatRecord(oppProfile)})</span>
-      </div>
+      {/* Floating Rules drawer */}
+      {showRules && <RulesDrawer onClose={() => setShowRules(false)} />}
 
       {/* Deck-pick overlay — second player picks here if they arrived without a stashed color */}
       {iMustPick && (
@@ -526,20 +528,14 @@ export function ChainsBoard(props: Props) {
       {/* Combat zone display */}
       <CombatStrip G={G} ctx={ctx} myId={myId} />
 
-      {/* Playmat with positioned zones, flanked by rules panels on desktop */}
+      {/* Playmat — now full-width, no flanking rule panels */}
       <div style={{
-        display: 'flex',
-        flexDirection: mobile ? 'column' : 'row',
-        gap: mobile ? 0 : 10,
-        alignItems: 'flex-start',
-        justifyContent: 'center',
         margin: '8px auto',
-        maxWidth: mobile ? '100%' : 1500,
+        maxWidth: mobile ? '100%' : 1280,
       }}>
-        {!mobile && <RulesPanel side="left" />}
-        <div style={{ flex: '1 1 1100px', maxWidth: 1100, minWidth: 0 }}>
-          <Playmat
+        <Playmat
         me={me} opp={opp} myId={myId} oppId={oppId}
+        myName={myName} oppName={oppName}
         myDeckCount={(G as any).deckCounts?.[myId]  ?? 0}
         oppDeckCount={(G as any).deckCounts?.[oppId] ?? 0}
         attackers={G.combat.attackers.map(a => a.memeUid)}
@@ -578,27 +574,48 @@ export function ChainsBoard(props: Props) {
         }}
         onMachineClick={uid => { if (targetMode?.kind === 'machine') pickTarget(uid); }}
       />
-        </div>
-        {!mobile && <RulesPanel side="right" />}
       </div>
 
-      {/* Hand */}
+      {/* Hand — curved fan layout on desktop */}
       <div style={{ marginTop: 8 }}>
-        <div style={{ fontSize: 12, opacity: 0.7 }}>Hand ({me.hand.length})</div>
+        <div style={{ fontSize: 11, opacity: 0.6, letterSpacing: 1, textTransform: 'uppercase', fontWeight: 700, textAlign: 'center', marginBottom: 4 }}>
+          ✋ Hand · {me.hand.length}
+        </div>
         <div style={{
-          display: 'flex', flexWrap: mobile ? 'nowrap' : 'wrap',
+          display: 'flex', flexWrap: mobile ? 'nowrap' : 'nowrap',
           overflowX: mobile ? 'auto' : 'visible',
           WebkitOverflowScrolling: 'touch',
           paddingBottom: mobile ? 6 : 0,
+          justifyContent: 'center', alignItems: 'flex-end',
+          minHeight: mobile ? 130 : 175,
+          perspective: 1200,
         }}>
-          {me.hand.map((id, i) => (
-            <CardFace
-              key={i}
-              defId={id}
-              selected={selectedHand === i}
-              onClick={() => isActive && myTurn && !inBlockers && tryPlay(i)}
-            />
-          ))}
+          {me.hand.map((id, i) => {
+            const n = me.hand.length;
+            // Curve: rotate cards around an arc, slight upward lift toward center.
+            const t = n === 1 ? 0 : (i - (n - 1) / 2) / Math.max(1, (n - 1) / 2);  // -1..1
+            const rot = mobile ? 0 : t * 6;          // ±6° fan
+            const lift = mobile ? 0 : Math.abs(t) * 8;
+            const overlap = mobile ? 0 : -18;        // slight overlap
+            return (
+              <div key={i} style={{
+                transform: `translateY(${lift}px) rotate(${rot}deg)`,
+                transformOrigin: '50% 100%',
+                marginLeft: i === 0 ? 0 : overlap,
+                transition: 'transform 0.18s ease',
+                zIndex: selectedHand === i ? 10 : i,
+              }}
+                onMouseEnter={e => { if (!mobile) e.currentTarget.style.transform = `translateY(-14px) rotate(${rot * 0.4}deg) scale(1.08)`; }}
+                onMouseLeave={e => { if (!mobile) e.currentTarget.style.transform = `translateY(${lift}px) rotate(${rot}deg)`; }}
+              >
+                <CardFace
+                  defId={id}
+                  selected={selectedHand === i}
+                  onClick={() => isActive && myTurn && !inBlockers && tryPlay(i)}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -1102,6 +1119,7 @@ function Playmat(props: {
   onMyMemeClick: (uid: string) => void;
   onOppMemeClick: (uid: string) => void;
   onMachineClick: (uid: string) => void;
+  myName?: string; oppName?: string;
 }) {
   const {
     me, opp, myId, oppId, myDeckCount, oppDeckCount,
@@ -1109,6 +1127,7 @@ function Playmat(props: {
     memeTargetable, machineTargetable, playerTargetable,
     onOppPlayerClick, onMyPlayerClick,
     onNodeClick, onMyMemeClick, onOppMemeClick, onMachineClick,
+    myName, oppName,
   } = props;
 
   // Zone rectangles in percentage of the mat (left, top, width, height).
@@ -1134,38 +1153,51 @@ function Playmat(props: {
 
   return (
     <div style={{
-      position: 'relative', width: '100%', maxWidth: 1100, aspectRatio: '1 / 1',
+      position: 'relative', width: '100%', maxWidth: 1280, aspectRatio: '1 / 1',
       margin: '8px auto', borderRadius: 10, overflow: 'hidden',
-      backgroundImage: 'url(/playmat.png)', backgroundSize: 'cover', backgroundPosition: 'center',
       boxShadow: '0 0 30px #000a inset, 0 4px 24px #000c',
+      isolation: 'isolate',
     }}>
+      {/* Background image — blurred + darkened so cards pop */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        backgroundImage: 'url(/playmat.png)', backgroundSize: 'cover', backgroundPosition: 'center',
+        filter: 'blur(2px) brightness(0.45) saturate(0.7)',
+        zIndex: 0,
+      }} />
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.55) 100%)',
+        zIndex: 0,
+      }} />
+      <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
       {/* ─── OPPONENT SIDE (rotated for face-to-face feel) ─── */}
-      <ZoneSlot rect={Z.oppGrave} label={`Graveyard (${opp.graveyard.length})`} rotated>
+      <ZoneSlot rect={Z.oppGrave} icon="☠️" label={`Graveyard (${opp.graveyard.length})`} compactLabel={`☠️ ${opp.graveyard.length}`} rotated>
         {opp.graveyard.slice(-1).map((id, i) => <MiniCard key={i} defId={id} faceUp />)}
       </ZoneSlot>
-      <ZoneSlot rect={Z.oppNodes} label={`Opp Nodes (${opp.nodes.length})`} rotated>
+      <ZoneSlot rect={Z.oppNodes} icon="🌐" label={`Opp Nodes (${opp.nodes.length})`} compactLabel={`🌐 Nodes · ${opp.nodes.length}`} rotated>
         {opp.nodes.map(inst => (
           <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp />
         ))}
       </ZoneSlot>
-      <ZoneSlot rect={Z.oppDeck} label={`Deck (${oppDeckCount})`} rotated>
+      <ZoneSlot rect={Z.oppDeck} icon="📚" label={`Deck (${oppDeckCount})`} compactLabel={`📚 ${oppDeckCount}`} rotated>
         {oppDeckCount > 0 && <MiniCard faceDown />}
       </ZoneSlot>
-      <ZoneSlot rect={Z.oppMaindeck} label="Hand" rotated>
+      <ZoneSlot rect={Z.oppMaindeck} icon="✋" label={`Hand (${opp.hand.length})`} compactLabel={`✋ ${opp.hand.length}`} rotated>
         {opp.hand.length > 0 && (
-          <div style={{ color: '#fff', fontSize: 12, fontWeight: 700, textShadow: '0 1px 4px #000' }}>
+          <div style={{ color: '#fff', fontSize: 14, fontWeight: 700, textShadow: '0 1px 4px #000' }}>
             🂠 × {opp.hand.length}
           </div>
         )}
       </ZoneSlot>
-      <ZoneSlot rect={Z.oppMachines} label={`Machines (${opp.machines.length})`} rotated>
+      <ZoneSlot rect={Z.oppMachines} icon="⚙️" label={`Machines (${opp.machines.length})`} compactLabel={`⚙️ ${opp.machines.length}`} rotated>
         {opp.machines.map(inst => (
           <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp
             onClick={machineTargetable ? () => onMachineClick(inst.uid) : undefined}
             targetable={machineTargetable} />
         ))}
       </ZoneSlot>
-      <ZoneSlot rect={Z.oppBattle} label={`Battlefield — ${COLOR_META[opp.color].name}`} rotated>
+      <ZoneSlot rect={Z.oppBattle} icon="⚔️" label={`Battlefield — ${COLOR_META[opp.color].name}`} compactLabel={`⚔️ ${COLOR_META[opp.color].name}`} rotated>
         {opp.memes.map(inst => {
           const attacking = attackerSide === 'opp' && attackers.includes(inst.uid);
           const blockedBy = blocks[inst.uid] ?? [];
@@ -1183,19 +1215,20 @@ function Playmat(props: {
           );
         })}
       </ZoneSlot>
-      <ZoneSlot rect={Z.oppLife} label="LIFE" rotated
+      {/* Large opponent life badge — corner, MTG-Arena style */}
+      <LifeBadge
+        life={opp.life} name={oppName ?? 'Opponent'} color={opp.color}
+        position="topRight" targetable={playerTargetable}
         onClick={playerTargetable ? onOppPlayerClick : undefined}
-        targetable={playerTargetable}>
-        <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', textShadow: '0 2px 6px #000' }}>{opp.life}</div>
-      </ZoneSlot>
+      />
 
       {/* ─── ME ─── */}
-      <ZoneSlot rect={Z.myLife} label="LIFE"
+      <LifeBadge
+        life={me.life} name={myName ?? 'You'} color={me.color}
+        position="bottomLeft" targetable={playerTargetable}
         onClick={playerTargetable ? onMyPlayerClick : undefined}
-        targetable={playerTargetable}>
-        <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', textShadow: '0 2px 6px #000' }}>{me.life}</div>
-      </ZoneSlot>
-      <ZoneSlot rect={Z.myBattle} label={`Your Battlefield — ${COLOR_META[me.color].name}`}>
+      />
+      <ZoneSlot rect={Z.myBattle} icon="⚔️" label={`Your Battlefield — ${COLOR_META[me.color].name}`} compactLabel={`⚔️ ${COLOR_META[me.color].name}`}>
         {me.memes.map(inst => {
           const attacking = attackerSide === 'me' && attackers.includes(inst.uid);
           const blockedBy = blocks[inst.uid] ?? [];
@@ -1210,68 +1243,218 @@ function Playmat(props: {
           );
         })}
       </ZoneSlot>
-      <ZoneSlot rect={Z.myMachines} label={`Machines (${me.machines.length})`}>
+      <ZoneSlot rect={Z.myMachines} icon="⚙️" label={`Machines (${me.machines.length})`} compactLabel={`⚙️ ${me.machines.length}`}>
         {me.machines.map(inst => (
           <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp
             onClick={machineTargetable ? () => onMachineClick(inst.uid) : undefined}
             targetable={machineTargetable} />
         ))}
       </ZoneSlot>
-      <ZoneSlot rect={Z.myMaindeck} label="Main Deck">
+      <ZoneSlot rect={Z.myMaindeck} icon="📜" label="Main Deck" compactLabel="📜">
         <div style={{ color: '#888', fontSize: 10 }}>—</div>
       </ZoneSlot>
-      <ZoneSlot rect={Z.myDeck} label={`Deck (${myDeckCount})`}>
+      <ZoneSlot rect={Z.myDeck} icon="📚" label={`Deck (${myDeckCount})`} compactLabel={`📚 ${myDeckCount}`}>
         {myDeckCount > 0 && <MiniCard faceDown />}
       </ZoneSlot>
-      <ZoneSlot rect={Z.myNodes} label={`Your Nodes (${me.nodes.length}) — click to tap`}>
+      <ZoneSlot rect={Z.myNodes} icon="🌐" label={`Your Nodes (${me.nodes.length}) — click to tap`} compactLabel={`🌐 Nodes · ${me.nodes.length}`}>
         {me.nodes.map(inst => (
           <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp
             onClick={() => onNodeClick(inst.uid)} />
         ))}
       </ZoneSlot>
-      <ZoneSlot rect={Z.myGrave} label={`Graveyard (${me.graveyard.length})`}>
+      <ZoneSlot rect={Z.myGrave} icon="☠️" label={`Graveyard (${me.graveyard.length})`} compactLabel={`☠️ ${me.graveyard.length}`}>
         {me.graveyard.slice(-1).map((id, i) => <MiniCard key={i} defId={id} faceUp />)}
       </ZoneSlot>
+      </div>
     </div>
   );
 }
 
 function ZoneSlot({
-  rect, label, children, rotated, onClick, targetable,
+  rect, label, compactLabel, icon, children, rotated, onClick, targetable,
 }: {
   rect: { left: number; top: number; w: number; h: number };
-  label: string; children: React.ReactNode; rotated?: boolean;
+  label: string; compactLabel?: string; icon?: string;
+  children: React.ReactNode; rotated?: boolean;
   onClick?: () => void; targetable?: boolean;
 }) {
   return (
     <div
       onClick={onClick}
+      title={label}
       style={{
         position: 'absolute',
         left: `${rect.left}%`, top: `${rect.top}%`,
         width: `${rect.w}%`, height: `${rect.h}%`,
-        border: targetable ? '2px dashed #ff0' : '1px solid rgba(120,180,255,0.25)',
-        borderRadius: 6,
-        background: 'rgba(0,0,0,0.18)',
-        boxShadow: 'inset 0 0 12px rgba(0,0,0,0.35)',
+        border: targetable ? '2px dashed #ffeb3b' : '1px solid rgba(120,180,255,0.18)',
+        borderRadius: 8,
+        background: 'rgba(0,0,0,0.35)',
+        backdropFilter: 'blur(1px)',
+        boxShadow: targetable
+          ? '0 0 14px rgba(255,235,59,0.45), inset 0 0 12px rgba(0,0,0,0.4)'
+          : 'inset 0 0 12px rgba(0,0,0,0.45)',
         padding: 3,
         overflow: 'hidden',
         cursor: onClick ? 'pointer' : 'default',
         transform: rotated ? 'rotate(180deg)' : undefined,
+        transition: 'box-shadow 0.2s ease, border-color 0.2s ease',
       }}
     >
       <div style={{
-        position: 'absolute', top: 2, left: 4, right: 4,
-        fontSize: 9, color: 'rgba(180,220,255,0.85)',
-        letterSpacing: 0.5, textShadow: '0 1px 2px #000',
-        pointerEvents: 'none', textTransform: 'uppercase', fontWeight: 700,
-      }}>{label}</div>
+        position: 'absolute', top: 3, left: 6, right: 6,
+        fontSize: 11, color: 'rgba(220,235,255,0.92)',
+        letterSpacing: 0.6, textShadow: '0 1px 3px #000, 0 0 4px #000',
+        pointerEvents: 'none', fontWeight: 700,
+        display: 'flex', alignItems: 'center', gap: 4,
+      }}>
+        <span>{compactLabel ?? (icon ? `${icon} ${label}` : label)}</span>
+      </div>
       <div style={{
-        position: 'absolute', top: 14, left: 3, right: 3, bottom: 3,
-        display: 'flex', flexWrap: 'wrap', gap: 2,
+        position: 'absolute', top: 18, left: 3, right: 3, bottom: 3,
+        display: 'flex', flexWrap: 'wrap', gap: 3,
         alignContent: 'flex-start', justifyContent: 'center', alignItems: 'center',
         overflow: 'hidden',
       }}>{children}</div>
+    </div>
+  );
+}
+
+/** Large MTG-Arena style circular life badge anchored to a playmat corner. */
+function LifeBadge({
+  life, name, color, position, onClick, targetable,
+}: {
+  life: number; name: string; color: Color;
+  position: 'topRight' | 'bottomLeft';
+  onClick?: () => void; targetable?: boolean;
+}) {
+  const meta = COLOR_META[color];
+  const pos: React.CSSProperties = position === 'topRight'
+    ? { top: 12, right: 14 }
+    : { bottom: 12, left: 14 };
+  const glow = targetable ? '0 0 22px rgba(255,235,59,0.85), 0 0 4px rgba(255,235,59,0.9)' : `0 0 24px ${meta.hex}aa, 0 4px 18px #000c`;
+  return (
+    <div
+      onClick={onClick}
+      title={`${name} — ${life} life`}
+      style={{
+        position: 'absolute', ...pos, zIndex: 5,
+        display: 'flex', alignItems: 'center', gap: 8,
+        cursor: onClick ? 'pointer' : 'default',
+        pointerEvents: 'auto',
+        flexDirection: position === 'topRight' ? 'row-reverse' : 'row',
+      }}>
+      <div style={{
+        width: 78, height: 78, borderRadius: '50%',
+        background: `radial-gradient(circle at 30% 30%, ${meta.hex}, #1a1a22 75%)`,
+        border: targetable ? '3px solid #ffeb3b' : `3px solid ${meta.hex}`,
+        boxShadow: glow,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: '#fff', textShadow: '0 2px 8px #000',
+        fontFamily: '"Cinzel", "Times New Roman", serif',
+        fontWeight: 900, fontSize: 36, lineHeight: 1,
+        transition: 'transform 0.15s ease',
+      }}>{life}</div>
+      <div style={{
+        background: 'rgba(0,0,0,0.55)',
+        backdropFilter: 'blur(4px)',
+        padding: '4px 10px', borderRadius: 6,
+        border: `1px solid ${meta.hex}66`,
+        color: '#fff', fontSize: 12, fontWeight: 700,
+        maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        letterSpacing: 0.4,
+      }}>{name}</div>
+    </div>
+  );
+}
+
+/** Top-of-screen turn banner with chain-color glow + pulse. */
+function TurnBanner({
+  myTurn, turn, phase, myName, oppName, myProfile, oppProfile, onOpenRules,
+}: {
+  myTurn: boolean; turn: number; phase: string;
+  myName: string; oppName: string;
+  myProfile?: any; oppProfile?: any;
+  onOpenRules: () => void;
+}) {
+  const dotColor = myTurn ? '#48d97a' : '#e85c5c';
+  const headline = myTurn ? 'YOUR TURN' : "OPPONENT'S TURN";
+  return (
+    <div style={{
+      position: 'relative',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      gap: 12, padding: '6px 14px', borderRadius: 10,
+      background: 'linear-gradient(180deg, rgba(20,20,30,0.95), rgba(10,10,14,0.95))',
+      border: `1px solid ${dotColor}55`,
+      boxShadow: `0 0 18px ${dotColor}33`,
+    }}>
+      <div style={{ fontSize: 11, color: '#9aa', fontWeight: 600, minWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        VS <b style={{ color: '#fff' }}>{oppName}</b> <span style={{ opacity: 0.6 }}>({formatRecord(oppProfile)})</span>
+      </div>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        fontFamily: '"Cinzel", "Times New Roman", serif',
+        fontWeight: 800, fontSize: 18, letterSpacing: 2,
+        color: '#fff', textShadow: `0 0 12px ${dotColor}aa`,
+      }}>
+        <span style={{
+          display: 'inline-block', width: 12, height: 12, borderRadius: '50%',
+          background: dotColor, boxShadow: `0 0 12px ${dotColor}`,
+          animation: 'pulse-dot 1.6s ease-in-out infinite',
+        }} />
+        {headline}
+        <span style={{ fontFamily: 'system-ui', fontWeight: 600, fontSize: 11, color: '#aab', letterSpacing: 1 }}>
+          · TURN {turn} · {phase.toUpperCase()}
+        </span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 160, justifyContent: 'flex-end' }}>
+        <span style={{ fontSize: 11, color: '#9aa', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <b style={{ color: '#fff' }}>{myName}</b> <span style={{ opacity: 0.6 }}>({formatRecord(myProfile)})</span>
+        </span>
+        <button onClick={onOpenRules} title="How to play"
+          style={{
+            background: 'linear-gradient(180deg,#3a2a55,#22163a)',
+            color: '#ffd76a', border: '1px solid #ffd76a55',
+            borderRadius: '50%', width: 28, height: 28, cursor: 'pointer',
+            fontWeight: 800, fontSize: 14, lineHeight: 1,
+            boxShadow: '0 0 8px #ffd76a44',
+          }}>?</button>
+      </div>
+      <style>{`@keyframes pulse-dot { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(0.85); } }`}</style>
+    </div>
+  );
+}
+
+/** Slide-in rules drawer launched by the floating ? button. */
+function RulesDrawer({ onClose }: { onClose: () => void }) {
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 100,
+      background: 'rgba(0,0,0,0.7)',
+      display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: 'min(720px, 100%)', height: '100%',
+        background: 'linear-gradient(180deg, #15101e, #0a0710)',
+        borderLeft: '1px solid #ffd76a55',
+        boxShadow: '-12px 0 32px #000c',
+        overflowY: 'auto',
+        padding: 20,
+        display: 'flex', flexDirection: 'column', gap: 16,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{
+            fontFamily: '"Cinzel", "Times New Roman", serif',
+            fontSize: 22, fontWeight: 800, color: '#ffd76a', letterSpacing: 2,
+          }}>HOW TO PLAY</div>
+          <button onClick={onClose} style={{
+            background: 'transparent', color: '#fff',
+            border: '1px solid #555', borderRadius: 6,
+            padding: '4px 12px', cursor: 'pointer', fontWeight: 700,
+          }}>✕</button>
+        </div>
+        <RulesPanel side="left" />
+        <RulesPanel side="right" />
+      </div>
     </div>
   );
 }
@@ -1287,9 +1470,10 @@ function MiniCard({
   if (faceDown || !defId) {
     return (
       <div style={{
-        width: 38, height: 54, borderRadius: 4,
+        width: 48, height: 68, borderRadius: 5,
         background: 'repeating-linear-gradient(45deg, #2a2a3a 0 5px, #3a3a4a 5px 10px)',
         border: '1px solid #000',
+        boxShadow: '0 2px 6px #0008',
       }} />
     );
   }
@@ -1299,24 +1483,41 @@ function MiniCard({
   return (
     <CardHover defId={defId}>
     <div onClick={onClick}
+      onMouseEnter={e => {
+        e.currentTarget.style.transform = `${instance?.tapped ? 'rotate(8deg) ' : ''}translateY(-4px) scale(1.08)`;
+        e.currentTarget.style.zIndex = '20';
+        e.currentTarget.style.boxShadow = `0 6px 18px ${meta.hex}aa, 0 0 12px ${meta.hex}88`;
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.transform = instance?.tapped ? 'rotate(8deg)' : '';
+        e.currentTarget.style.zIndex = '';
+        e.currentTarget.style.boxShadow = instance?.tapped
+          ? 'inset 0 0 0 3px #0008, 0 2px 6px #000a'
+          : selected ? `0 0 14px ${meta.hex}, 0 0 4px #ffeb3b` : '0 2px 6px #000a';
+      }}
       style={{
-        width: 52, height: 72, padding: 3, borderRadius: 4,
+        width: 68, height: 96, padding: 3, borderRadius: 6,
         background: meta.hex, color: meta.ink,
-        border: selected ? '2px solid #ff0' : targetable ? '2px dashed #ff0' : '1px solid #000',
-        cursor: onClick ? 'pointer' : faceUp ? 'default' : 'default',
-        boxShadow: instance?.tapped ? 'inset 0 0 0 3px #0008' : undefined,
+        border: selected ? '2px solid #ffeb3b' : targetable ? '2px dashed #ffeb3b' : '1px solid #000',
+        cursor: onClick ? 'pointer' : 'default',
+        boxShadow: instance?.tapped
+          ? 'inset 0 0 0 3px #0008, 0 2px 6px #000a'
+          : selected ? `0 0 14px ${meta.hex}, 0 0 4px #ffeb3b` : '0 2px 6px #000a',
         transform: instance?.tapped ? 'rotate(8deg)' : undefined,
         opacity: instance?.summoningSick && def.type === 'meme' ? 0.6 : 1,
         display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
         fontFamily: 'system-ui',
+        position: 'relative',
+        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
       }}>
-      <div style={{ fontSize: 6, fontWeight: 800, lineHeight: 1.0, overflow: 'hidden' }}>{def.name}</div>
+      <div style={{ fontSize: 8, fontWeight: 800, lineHeight: 1.0, overflow: 'hidden' }}>{def.name}</div>
       {def.power != null && def.toughness != null && (
-        <div style={{ fontSize: 8, fontWeight: 800, alignSelf: 'flex-end' }}>
-          {def.power}/{def.toughness}
+        <div style={{ fontSize: 10, fontWeight: 800, alignSelf: 'flex-end',
+          background: '#000a', padding: '0 4px', borderRadius: 3 }}>
+          {def.power}/{(def.toughness ?? 1) - (instance?.damage ?? 0)}
         </div>
       )}
-      {footer && <div style={{ fontSize: 6, lineHeight: 1.0 }}>{footer}</div>}
+      {footer && <div style={{ fontSize: 7, lineHeight: 1.0 }}>{footer}</div>}
     </div>
     </CardHover>
   );
