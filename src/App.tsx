@@ -47,6 +47,13 @@ const sess = {
   set(k: string, v: any) { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch {} },
   del(k: string) { try { sessionStorage.removeItem(k); } catch {} },
 };
+/** Local (cross-tab, survives tab close) storage — used for identity + active seat
+ *  so a player can rejoin an in-progress match after accidentally closing the tab. */
+const local = {
+  get<T>(k: string, def: T): T { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) as T : def; } catch { return def; } },
+  set(k: string, v: any) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  del(k: string) { try { localStorage.removeItem(k); } catch {} },
+};
 
 type Seat = { matchID: string; playerID: string; credentials: string; playerName: string };
 
@@ -55,7 +62,7 @@ function Login({ onLogin, onFirstTime }: {
   onLogin: (name: string) => void;
   onFirstTime: (wallet: ConnectedWallet) => void;
 }) {
-  const [name, setName] = useState(sess.get<string>('lastName', ''));
+  const [name, setName] = useState(local.get<string>('lastName', '') || sess.get<string>('lastName', ''));
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState<'evm' | 'sol' | null>(null);
 
@@ -963,6 +970,21 @@ function Lobby({
   }
 
   function openJoin(m: any) {
+    // If we already have a saved seat for this match (e.g. tab closed + reopened),
+    // just rejoin directly using the stored credentials — do NOT pick a new open
+    // seat (which would be the wrong one and could clobber another player).
+    const existing = local.get<Seat | null>('seat', null);
+    if (existing && existing.matchID === m.matchID) {
+      onJoined(existing);
+      return;
+    }
+    // If our name is already claimed in this match but we don't have credentials,
+    // that means another tab still has the seat. Refuse rather than trying to
+    // grab the opponent's slot.
+    if ((m.players as Array<{ name?: string }>).some(p => p.name === myName)) {
+      setError('You are already in this match in another tab. Close that tab or use it to play.');
+      return;
+    }
     const openSeat = (m.players as Array<{ id: number; name?: string }>).find(p => !p.name);
     if (!openSeat) { setError('No open seat'); return; }
     // Default the join-color to something different from the creator's color if known.
@@ -1424,10 +1446,35 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
 type View = 'landing' | 'profile' | 'rules' | 'lobby';
 
 export default function App() {
-  const [name, setName] = useState<string>(() => sess.get<string>('myName', ''));
-  const [seat, setSeat] = useState<Seat | null>(() => sess.get<Seat | null>('seat', null));
+  const [name, setName] = useState<string>(() => local.get<string>('myName', ''));
+  const [seat, setSeat] = useState<Seat | null>(() => local.get<Seat | null>('seat', null));
   const [view, setView] = useState<View>(() => sess.get<View>('view', 'landing'));
   const [pendingWallet, setPendingWallet] = useState<ConnectedWallet | null>(null);
+
+  // On boot: if we have a saved seat from a previous tab, verify the match
+  // still exists and our seat is still claimed by us. Otherwise clear it so
+  // we don't try to reconnect to a dead match.
+  useEffect(() => {
+    if (!seat) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const m = await lobby.getMatch(GAME_NAME, seat.matchID);
+        if (cancelled) return;
+        const slot = (m.players as Array<{ id: number; name?: string }>).find(p => String(p.id) === seat.playerID);
+        // If our seat was somehow freed (e.g. server restart) or claimed by someone else
+        // with a different name, drop the stale seat.
+        if (!slot || (slot.name && slot.name !== seat.playerName)) {
+          local.del('seat'); setSeat(null);
+        }
+      } catch {
+        // Match no longer exists.
+        local.del('seat'); setSeat(null);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Deep-link: ?match=ID auto-joins (or shows lobby with prefill).
   useEffect(() => {
@@ -1439,26 +1486,39 @@ export default function App() {
     (async () => {
       try {
         const info = await lobby.getMatch(GAME_NAME, matchID);
-        const open = (info.players as Array<{ id: number; name?: string }>).find(p => !p.name);
+        const players = info.players as Array<{ id: number; name?: string }>;
+        // If we're already seated in this match, reuse the saved seat instead of
+        // grabbing a new (potentially wrong) one.
+        const existingSeat = local.get<Seat | null>('seat', null);
+        if (existingSeat && existingSeat.matchID === matchID) {
+          sess.set('seat', existingSeat); local.set('seat', existingSeat); setSeat(existingSeat);
+          window.history.replaceState(null, '', window.location.pathname);
+          return;
+        }
+        const mineByName = players.find(p => p.name === name);
+        if (mineByName) {
+          throw new Error('You are already in this match in another tab; close it first or use that tab.');
+        }
+        const open = players.find(p => !p.name);
         if (!open) throw new Error('Match full');
         await upsertProfileApi(name);
         const joined = await lobby.joinMatch(GAME_NAME, matchID, { playerID: String(open.id), playerName: name });
         const s: Seat = { matchID, playerID: String(open.id), credentials: joined.playerCredentials, playerName: name };
-        sess.set('seat', s); setSeat(s);
+        sess.set('seat', s); local.set('seat', s); setSeat(s);
         window.history.replaceState(null, '', window.location.pathname);
       } catch (e) { console.warn('auto-join failed', e); }
     })();
   }, [name, seat]);
 
   function login(n: string) {
-    sess.set('myName', n); sess.set('lastName', n); setName(n);
+    sess.set('myName', n); sess.set('lastName', n); local.set('myName', n); local.set('lastName', n); setName(n);
     setPendingWallet(null);
     upsertProfileApi(n).catch(() => {});
     goto('landing');
   }
-  function logout() { sess.del('myName'); sess.del('seat'); sess.del('view'); setName(''); setSeat(null); setPendingWallet(null); setView('landing'); }
-  function joinedSeat(s: Seat) { sess.set('seat', s); setSeat(s); }
-  function leftSeat() { sess.del('seat'); setSeat(null); goto('landing'); }
+  function logout() { sess.del('myName'); sess.del('seat'); sess.del('view'); local.del('myName'); local.del('seat'); setName(''); setSeat(null); setPendingWallet(null); setView('landing'); }
+  function joinedSeat(s: Seat) { sess.set('seat', s); local.set('seat', s); setSeat(s); }
+  function leftSeat() { sess.del('seat'); local.del('seat'); setSeat(null); goto('landing'); }
   function goto(v: View) { sess.set('view', v); setView(v); }
 
   if (!name) {
