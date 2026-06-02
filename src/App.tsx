@@ -1948,9 +1948,10 @@ function RankBadge({ p, size = 'md' }: { p: { visibleRank: PublicRankedProfile['
       boxShadow: `0 0 ${size === 'lg' ? 24 : 12}px ${c.glow}`,
       border: '2px solid rgba(0,0,0,0.4)',
       flex: '0 0 auto',
+      fontFamily: '"Cinzel", "Times New Roman", serif',
     }}>
       <div style={{ fontSize: fs, letterSpacing: 0.5 }}>{p.visibleRank.slice(0, size === 'sm' ? 3 : 99).toUpperCase()}</div>
-      {roman && <div style={{ fontSize: fs - 2, opacity: 0.85 }}>{roman}</div>}
+      {roman && <div style={{ fontSize: fs - 2, opacity: 0.85, marginTop: 1 }}>{roman}</div>}
     </div>
   );
 }
@@ -2078,8 +2079,12 @@ function RankedHub({
             <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
               <RankBadge p={profile} size="lg" />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, color: '#aaa', textTransform: 'uppercase', letterSpacing: 1.2 }}>{myName}</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#fff', marginTop: 4 }}>
+                <div style={{ fontSize: 12, color: '#aaa', textTransform: 'uppercase', letterSpacing: 1.5, fontFamily: 'serif', fontWeight: 700 }}>{myName}</div>
+                <div style={{
+                  fontSize: 22, fontWeight: 800, color: '#fff', marginTop: 4,
+                  fontFamily: '"Cinzel", "Times New Roman", serif',
+                  letterSpacing: 1, textShadow: '0 0 12px rgba(192,132,252,0.4)',
+                }}>
                   {inPlacements ? 'Placement' : rankLabel(profile)}
                 </div>
                 {!inPlacements && profile.visibleRank !== 'Mythic' && (
@@ -2123,18 +2128,23 @@ function RankedHub({
                   }}
                 >🏆  ENTER RANKED QUEUE</button>
                 {!deckOk && (
-                  <div style={{ marginTop: 8, fontSize: 12, color: '#f99' }}>
+                  <div style={{ marginTop: 8, fontSize: 12, color: '#f99', fontStyle: 'italic' }}>
                     You need a valid 60-card deck on your Profile before queueing.
                   </div>
                 )}
               </>
             ) : (
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 14, color: '#aaa', marginBottom: 6 }}>Searching for opponent…</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: '#c084fc', fontVariantNumeric: 'tabular-nums' }}>
+                <div style={{ fontSize: 13, color: '#aaa', marginBottom: 6, fontFamily: 'serif', letterSpacing: 1.5, textTransform: 'uppercase' }}>Searching for opponent…</div>
+                <div style={{
+                  fontSize: 32, fontWeight: 800, color: '#c084fc',
+                  fontVariantNumeric: 'tabular-nums',
+                  fontFamily: '"Cinzel", "Times New Roman", serif',
+                  textShadow: '0 0 16px rgba(192,132,252,0.5)',
+                }}>
                   {Math.floor(waitMs / 60000)}:{String(Math.floor((waitMs / 1000) % 60)).padStart(2, '0')}
                 </div>
-                <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
+                <div style={{ fontSize: 11, color: '#888', marginTop: 4, fontStyle: 'italic' }}>
                   MMR window expands ±50 every 10s
                 </div>
                 <button onClick={leaveQueue} disabled={busy}
@@ -2150,9 +2160,13 @@ function RankedHub({
           background: 'linear-gradient(135deg, #0e1825 0%, #122035 100%)',
           border: '1px solid #2a3a5a',
         }}>
-          <div style={{ fontSize: 12, color: '#7fb', textTransform: 'uppercase', letterSpacing: 1.2 }}>Current Season</div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: '#fff', marginTop: 4 }}>{season?.name ?? '—'}</div>
-          <div style={{ fontSize: 13, color: '#aaa', marginTop: 4 }}>
+          <div style={{ fontSize: 12, color: '#7fb', textTransform: 'uppercase', letterSpacing: 1.5, fontFamily: 'serif', fontWeight: 700 }}>Current Season</div>
+          <div style={{
+            fontSize: 20, fontWeight: 800, color: '#fff', marginTop: 4,
+            fontFamily: '"Cinzel", "Times New Roman", serif',
+            letterSpacing: 1,
+          }}>{season?.name ?? '—'}</div>
+          <div style={{ fontSize: 13, color: '#aaa', marginTop: 4, fontStyle: 'italic' }}>
             {seasonDaysLeft} days remaining
           </div>
           <div style={{ marginTop: 14, fontSize: 12, color: '#bbb', lineHeight: 1.7 }}>
@@ -2167,12 +2181,12 @@ function RankedHub({
       {/* Leaderboard */}
       <Section title="Season Leaderboard" right={<button onClick={refresh} style={ghostBtn}>↻</button>}>
         {leaders.length === 0
-          ? <div style={{ color: '#888', fontSize: 13 }}>No ranked players yet — be the first.</div>
+          ? <div style={{ color: '#888', fontSize: 13, fontStyle: 'italic' }}>No ranked players yet — be the first.</div>
           : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
-                  <tr style={{ color: '#888', textAlign: 'left' }}>
+                  <tr style={{ color: '#888', textAlign: 'left', fontFamily: 'serif', textTransform: 'uppercase', letterSpacing: 1.2, fontSize: 11 }}>
                     <th style={{ padding: '6px 8px', width: 40 }}>#</th>
                     <th style={{ padding: '6px 8px' }}>Player</th>
                     <th style={{ padding: '6px 8px' }}>Rank</th>
@@ -2193,20 +2207,20 @@ function RankedHub({
                             background: isMe ? 'rgba(192,132,252,0.12)' : (l.rank % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent'),
                             borderTop: '1px solid #1a1a1a',
                           }}>
-                        <td style={{ padding: '8px', fontWeight: 700, color: l.rank <= 3 ? '#ffd86a' : '#888' }}>
+                        <td style={{ padding: '8px', fontWeight: 800, color: l.rank <= 3 ? '#ffd86a' : '#888', fontFamily: '"Cinzel", "Times New Roman", serif' }}>
                           {l.rank}
                         </td>
-                        <td style={{ padding: '8px', color: '#fff' }}>
-                          {l.playerId}{isMe && <span style={{ color: '#c084fc', marginLeft: 6 }}>(you)</span>}
+                        <td style={{ padding: '8px', color: '#fff', fontWeight: 600 }}>
+                          {l.playerId}{isMe && <span style={{ color: '#c084fc', marginLeft: 6, fontStyle: 'italic', fontWeight: 400 }}>(you)</span>}
                         </td>
                         <td style={{ padding: '8px' }}>
                           <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
                             <RankBadge p={l} size="sm" />
-                            <span>{rankLabel(l)}</span>
+                            <span style={{ fontFamily: '"Cinzel", "Times New Roman", serif', fontSize: 12, letterSpacing: 0.5 }}>{rankLabel(l)}</span>
                           </span>
                         </td>
-                        <td style={{ padding: '8px', textAlign: 'right', color: '#ccc' }}>{l.wins}/{l.losses}</td>
-                        <td style={{ padding: '8px', textAlign: 'right', color: '#ccc' }}>{lwr}%</td>
+                        <td style={{ padding: '8px', textAlign: 'right', color: '#ccc', fontVariantNumeric: 'tabular-nums' }}>{l.wins}/{l.losses}</td>
+                        <td style={{ padding: '8px', textAlign: 'right', color: '#ccc', fontVariantNumeric: 'tabular-nums' }}>{lwr}%</td>
                       </tr>
                     );
                   })}
