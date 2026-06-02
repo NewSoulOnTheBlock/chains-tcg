@@ -1114,6 +1114,9 @@ function Lobby({
   // Join modal state — second player picks their color when accepting.
   const [joinTarget, setJoinTarget] = useState<{ match: any; seat: string } | null>(null);
   const [joinColor, setJoinColor] = useState<Color>('eth');
+  // Match stakes — 'free' or a SOL wager. Currently UI-only metadata stored in setupData.
+  const [wagerKind, setWagerKind] = useState<'free' | 'sol'>('free');
+  const [wagerAmount, setWagerAmount] = useState<string>('0.1');
 
   // Load this player's saved custom deck on mount (if any).
   useEffect(() => {
@@ -1151,6 +1154,11 @@ function Lobby({
         setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile → Custom Deck.`);
         return;
       }
+      const wager = parseWager(wagerKind, wagerAmount);
+      if (wagerKind === 'sol' && !wager) {
+        setError('Enter a valid SOL wager amount greater than 0.');
+        return;
+      }
       await upsertProfileApi(myName);
       // When using a custom deck, the color slot is null and the deck is passed
       // via setupData.decks; the game derives a theme color from the deck.
@@ -1162,7 +1170,7 @@ function Lobby({
       ) as Array<string[] | null>;
       const created = await lobby.createMatch(GAME_NAME, {
         numPlayers: 2,
-        setupData: { colors, names: ['Player 0', 'Player 1'], decks },
+        setupData: { colors, names: ['Player 0', 'Player 1'], decks, wager },
       });
       const joined = await lobby.joinMatch(GAME_NAME, created.matchID, {
         playerID: seatChoice,
@@ -1269,6 +1277,18 @@ function Lobby({
         <div style={{ fontSize: 11, color: '#a59a78', marginTop: 2 }}>
           {filled}/{players.length} seated
         </div>
+        {(() => {
+          const w = readWager(m.setupData);
+          return (
+            <div style={{
+              fontSize: 10, marginTop: 4, padding: '2px 6px', display: 'inline-block',
+              background: w.kind === 'sol' ? 'rgba(153,69,255,0.18)' : 'rgba(180,150,80,0.18)',
+              color: w.kind === 'sol' ? '#c8a3ff' : '#d9c98e',
+              border: `1px solid ${w.kind === 'sol' ? 'rgba(153,69,255,0.55)' : 'rgba(180,150,80,0.55)'}`,
+              borderRadius: 3, fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase',
+            }}>{wagerLabel(w)}</div>
+          );
+        })()}
         <button
           onClick={() => openJoin(m)}
           disabled={inProgress}
@@ -1350,6 +1370,8 @@ function Lobby({
                 }}>P{s}</button>
               ))}
             </div>
+            <WagerControls kind={wagerKind} amount={wagerAmount}
+              onKind={setWagerKind} onAmount={setWagerAmount} />
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
               <button onClick={createAndJoin} style={{
                 flex: 1, padding: '10px 0',
@@ -1465,6 +1487,8 @@ function Lobby({
               }}>P{s}</button>
             ))}
           </div>
+          <WagerControls compact kind={wagerKind} amount={wagerAmount}
+            onKind={setWagerKind} onAmount={setWagerAmount} />
         </div>
 
         {/* Bottom-left banner — create button */}
@@ -1563,6 +1587,24 @@ function Lobby({
                   Opponent is playing <span style={{ color: COLOR_META[oppCol].hex, fontWeight: 700 }}>{COLOR_META[oppCol].name}</span>.
                 </div>
               ) : null;
+            })()}
+            {(() => {
+              const w = readWager(joinTarget.match.setupData);
+              if (w.kind === 'free') {
+                return <div style={{
+                  fontSize: 12, marginBottom: 12, padding: '6px 10px',
+                  background: 'rgba(180,150,80,0.12)', border: '1px solid rgba(180,150,80,0.45)',
+                  borderRadius: 4, color: '#d9c98e', fontWeight: 700, letterSpacing: 0.5,
+                }}>Stakes: FREE MATCH</div>;
+              }
+              return <div style={{
+                fontSize: 13, marginBottom: 12, padding: '8px 10px',
+                background: 'rgba(153,69,255,0.14)', border: '1px solid rgba(153,69,255,0.55)',
+                borderRadius: 4, color: '#e6d4ff',
+              }}>
+                <div style={{ fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase', fontSize: 11, color: '#c8a3ff' }}>Wagered Match</div>
+                <div style={{ marginTop: 2 }}>Accepting will agree to a <b style={{ color: '#fff' }}>{w.amount} SOL</b> wager — winner takes the pot.</div>
+              </div>;
             })()}
             <ColorChooser label="Your chain" value={joinColor} onChange={(c) => { setJoinUseCustom(false); setJoinColor(c); }} />
             {validateDeck(joinDeck).ok && (
@@ -1804,6 +1846,78 @@ function Banner({ kind, children }: { kind: 'error' | 'info'; children: React.Re
   const bd = kind === 'error' ? '#844' : '#488';
   return <div style={{ padding: 10, background: bg, border: `1px solid ${bd}`, color: '#eee', borderRadius: 4, fontSize: 13, marginTop: 8 }}>{children}</div>;
 }
+// ── Wager helpers ───────────────────────────────────────────────────────────
+type Wager = { kind: 'free' } | { kind: 'sol'; amount: number };
+
+function parseWager(kind: 'free' | 'sol', raw: string): Wager | null {
+  if (kind === 'free') return { kind: 'free' };
+  const n = Number(raw);
+  if (!isFinite(n) || n <= 0) return null;
+  // Round to 6 decimals (1 lamport ≈ 1e-9 SOL; this is a UI metadata for now).
+  return { kind: 'sol', amount: Math.round(n * 1e6) / 1e6 };
+}
+
+function readWager(setupData: any): Wager {
+  const w = setupData?.wager;
+  if (w && (w.kind === 'free' || w.kind === 'sol')) return w as Wager;
+  return { kind: 'free' };
+}
+
+function wagerLabel(w: Wager): string {
+  return w.kind === 'free' ? 'Free Match' : `Wager · ${w.amount} SOL`;
+}
+
+function WagerControls({
+  kind, amount, onKind, onAmount, compact,
+}: {
+  kind: 'free' | 'sol'; amount: string;
+  onKind: (k: 'free' | 'sol') => void; onAmount: (s: string) => void;
+  compact?: boolean;
+}) {
+  const Btn = ({ k, label }: { k: 'free' | 'sol'; label: string }) => {
+    const sel = kind === k;
+    return (
+      <button type="button" onClick={() => onKind(k)} style={{
+        flex: 1, padding: compact ? '4px 6px' : '6px 8px', fontSize: 11, fontWeight: 800,
+        background: sel ? '#f1e3a8' : 'transparent',
+        color: sel ? '#1a1408' : '#e9e4d0',
+        border: '1px solid rgba(180,150,80,0.55)', borderRadius: 3, cursor: 'pointer',
+        letterSpacing: 0.5, textTransform: 'uppercase',
+      }}>{label}</button>
+    );
+  };
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 6, marginTop: compact ? 6 : 10,
+      background: 'rgba(10,12,20,0.7)', padding: '6px 10px',
+      border: '1px solid rgba(180,150,80,0.35)', borderRadius: 4,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 11, color: '#c9b97a', minWidth: 50 }}>STAKES</span>
+        <Btn k="free" label="Free" />
+        <Btn k="sol"  label="Wager · SOL" />
+      </div>
+      {kind === 'sol' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 11, color: '#c9b97a', minWidth: 50 }}>AMOUNT</span>
+          <input
+            type="number" inputMode="decimal" min={0} step={0.01}
+            value={amount}
+            onChange={e => onAmount(e.target.value)}
+            placeholder="0.10"
+            style={{
+              flex: 1, padding: '4px 8px', fontSize: 12, fontWeight: 700,
+              background: '#000', color: '#f1e3a8',
+              border: '1px solid rgba(180,150,80,0.55)', borderRadius: 3,
+            }}
+          />
+          <span style={{ fontSize: 11, color: '#c9b97a', fontWeight: 700 }}>SOL</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ColorChooser({ label, value, onChange }: { label: string; value: Color; onChange: (c: Color) => void }) {
   return (
     <div>
