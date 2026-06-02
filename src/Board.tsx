@@ -1134,6 +1134,127 @@ function RulesPanel({ side }: { side: 'left' | 'right' }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Cascade-stack rendering for Nodes. When a player controls 3+ copies of the
+// same Node def, we collapse them visually into one tile with ghost layers
+// behind it. Clicking the stack taps the next available untapped node.
+// ─────────────────────────────────────────────────────────────────────────────
+function NodeStack({
+  group, onClick,
+}: {
+  group: Instance[];
+  onClick?: (uid: string) => void;
+}) {
+  // Untapped nodes float to the front so the click target is always live.
+  const sorted = [...group].sort((a, b) => Number(a.tapped) - Number(b.tapped));
+  const top = sorted[0];
+  const tappedCount = group.filter(g => g.tapped).length;
+  const allTapped = tappedCount === group.length;
+  const ghostLayers = Math.min(3, group.length - 1);
+  const total = group.length;
+
+  const handleClick = () => {
+    if (allTapped || !onClick) return;
+    const target = sorted.find(g => !g.tapped);
+    if (target) onClick(target.uid);
+  };
+
+  return (
+    <div style={{
+      position: 'relative',
+      width: 68, height: 96,
+      // Reserve room for the offset ghost layers so adjacent zones don't overlap us.
+      marginRight: 4 * ghostLayers,
+      marginBottom: 4 * ghostLayers,
+    }}
+    title={allTapped
+      ? `All ${total} tapped — wait for next turn.`
+      : `×${total} stacked (${tappedCount} tapped). Click to tap the next available.`}
+    >
+      {/* Ghost copies of the stack — purely cosmetic, slight rotation + offset. */}
+      {Array.from({ length: ghostLayers }).map((_, i) => {
+        const depth = ghostLayers - i;       // 1..ghostLayers, deepest first
+        const def = CARDS[top.defId];
+        if (!def) return null;
+        const meta = COLOR_META[def.color];
+        const rot  = (i % 2 === 0 ? 1 : -1) * 1.5 * (depth);
+        return (
+          <div key={i} aria-hidden style={{
+            position: 'absolute',
+            left: 4 * depth, top: 4 * depth,
+            width: 68, height: 96, borderRadius: 6,
+            background: meta.hex, opacity: 0.55,
+            border: '1px solid #000',
+            boxShadow: '0 2px 6px #000a',
+            transform: `rotate(${rot}deg)`,
+            pointerEvents: 'none',
+            zIndex: 0,
+          }} />
+        );
+      })}
+      {/* Top live card */}
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        <MiniCard
+          defId={top.defId}
+          instance={top}
+          faceUp
+          onClick={onClick && !allTapped ? handleClick : undefined}
+        />
+      </div>
+      {/* Count badge */}
+      <div style={{
+        position: 'absolute',
+        right: -6, top: -6,
+        background: allTapped ? '#7a3030' : '#1e7a3a',
+        color: '#fff',
+        border: '1px solid #000',
+        borderRadius: 10,
+        padding: '1px 6px',
+        fontSize: 10, fontWeight: 800,
+        letterSpacing: 0.5,
+        boxShadow: '0 1px 4px #000a',
+        zIndex: 2,
+        pointerEvents: 'none',
+        whiteSpace: 'nowrap',
+      }}>
+        ×{total}{tappedCount > 0 && <span style={{ opacity: 0.85, marginLeft: 3 }}>({tappedCount}⤓)</span>}
+      </div>
+    </div>
+  );
+}
+
+/** Group nodes by defId; collapse same-def groups of 3+ into a NodeStack tile. */
+function renderNodes(
+  nodes: Instance[],
+  onNodeClick?: (uid: string) => void,
+): React.ReactNode {
+  const groups = new Map<string, Instance[]>();
+  // Preserve original visual order: each defId's first appearance fixes its slot.
+  for (const inst of nodes) {
+    if (!groups.has(inst.defId)) groups.set(inst.defId, []);
+    groups.get(inst.defId)!.push(inst);
+  }
+  const out: React.ReactNode[] = [];
+  for (const [defId, group] of groups) {
+    if (group.length >= 3) {
+      out.push(<NodeStack key={`stack-${defId}`} group={group} onClick={onNodeClick} />);
+    } else {
+      for (const inst of group) {
+        out.push(
+          <MiniCard
+            key={inst.uid}
+            defId={inst.defId}
+            instance={inst}
+            faceUp
+            onClick={onNodeClick ? () => onNodeClick(inst.uid) : undefined}
+          />
+        );
+      }
+    }
+  }
+  return out;
+}
+
 function Playmat(props: {
   me: GState['players'][string];
   opp: GState['players'][string];
@@ -1208,9 +1329,7 @@ function Playmat(props: {
         {opp.graveyard.slice(-1).map((id, i) => <MiniCard key={i} defId={id} faceUp />)}
       </ZoneSlot>
       <ZoneSlot rect={Z.oppNodes} icon="🌐" label={`Opp Nodes (${opp.nodes.length})`} compactLabel={`🌐 Nodes · ${opp.nodes.length}`} rotated>
-        {opp.nodes.map(inst => (
-          <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp />
-        ))}
+        {renderNodes(opp.nodes)}
       </ZoneSlot>
       <ZoneSlot rect={Z.oppDeck} icon="📚" label={`Deck (${oppDeckCount})`} compactLabel={`📚 ${oppDeckCount}`} rotated>
         {oppDeckCount > 0 && <MiniCard faceDown />}
@@ -1289,10 +1408,7 @@ function Playmat(props: {
         {myDeckCount > 0 && <MiniCard faceDown />}
       </ZoneSlot>
       <ZoneSlot rect={Z.myNodes} icon="🌐" label={`Your Nodes (${me.nodes.length}) — click to tap`} compactLabel={`🌐 Nodes · ${me.nodes.length}`}>
-        {me.nodes.map(inst => (
-          <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp
-            onClick={() => onNodeClick(inst.uid)} />
-        ))}
+        {renderNodes(me.nodes, onNodeClick)}
       </ZoneSlot>
       <ZoneSlot rect={Z.myGrave} icon="☠️" label={`Graveyard (${me.graveyard.length})`} compactLabel={`☠️ ${me.graveyard.length}`}>
         {me.graveyard.slice(-1).map((id, i) => <MiniCard key={i} defId={id} faceUp />)}
