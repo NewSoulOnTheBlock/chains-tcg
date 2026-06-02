@@ -312,6 +312,20 @@ export function ChainsBoard(props: Props) {
     }
   }, [ctx.activePlayers, ctx.turn, ctx.gameover, myTurn, oppId, pickPhase, selectedHand, targetMode, me, moves]);
 
+  // Auto-skip block phase: if I'm the defender in the blockers stage and I have
+  // no untapped memes available to block, confirm-blocks immediately.
+  const autoSkippedBlockTurnRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (pickPhase || ctx.gameover) return;
+    if (ctx.activePlayers?.[myId] !== 'blockers') return;
+    if (autoSkippedBlockTurnRef.current === ctx.turn) return;
+    const hasBlocker = me.memes.some(m => !m.tapped);
+    if (hasBlocker) return;
+    autoSkippedBlockTurnRef.current = ctx.turn;
+    const t = window.setTimeout(() => moves.confirmBlocks(), 500);
+    return () => window.clearTimeout(t);
+  }, [ctx.activePlayers, ctx.turn, ctx.gameover, myId, pickPhase, me, moves]);
+
   function tryPlay(idx: number) {
     const defId = me.hand[idx];
     const def = CARDS[defId];
