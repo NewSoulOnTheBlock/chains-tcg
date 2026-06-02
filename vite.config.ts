@@ -13,6 +13,14 @@ export default defineConfig({
       protocolImports: true,
     }),
   ],
+  optimizeDeps: {
+    exclude: ['bufferutil', 'utf-8-validate'],
+  },
+  build: {
+    rollupOptions: {
+      external: ['bufferutil', 'utf-8-validate'],
+    },
+  },
   server: {
     port: 5173,
     proxy: {
