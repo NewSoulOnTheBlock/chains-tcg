@@ -59,7 +59,7 @@ export async function updateProfileApi(
 
 export async function recordResultApi(
   matchID: string,
-  result: { winner: string | null; loser: string | null; draw: boolean },
+  result: { winner: string | null; loser: string | null; draw: boolean } & Record<string, any>,
 ): Promise<'recorded' | 'duplicate'> {
   const { status } = await http<{ status: 'recorded' | 'duplicate' }>(
     '/api/result',

@@ -55,6 +55,8 @@ export interface GState {
   log: string[];
   /** Optional match stakes carried over from setupData so the Board can render a payout prompt. */
   wager?: { kind: 'free' | 'sol'; amount?: number };
+  /** Ranked-mode metadata. When present, the board should report results to /api/ranked. */
+  ranked?: { seasonId: string; startedAt: number };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -527,7 +529,7 @@ export const ChainsTCG: Game<GState> = {
   minPlayers: 2,
   maxPlayers: 2,
 
-  setup: ({ ctx, random }, setupData?: { colors?: Array<Color | null | undefined>; names?: [string, string]; decks?: Array<string[] | null | undefined>; wager?: { kind: 'free' | 'sol'; amount?: number } }) => {
+  setup: ({ ctx, random }, setupData?: { colors?: Array<Color | null | undefined>; names?: [string, string]; decks?: Array<string[] | null | undefined>; wager?: { kind: 'free' | 'sol'; amount?: number }; ranked?: boolean; seasonId?: string; mode?: string }) => {
     const colors = setupData?.colors ?? DEFAULT_MATCHUP;
     const names = setupData?.names ?? ['Player 0', 'Player 1'];
     const decksIn = setupData?.decks ?? [];
@@ -579,6 +581,9 @@ export const ChainsTCG: Game<GState> = {
       log: ['Game start.'],
       wager: setupData?.wager && (setupData.wager.kind === 'sol' || setupData.wager.kind === 'free')
         ? { kind: setupData.wager.kind, amount: setupData.wager.amount }
+        : undefined,
+      ranked: (setupData?.ranked || setupData?.mode === 'ranked') && setupData?.seasonId
+        ? { seasonId: String(setupData.seasonId), startedAt: Date.now() }
         : undefined,
     };
   },

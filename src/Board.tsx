@@ -386,11 +386,23 @@ export function ChainsBoard(props: Props) {
     const winnerId = ctx.gameover.winner as string | undefined;
     const winnerName = winnerId === myId ? myName : winnerId === oppId ? oppName : null;
     const loserName  = winnerName ? (winnerName === myName ? oppName : myName) : null;
+    const rankedMeta = G.ranked
+      ? {
+          ranked: true,
+          seasonId: G.ranked.seasonId,
+          // Seat 0 / 1 mapping: keep stable as p0/p1 for the rating service.
+          player0: myId === '0' ? myName : oppName,
+          player1: myId === '0' ? oppName : myName,
+          startedAt: G.ranked.startedAt,
+          replaySeed: matchID,
+        }
+      : {};
     recordResultApi(matchID, {
       winner: draw ? null : winnerName,
       loser:  draw ? null : loserName,
       draw,
-    }).then(() => refreshProfiles()).catch(e => console.warn('record result failed', e));
+      ...rankedMeta,
+    } as any).then(() => refreshProfiles()).catch(e => console.warn('record result failed', e));
   }, [ctx.gameover, matchID, myId, oppId, myName, oppName, refreshProfiles]);
 
   // ── Render ────────────────────────────────────────────────────────────────

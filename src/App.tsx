@@ -14,6 +14,7 @@ import {
 } from './profiles';
 import { connectEvm, connectSolana, shortAddr, type ConnectedWallet } from './wallet';
 import { CardHover } from './CardPreview';
+import { RankedAPI, tierColors, rankLabel, type PublicRankedProfile, type LeaderboardEntry } from './ranked-client';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 // Server base: in dev Vite proxies /games (lobby) and /socket.io to :8000.
@@ -439,8 +440,8 @@ function Table({ rows }: { rows: [string, string][] }) {
 
 // ── Landing screen (post-login hub) ─────────────────────────────────────────
 function Landing({
-  myName, onPlay, onProfile, onRules, onLogout,
-}: { myName: string; onPlay: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
+  myName, onPlay, onRanked, onProfile, onRules, onLogout,
+}: { myName: string; onPlay: () => void; onRanked: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
   const mobile = useIsMobile();
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#000', color: '#fff', fontFamily: 'system-ui' }}>
@@ -479,6 +480,7 @@ function Landing({
         maxWidth: mobile ? 360 : undefined,
       }}>
         <MenuBtn primary onClick={onPlay}>▶  PLAY</MenuBtn>
+        <MenuBtn ranked onClick={onRanked}>🏆  RANKED</MenuBtn>
         <MenuBtn onClick={onProfile}>👤  PROFILE</MenuBtn>
         <MenuBtn onClick={onRules}>📖  RULES</MenuBtn>
         <MenuBtn onClick={() => window.open('https://x.com/MemeticMasters', '_blank', 'noopener')}>📰  NEWS</MenuBtn>
@@ -487,15 +489,21 @@ function Landing({
   );
 }
 
-function MenuBtn({ children, onClick, primary }: { children: React.ReactNode; onClick: () => void; primary?: boolean }) {
+function MenuBtn({ children, onClick, primary, ranked }: { children: React.ReactNode; onClick: () => void; primary?: boolean; ranked?: boolean }) {
+  const bg = ranked
+    ? 'linear-gradient(90deg, #7b2cbf, #c084fc)'
+    : primary ? 'linear-gradient(90deg, #ff7e1a, #ffb347)' : 'rgba(20,20,20,0.75)';
+  const shadow = ranked
+    ? '0 6px 24px rgba(192,132,252,0.5)'
+    : primary ? '0 6px 24px rgba(255,126,26,0.45)' : '0 4px 16px rgba(0,0,0,0.6)';
   return (
     <button
       onClick={onClick}
       style={{
         padding: '14px 22px',
-        background: primary ? 'linear-gradient(90deg, #ff7e1a, #ffb347)' : 'rgba(20,20,20,0.75)',
+        background: bg,
         color: '#fff',
-        border: primary ? 'none' : '1px solid rgba(255,255,255,0.25)',
+        border: (primary || ranked) ? 'none' : '1px solid rgba(255,255,255,0.25)',
         borderRadius: 6,
         fontWeight: 800,
         fontSize: 16,
@@ -503,7 +511,7 @@ function MenuBtn({ children, onClick, primary }: { children: React.ReactNode; on
         cursor: 'pointer',
         textAlign: 'left',
         backdropFilter: 'blur(6px)',
-        boxShadow: primary ? '0 6px 24px rgba(255,126,26,0.45)' : '0 4px 16px rgba(0,0,0,0.6)',
+        boxShadow: shadow,
         transition: 'transform 0.08s ease',
       }}
       onMouseDown={e => (e.currentTarget.style.transform = 'translateY(1px)')}
@@ -1765,7 +1773,7 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
 }
 
 // ── Root ────────────────────────────────────────────────────────────────────
-type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile';
+type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile' | 'ranked';
 
 export default function App() {
   const [name, setName] = useState<string>(() => local.get<string>('myName', ''));
@@ -1858,7 +1866,7 @@ export default function App() {
 
   // Landing + Profile share the same audio element so music keeps playing
   // (and the user's mute state is preserved) when switching between them.
-  const showMusic = view === 'landing' || view === 'profile' || view === 'rules' || view === 'lobby';
+  const showMusic = view === 'landing' || view === 'profile' || view === 'rules' || view === 'lobby' || view === 'ranked';
   return (
     <>
       {showMusic && <MenuMusic />}
@@ -1868,15 +1876,302 @@ export default function App() {
           ? <RulesPage onBack={() => goto('landing')} />
           : view === 'view-profile' && viewedProfile
             ? <PublicProfile name={viewedProfile} onBack={() => goto('lobby')} />
-            : view === 'lobby'
-              ? <Lobby
-                  myName={name}
-                  onJoined={joinedSeat}
-                  onBack={() => goto('landing')}
-                  onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
-                />
-              : <Landing myName={name} onPlay={() => goto('lobby')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
+            : view === 'ranked'
+              ? <RankedHub myName={name} onBack={() => goto('landing')} onJoined={joinedSeat} onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }} />
+              : view === 'lobby'
+                ? <Lobby
+                    myName={name}
+                    onJoined={joinedSeat}
+                    onBack={() => goto('landing')}
+                    onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
+                  />
+                : <Landing myName={name} onPlay={() => goto('lobby')} onRanked={() => goto('ranked')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
     </>
+  );
+}
+
+// ── Ranked Hub ─────────────────────────────────────────────────────────────
+function RankBadge({ p, size = 'md' }: { p: { visibleRank: PublicRankedProfile['visibleRank']; division: PublicRankedProfile['division'] }; size?: 'sm'|'md'|'lg' }) {
+  const c = tierColors(p.visibleRank);
+  const dim = size === 'lg' ? 80 : size === 'sm' ? 32 : 50;
+  const fs  = size === 'lg' ? 16 : size === 'sm' ? 9 : 12;
+  const roman = p.visibleRank === 'Mythic' ? '' : (['', 'I','II','III','IV'][p.division as number]);
+  return (
+    <div style={{
+      width: dim, height: dim, borderRadius: '50%',
+      background: c.bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      color: c.fg, fontWeight: 900, lineHeight: 1,
+      boxShadow: `0 0 ${size === 'lg' ? 24 : 12}px ${c.glow}`,
+      border: '2px solid rgba(0,0,0,0.4)',
+      flex: '0 0 auto',
+    }}>
+      <div style={{ fontSize: fs, letterSpacing: 0.5 }}>{p.visibleRank.slice(0, size === 'sm' ? 3 : 99).toUpperCase()}</div>
+      {roman && <div style={{ fontSize: fs - 2, opacity: 0.85 }}>{roman}</div>}
+    </div>
+  );
+}
+
+function RankedHub({
+  myName, onBack, onJoined, onViewProfile,
+}: { myName: string; onBack: () => void; onJoined: (s: Seat) => void; onViewProfile: (n: string) => void }) {
+  const mobile = useIsMobile();
+  const [profile, setProfile] = useState<PublicRankedProfile | null>(null);
+  const [season, setSeason] = useState<{ id: string; name: string; startedAt: number; endsAt: number } | null>(null);
+  const [leaders, setLeaders] = useState<LeaderboardEntry[]>([]);
+  const [region, setRegion] = useState<string>(() => {
+    try { return localStorage.getItem('rankedRegion') || 'global'; } catch { return 'global'; }
+  });
+  const [queued, setQueued] = useState<{ queuedAt: number } | null>(null);
+  const [waitMs, setWaitMs] = useState(0);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [deckOk, setDeckOk] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [p, s, lb] = await Promise.all([
+        RankedAPI.profile(myName),
+        RankedAPI.season(),
+        RankedAPI.leaderboard(50),
+      ]);
+      setProfile(p);
+      setSeason({ id: s.id, name: s.name, startedAt: s.startedAt, endsAt: s.endsAt });
+      setLeaders(lb);
+    } catch (e: any) { setError(String(e?.message ?? e)); }
+  }, [myName]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  // Validate deck up front so we don't let a player queue with an invalid one.
+  useEffect(() => {
+    (async () => {
+      try {
+        const d = await getDeckApi(myName);
+        setDeckOk(validateDeck(d).ok);
+      } catch { setDeckOk(false); }
+    })();
+  }, [myName]);
+
+  // Queue status poll — every 2s while in queue.
+  useEffect(() => {
+    if (!queued) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const s = await RankedAPI.queueStatus(myName);
+        if (cancelled) return;
+        setWaitMs(Date.now() - (s.queuedAt ?? Date.now()));
+        if (s.match) {
+          // Match found — auto-join the boardgame.io match.
+          try {
+            const joined = await lobby.joinMatch(GAME_NAME, s.match.matchId, {
+              playerID: s.match.seat, playerName: myName,
+            });
+            setQueued(null);
+            onJoined({
+              matchID: s.match.matchId,
+              playerID: s.match.seat,
+              credentials: joined.playerCredentials,
+              playerName: myName,
+            });
+          } catch (e: any) {
+            setError(`Match join failed: ${e?.message ?? e}`);
+            setQueued(null);
+          }
+        } else if (!s.queued) {
+          setQueued(null);
+        }
+      } catch (e: any) {
+        if (!cancelled) setError(String(e?.message ?? e));
+      }
+    };
+    const id = setInterval(tick, 2000);
+    void tick();
+    return () => { cancelled = true; clearInterval(id); };
+  }, [queued, myName, onJoined]);
+
+  async function joinQueue() {
+    if (!deckOk) { setError('Save a valid 60-card deck on your profile before queueing.'); return; }
+    setBusy(true); setError('');
+    try {
+      const r = await RankedAPI.queueJoin(myName, region);
+      if (!('ok' in r) || !r.ok) {
+        setError((r as any).error || 'queue failed');
+      } else {
+        setQueued({ queuedAt: r.queuedAt ?? Date.now() });
+        try { localStorage.setItem('rankedRegion', region); } catch {}
+      }
+    } catch (e: any) { setError(String(e?.message ?? e)); }
+    finally { setBusy(false); }
+  }
+  async function leaveQueue() {
+    setBusy(true);
+    try { await RankedAPI.queueLeave(myName); } catch {}
+    setQueued(null); setBusy(false);
+  }
+
+  const placementRemaining = profile?.placementMatchesRemaining ?? 10;
+  const inPlacements = placementRemaining > 0;
+  const totalGames = (profile?.wins ?? 0) + (profile?.losses ?? 0);
+  const wr = totalGames > 0 ? Math.round(((profile?.wins ?? 0) / totalGames) * 100) : 0;
+  const seasonDaysLeft = season ? Math.max(0, Math.ceil((season.endsAt - Date.now()) / 86400000)) : 0;
+
+  return (
+    <Screen
+      title="Ranked Ladder"
+      right={<button onClick={onBack} style={ghostBtn}>← Back</button>}
+    >
+      {error && <Banner kind="error">{error}</Banner>}
+
+      <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : '1fr 1fr', gap: 14, marginTop: 14 }}>
+        {/* Profile card */}
+        <div style={{
+          padding: 18, borderRadius: 10,
+          background: 'linear-gradient(135deg, #161025 0%, #1a1238 100%)',
+          border: '1px solid rgba(192,132,252,0.35)',
+        }}>
+          {profile ? (
+            <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+              <RankBadge p={profile} size="lg" />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: '#aaa', textTransform: 'uppercase', letterSpacing: 1.2 }}>{myName}</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: '#fff', marginTop: 4 }}>
+                  {inPlacements ? 'Placement' : rankLabel(profile)}
+                </div>
+                {!inPlacements && profile.visibleRank !== 'Mythic' && (
+                  <div style={{ marginTop: 8, height: 8, background: '#222', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${profile.rankedPoints}%`, height: '100%',
+                      background: tierColors(profile.visibleRank).bg,
+                    }} />
+                  </div>
+                )}
+                <div style={{ marginTop: 8, fontSize: 13, color: '#ccc' }}>
+                  {inPlacements
+                    ? <span>Placement matches remaining: <b style={{ color: '#ffb347' }}>{placementRemaining}</b></span>
+                    : <span>{profile.wins}W / {profile.losses}L · {wr}% WR</span>}
+                </div>
+              </div>
+            </div>
+          ) : <div style={{ color: '#888' }}>Loading profile…</div>}
+
+          {/* Queue panel */}
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #2a2240' }}>
+            {!queued ? (
+              <>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+                  <label style={{ fontSize: 12, color: '#aaa' }}>Region:</label>
+                  <select value={region} onChange={e => setRegion(e.target.value)} style={{ padding: '6px 10px', background: '#1a1a1a', color: '#eee', border: '1px solid #444', borderRadius: 4, fontSize: 13 }}>
+                    <option value="global">Global</option>
+                    <option value="na">North America</option>
+                    <option value="eu">Europe</option>
+                    <option value="ap">Asia Pacific</option>
+                  </select>
+                </div>
+                <button
+                  onClick={joinQueue}
+                  disabled={busy || !deckOk}
+                  style={{
+                    ...primaryBtn(!!deckOk && !busy),
+                    width: '100%', padding: '12px 18px', fontSize: 16,
+                    background: deckOk ? 'linear-gradient(90deg, #7b2cbf, #c084fc)' : '#444',
+                    cursor: deckOk ? 'pointer' : 'not-allowed',
+                  }}
+                >🏆  ENTER RANKED QUEUE</button>
+                {!deckOk && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: '#f99' }}>
+                    You need a valid 60-card deck on your Profile before queueing.
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 14, color: '#aaa', marginBottom: 6 }}>Searching for opponent…</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: '#c084fc', fontVariantNumeric: 'tabular-nums' }}>
+                  {Math.floor(waitMs / 60000)}:{String(Math.floor((waitMs / 1000) % 60)).padStart(2, '0')}
+                </div>
+                <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
+                  MMR window expands ±50 every 10s
+                </div>
+                <button onClick={leaveQueue} disabled={busy}
+                  style={{ ...ghostBtn, marginTop: 12, padding: '8px 16px' }}>Leave Queue</button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Season + info */}
+        <div style={{
+          padding: 18, borderRadius: 10,
+          background: 'linear-gradient(135deg, #0e1825 0%, #122035 100%)',
+          border: '1px solid #2a3a5a',
+        }}>
+          <div style={{ fontSize: 12, color: '#7fb', textTransform: 'uppercase', letterSpacing: 1.2 }}>Current Season</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#fff', marginTop: 4 }}>{season?.name ?? '—'}</div>
+          <div style={{ fontSize: 13, color: '#aaa', marginTop: 4 }}>
+            {seasonDaysLeft} days remaining
+          </div>
+          <div style={{ marginTop: 14, fontSize: 12, color: '#bbb', lineHeight: 1.7 }}>
+            <div><b style={{ color: '#fff' }}>Hidden MMR:</b> The matchmaker uses a hidden Glicko-2 rating you never see.</div>
+            <div style={{ marginTop: 4 }}><b style={{ color: '#fff' }}>Placements:</b> 10 games to lock in your starting rank.</div>
+            <div style={{ marginTop: 4 }}><b style={{ color: '#fff' }}>Soft Reset:</b> Each season your MMR collapses halfway toward 1500.</div>
+            <div style={{ marginTop: 4 }}><b style={{ color: '#fff' }}>Rewards:</b> Cosmetics only — no gameplay advantages.</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Leaderboard */}
+      <Section title="Season Leaderboard" right={<button onClick={refresh} style={ghostBtn}>↻</button>}>
+        {leaders.length === 0
+          ? <div style={{ color: '#888', fontSize: 13 }}>No ranked players yet — be the first.</div>
+          : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ color: '#888', textAlign: 'left' }}>
+                    <th style={{ padding: '6px 8px', width: 40 }}>#</th>
+                    <th style={{ padding: '6px 8px' }}>Player</th>
+                    <th style={{ padding: '6px 8px' }}>Rank</th>
+                    <th style={{ padding: '6px 8px', textAlign: 'right' }}>W/L</th>
+                    <th style={{ padding: '6px 8px', textAlign: 'right' }}>WR</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leaders.map(l => {
+                    const games = l.wins + l.losses;
+                    const lwr = games > 0 ? Math.round((l.wins / games) * 100) : 0;
+                    const isMe = l.playerId === myName;
+                    return (
+                      <tr key={l.playerId}
+                          onClick={() => onViewProfile(l.playerId)}
+                          style={{
+                            cursor: 'pointer',
+                            background: isMe ? 'rgba(192,132,252,0.12)' : (l.rank % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent'),
+                            borderTop: '1px solid #1a1a1a',
+                          }}>
+                        <td style={{ padding: '8px', fontWeight: 700, color: l.rank <= 3 ? '#ffd86a' : '#888' }}>
+                          {l.rank}
+                        </td>
+                        <td style={{ padding: '8px', color: '#fff' }}>
+                          {l.playerId}{isMe && <span style={{ color: '#c084fc', marginLeft: 6 }}>(you)</span>}
+                        </td>
+                        <td style={{ padding: '8px' }}>
+                          <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                            <RankBadge p={l} size="sm" />
+                            <span>{rankLabel(l)}</span>
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px', textAlign: 'right', color: '#ccc' }}>{l.wins}/{l.losses}</td>
+                        <td style={{ padding: '8px', textAlign: 'right', color: '#ccc' }}>{lwr}%</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+      </Section>
+    </Screen>
   );
 }
 
