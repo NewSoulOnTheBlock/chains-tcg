@@ -441,6 +441,12 @@ export function ChainsBoard(props: Props) {
         myProfile={myProfile} oppProfile={oppProfile}
       />
 
+      <WinnerShareModal
+        gameover={ctx.gameover}
+        myId={myId}
+        myName={myName}
+      />
+
       {/* Combat zone display */}
       <CombatStrip G={G} ctx={ctx} myId={myId} />
 
@@ -752,6 +758,100 @@ function WagerPayoutModal({
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
           <button onClick={() => setDismissed(true)} style={{
             padding: '8px 16px', fontWeight: 800, fontSize: 13, letterSpacing: 1, textTransform: 'uppercase',
+            background: 'linear-gradient(180deg, #f0b32a, #a8740f)', color: '#1a1408',
+            border: '1px solid #6a5520', borderRadius: 4, cursor: 'pointer',
+            fontFamily: '"Cinzel", "Times New Roman", serif',
+          }}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: string; myName: string }) {
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => { setDismissed(false); }, [gameover?.winner, gameover?.draw]);
+  if (!gameover || gameover.draw) return null;
+  if (gameover.winner !== myId) return null;
+  if (dismissed) return null;
+
+  const siteUrl = (typeof window !== 'undefined' ? window.location.origin : 'https://memetic-masters.onrender.com');
+  const imgUrl = `${siteUrl}/share-win.jpg`;
+  const tweetText = `I just won in Memetic Masters TCG! ⚔️\n\nPlay the 5-chain meme card game at ${siteUrl}`;
+  const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
+
+  async function downloadImage() {
+    try {
+      const r = await fetch('/share-win.jpg');
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'memetic-masters-win.jpg';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      window.open('/share-win.jpg', '_blank');
+    }
+  }
+
+  return (
+    <div onClick={() => setDismissed(true)} style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 199,
+      fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif',
+      padding: 12,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: 'linear-gradient(180deg, #1a1240 0%, #0a0a1e 100%)',
+        border: '2px solid #4c1d95', borderRadius: 10,
+        padding: 20, width: 'min(560px, calc(100vw - 24px))',
+        maxHeight: 'calc(100vh - 24px)', overflowY: 'auto',
+        boxShadow: '0 0 40px rgba(139,92,246,0.45)',
+        color: '#ece1c7',
+      }}>
+        <div style={{
+          fontFamily: '"Cinzel", "Times New Roman", serif',
+          fontSize: 22, fontWeight: 800, letterSpacing: 2,
+          color: '#f0b32a', textTransform: 'uppercase',
+          textShadow: '0 0 14px rgba(240,179,42,0.45)',
+          textAlign: 'center', marginBottom: 4,
+        }}>Victory, {myName}</div>
+        <div style={{
+          textAlign: 'center', color: '#b896ff',
+          fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 14,
+        }}>Share your win</div>
+
+        <img src={imgUrl} alt="I just won in Memetic Masters"
+          style={{
+            display: 'block', width: '100%', height: 'auto',
+            borderRadius: 6, border: '1px solid rgba(240,179,42,0.4)',
+            marginBottom: 12,
+          }}
+        />
+
+        <div style={{
+          fontSize: 13, color: '#cdbf99', lineHeight: 1.45,
+          padding: '0 4px 12px', textAlign: 'center',
+        }}>
+          Click <b style={{ color: '#ffd66e' }}>Share on X</b> to open a pre-filled post,
+          then attach the downloaded image.
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <a href={intentUrl} target="_blank" rel="noopener noreferrer" style={{
+            padding: '10px 18px', fontWeight: 800, fontSize: 13, letterSpacing: 1, textTransform: 'uppercase',
+            background: '#000', color: '#fff', border: '1px solid #ffd66e', borderRadius: 4,
+            textDecoration: 'none', cursor: 'pointer',
+            fontFamily: '"Cinzel", "Times New Roman", serif',
+          }}>Share on X</a>
+          <button onClick={downloadImage} style={{
+            padding: '10px 18px', fontWeight: 800, fontSize: 13, letterSpacing: 1, textTransform: 'uppercase',
+            background: 'linear-gradient(180deg, #4c1d95, #2a0f5a)', color: '#ece1c7',
+            border: '1px solid #6b2fc9', borderRadius: 4, cursor: 'pointer',
+            fontFamily: '"Cinzel", "Times New Roman", serif',
+          }}>Download Image</button>
+          <button onClick={() => setDismissed(true)} style={{
+            padding: '10px 18px', fontWeight: 800, fontSize: 13, letterSpacing: 1, textTransform: 'uppercase',
             background: 'linear-gradient(180deg, #f0b32a, #a8740f)', color: '#1a1408',
             border: '1px solid #6a5520', borderRadius: 4, cursor: 'pointer',
             fontFamily: '"Cinzel", "Times New Roman", serif',
