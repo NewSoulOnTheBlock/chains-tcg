@@ -1,7 +1,7 @@
 // src/App.tsx
 // Online lobby + multiplayer client for Chains TCG.
 // Flow: Login -> Lobby (create/join match) -> Waiting room -> Game.
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Client } from 'boardgame.io/react';
 import { SocketIO } from 'boardgame.io/multiplayer';
 import { LobbyClient } from 'boardgame.io/client';
@@ -268,173 +268,759 @@ function BgMusic({ src, storageKey }: { src: string; storageKey: string }) {
 function MenuMusic()   { return <BgMusic src="/menu-music.mp3"   storageKey="musicMuted" />; }
 function BattleMusic() { return <BgMusic src="/battle-music.mp3" storageKey="battleMuted" />; }
 
-// ── Rules page ─────────────────────────────────────────────────────────────
+// ── Rules page (Interactive Rulebook) ──────────────────────────────────────
+const RULES_TOKENS = {
+  bg: '#050514',
+  panel: 'rgba(20,20,40,0.85)',
+  panelHi: 'rgba(28,22,58,0.92)',
+  border: 'rgba(212,175,55,0.32)',
+  borderSoft: 'rgba(255,255,255,0.08)',
+  gold: '#D4AF37',
+  goldGlow: 'rgba(212,175,55,0.55)',
+  purple: '#8A2BE2',
+  purpleSoft: 'rgba(138,43,226,0.55)',
+  blue: '#4A90E2',
+  red: '#D94B4B',
+  green: '#4ad58e',
+  text: '#ece1c7',
+  mute: '#9e9382',
+};
+const RULES_FONT = "'Inter', 'Geist', 'Satoshi', system-ui, -apple-system, sans-serif";
+const RULES_HEAD = '"Cinzel", "Times New Roman", serif';
+
+type RulesSectionId = 'goal' | 'setup' | 'cards' | 'gas' | 'turn' | 'advanced' | 'example' | 'cheatsheet';
+
+const RULES_NAV: { id: RulesSectionId; label: string; icon: string }[] = [
+  { id: 'goal',       label: 'Goal',           icon: '🏆' },
+  { id: 'setup',      label: 'Setup',          icon: '⚔️' },
+  { id: 'cards',      label: 'Card Types',     icon: '🃏' },
+  { id: 'gas',        label: 'Gas System',     icon: '⛽' },
+  { id: 'turn',       label: 'Turn Order',     icon: '🔄' },
+  { id: 'advanced',   label: 'Advanced',       icon: '📖' },
+  { id: 'example',    label: 'Example Turn',   icon: '🎮' },
+  { id: 'cheatsheet', label: 'UI Cheat-sheet', icon: '⌨️' },
+];
+
+const RULES_SEARCH_INDEX: { id: RulesSectionId; text: string }[] = [
+  { id: 'goal',       text: 'goal life 20 reduce opponent zero win last player standing' },
+  { id: 'setup',      text: 'setup chain bnb solana hyperliquid ethereum xrp 60 card deck draw 7 hand 20 life mulligan first player no draw' },
+  { id: 'cards',      text: 'card types node meme machine move land creature artifact enchantment spell instant power toughness permanent one-shot' },
+  { id: 'gas',        text: 'gas mana cost tap node color pool drain end of turn empty mixed' },
+  { id: 'turn',       text: 'turn phase untap draw main combat attack block damage end discard summoning sick haste' },
+  { id: 'advanced',   text: 'advanced summoning sickness haste blockers simultaneous damage graveyard discard max hand 7 discard down' },
+  { id: 'example',    text: 'example turn 1 play purple node tap gain gas cast pepe warrior end' },
+  { id: 'cheatsheet', text: 'ui click node tap card hand play meme attack blocker end turn button' },
+];
+
 function RulesPage({ onBack }: { onBack: () => void }) {
+  const [openSection, setOpenSection] = useState<RulesSectionId>('goal');
+  const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const sectionRefs = useRef<Record<RulesSectionId, HTMLDivElement | null>>({} as any);
+
+  // Ctrl/Cmd+K to focus search
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+        setTimeout(() => searchRef.current?.focus(), 50);
+      }
+      if (e.key === 'Escape') setSearchOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const filteredNav = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return RULES_NAV;
+    const matches = new Set(RULES_SEARCH_INDEX.filter(s => s.text.includes(q)).map(s => s.id));
+    return RULES_NAV.filter(n => matches.has(n.id) || n.label.toLowerCase().includes(q));
+  }, [search]);
+
+  const goSection = (id: RulesSectionId) => {
+    setOpenSection(id);
+    setTimeout(() => {
+      const el = sectionRefs.current[id];
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  };
+
+  const highlight = (text: string) => {
+    const q = search.trim();
+    if (!q) return text;
+    const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
+    return text.split(re).map((part, i) =>
+      part.toLowerCase() === q.toLowerCase()
+        ? <mark key={i} style={{ background: 'rgba(212,175,55,0.45)', color: '#fff', padding: '0 2px', borderRadius: 2 }}>{part}</mark>
+        : <React.Fragment key={i}>{part}</React.Fragment>
+    );
+  };
+
   return (
     <div style={{
-      fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif',
-      background: 'radial-gradient(ellipse at top, #1a1240 0%, #0a0a1e 55%, #050510 100%)',
-      minHeight: '100vh', color: '#ece1c7',
+      fontFamily: RULES_FONT,
+      background: `radial-gradient(ellipse at top, #1a1240 0%, #0a0a1e 50%, ${RULES_TOKENS.bg} 100%)`,
+      minHeight: '100vh', color: RULES_TOKENS.text, position: 'relative', overflow: 'hidden',
     }}>
+      {/* Keyframes */}
+      <style>{`
+        @keyframes rulesGlow {
+          0%, 100% { text-shadow: 0 0 22px rgba(212,175,55,0.45), 0 0 4px rgba(212,175,55,0.6); }
+          50%      { text-shadow: 0 0 38px rgba(212,175,55,0.85), 0 0 8px rgba(212,175,55,0.9); }
+        }
+        @keyframes rulesFloat {
+          0%   { transform: translateY(0) translateX(0); opacity: 0; }
+          15%  { opacity: 0.6; }
+          85%  { opacity: 0.5; }
+          100% { transform: translateY(-120vh) translateX(20px); opacity: 0; }
+        }
+        @keyframes rulesFade {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes rulesPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(212,175,55,0.45); }
+          50%      { box-shadow: 0 0 0 8px rgba(212,175,55,0); }
+        }
+        @keyframes rulesEnergy {
+          0%   { transform: translateY(-100%); opacity: 0; }
+          30%  { opacity: 1; }
+          100% { transform: translateY(100%); opacity: 0; }
+        }
+        @keyframes rulesArrow {
+          0%, 100% { opacity: 0.4; transform: translateY(0); }
+          50%      { opacity: 1;   transform: translateY(3px); }
+        }
+        @keyframes rulesFog {
+          0%   { transform: translateX(-10%); }
+          100% { transform: translateX(10%); }
+        }
+      `}</style>
+
+      {/* Floating embers */}
+      <div aria-hidden style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0 }}>
+        {Array.from({ length: 18 }).map((_, i) => {
+          const left = (i * 53) % 100;
+          const dur = 14 + (i % 7) * 2;
+          const delay = (i % 9) * 1.4;
+          const size = 2 + (i % 4);
+          const tint = i % 3 === 0 ? RULES_TOKENS.purple : RULES_TOKENS.gold;
+          return (
+            <span key={i} style={{
+              position: 'absolute', bottom: -10, left: `${left}%`,
+              width: size, height: size, borderRadius: '50%',
+              background: tint,
+              boxShadow: `0 0 ${size * 3}px ${tint}`,
+              animation: `rulesFloat ${dur}s linear ${delay}s infinite`,
+            }} />
+          );
+        })}
+      </div>
+
+      {/* Drifting fog */}
+      <div aria-hidden style={{
+        position: 'fixed', inset: '-10%',
+        background: 'radial-gradient(circle at 20% 30%, rgba(138,43,226,0.10), transparent 40%), radial-gradient(circle at 80% 70%, rgba(212,175,55,0.08), transparent 45%)',
+        pointerEvents: 'none', zIndex: 0,
+        animation: 'rulesFog 24s ease-in-out infinite alternate',
+      }} />
+
+      {/* Sticky header */}
       <div style={{
         padding: '14px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        borderBottom: '1px solid #3a2a6a', position: 'sticky', top: 0,
-        background: 'linear-gradient(180deg, #0a0a1e 0%, rgba(10,10,30,0.92) 100%)', zIndex: 5,
+        borderBottom: `1px solid ${RULES_TOKENS.border}`, position: 'sticky', top: 0,
+        background: 'linear-gradient(180deg, rgba(5,5,20,0.95) 0%, rgba(10,10,30,0.85) 100%)',
+        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+        zIndex: 10,
       }}>
         <button onClick={onBack} style={ghostBtn}>← Back</button>
         <div style={{
-          fontFamily: '"Cinzel", "Times New Roman", serif',
-          fontWeight: 800, letterSpacing: 4, fontSize: 18,
-          color: '#f0b32a',
-          textShadow: '0 0 14px rgba(240,179,42,0.45)',
-        }}>RULES</div>
-        <div style={{ width: 80 }} />
+          fontFamily: RULES_HEAD, fontWeight: 800, letterSpacing: 4, fontSize: 18,
+          color: RULES_TOKENS.gold,
+          animation: 'rulesGlow 3.6s ease-in-out infinite',
+        }}>RULEBOOK</div>
+        <button
+          onClick={() => { setSearchOpen(v => !v); setTimeout(() => searchRef.current?.focus(), 50); }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '8px 14px', background: 'rgba(212,175,55,0.10)',
+            border: `1px solid ${RULES_TOKENS.border}`, borderRadius: 8,
+            color: RULES_TOKENS.gold, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+          }}
+          title="Search rules (Ctrl+K)"
+        >🔍 <span style={{ opacity: 0.85 }}>Search</span><kbd style={{
+          marginLeft: 4, padding: '2px 6px', fontSize: 10,
+          background: 'rgba(0,0,0,0.4)', borderRadius: 4, color: RULES_TOKENS.mute,
+        }}>Ctrl K</kbd></button>
       </div>
 
-      <div style={{ maxWidth: 820, margin: '0 auto', padding: '28px 22px 60px', lineHeight: 1.6, fontSize: 16 }}>
-        <H1>Memetic Masters TCG — Quick Rules</H1>
+      {/* Search bar */}
+      {searchOpen && (
+        <div style={{
+          position: 'sticky', top: 58, zIndex: 9,
+          padding: '10px 22px',
+          background: 'rgba(5,5,20,0.85)', backdropFilter: 'blur(8px)',
+          borderBottom: `1px solid ${RULES_TOKENS.borderSoft}`,
+          animation: 'rulesFade 200ms ease',
+        }}>
+          <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', gap: 10, alignItems: 'center' }}>
+            <input
+              ref={searchRef}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search rules… (e.g. combat, summoning sickness, gas)"
+              style={{
+                flex: 1, padding: '10px 14px', fontSize: 14,
+                background: RULES_TOKENS.panel, color: '#fff',
+                border: `1px solid ${RULES_TOKENS.border}`, borderRadius: 8,
+                outline: 'none', fontFamily: RULES_FONT,
+              }}
+            />
+            <button onClick={() => { setSearch(''); setSearchOpen(false); }} style={ghostBtn}>Close</button>
+          </div>
+        </div>
+      )}
 
-        <H2>Goal</H2>
-        <P>Reduce your opponent's life from <B>20 → 0</B>. Last player standing wins.</P>
+      {/* Hero */}
+      <div style={{
+        position: 'relative', zIndex: 1,
+        maxWidth: 1100, margin: '0 auto', padding: '50px 22px 14px', textAlign: 'center',
+      }}>
+        <div style={{
+          fontFamily: RULES_HEAD, fontWeight: 900, fontSize: 'clamp(34px, 5.5vw, 56px)',
+          letterSpacing: 6, color: RULES_TOKENS.gold,
+          animation: 'rulesGlow 3.6s ease-in-out infinite',
+          background: 'linear-gradient(180deg, #ffe28a 0%, #d4af37 55%, #8a6a16 100%)',
+          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+          filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.6))',
+        }}>MEMETIC MASTERS</div>
+        <div style={{
+          fontFamily: RULES_HEAD, fontWeight: 600, fontSize: 20,
+          letterSpacing: 12, color: RULES_TOKENS.purple, marginTop: 4,
+          textShadow: '0 0 18px rgba(138,43,226,0.55)',
+        }}>RULEBOOK</div>
+        <div style={{
+          height: 2, width: 220, margin: '14px auto 0',
+          background: `linear-gradient(90deg, transparent, ${RULES_TOKENS.gold}, transparent)`,
+        }} />
+      </div>
 
-        <H2>Setup</H2>
-        <UL items={[
-          <>Each player picks one of <B>5 chains</B>: <CC c="#f3ba2f">BnB</CC> · <CC c="#9945ff">Solana</CC> · <CC c="#50d2c1">Hyperliquid</CC> · <CC c="#cfd8dc">Ethereum</CC> · <CC c="#8a8a8a">XRP</CC></>,
-          <>Each gets a <B>60-card deck</B> in that color, shuffled.</>,
-          <>Draw <B>7 cards</B>. Start at <B>20 life</B>.</>,
-          <>Max hand size <B>7</B> at end of turn — discard down.</>,
-          <>The player going <B>first does not draw on turn 1</B>; everyone else draws 1 at the start of their turn.</>,
-        ]} />
+      {/* Quick start panel */}
+      <div style={{ position: 'relative', zIndex: 1, maxWidth: 1100, margin: '24px auto 0', padding: '0 22px' }}>
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(138,43,226,0.20) 0%, rgba(212,175,55,0.12) 100%)',
+          border: `1px solid ${RULES_TOKENS.border}`, borderRadius: 14,
+          padding: '22px 26px', backdropFilter: 'blur(10px)',
+          boxShadow: '0 14px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)',
+        }}>
+          <div style={{
+            fontFamily: RULES_HEAD, fontSize: 18, letterSpacing: 4, fontWeight: 700,
+            color: RULES_TOKENS.gold, textAlign: 'center', marginBottom: 14,
+          }}>⚡ LEARN IN 30 SECONDS</div>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12,
+          }}>
+            {[
+              { n: 1, t: 'Play Nodes',           c: RULES_TOKENS.gold },
+              { n: 2, t: 'Nodes make Gas',       c: RULES_TOKENS.purple },
+              { n: 3, t: 'Cast Memes',           c: RULES_TOKENS.blue },
+              { n: 4, t: 'Attack Opponent',      c: RULES_TOKENS.red },
+              { n: 5, t: 'Reduce Life 20 → 0',   c: RULES_TOKENS.green },
+            ].map(s => (
+              <div key={s.n} style={{
+                background: 'rgba(0,0,0,0.35)', borderRadius: 10,
+                border: `1px solid ${s.c}55`, padding: '14px 12px', textAlign: 'center',
+                animation: 'rulesFade 360ms ease both',
+              }}>
+                <div style={{
+                  width: 34, height: 34, borderRadius: '50%', margin: '0 auto 8px',
+                  background: `radial-gradient(circle, ${s.c}, ${s.c}66)`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontWeight: 900, color: '#0a0a14', fontSize: 16,
+                  boxShadow: `0 0 18px ${s.c}77`,
+                }}>{s.n}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{s.t}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{
+            marginTop: 14, textAlign: 'center', fontSize: 13, color: RULES_TOKENS.mute, fontStyle: 'italic',
+          }}>Last player standing wins.</div>
+        </div>
+      </div>
 
-        <H2>The 4 Card Types</H2>
-        <Table rows={[
-          ['Node',    'Your "land". Free to play but only 1 per turn. Tap on a later turn to add 1 Gas of its color.'],
-          ['Meme',    'Your creatures. Have Power / Toughness. Attack to deal damage to the opponent.'],
-          ['Machine', 'Permanent ongoing effect (like an artifact/enchantment). Stays in play until destroyed.'],
-          ['Move',    'One-shot spell. Resolves immediately, then goes to the graveyard.'],
-        ]} />
+      {/* Body: sticky nav + sections */}
+      <div style={{
+        position: 'relative', zIndex: 1,
+        maxWidth: 1100, margin: '24px auto 0', padding: '0 22px 80px',
+        display: 'grid', gridTemplateColumns: 'minmax(0, 220px) minmax(0, 1fr)', gap: 22,
+      }}>
+        {/* Sticky nav */}
+        <nav style={{
+          position: 'sticky', top: searchOpen ? 130 : 78, alignSelf: 'start',
+          background: RULES_TOKENS.panel, backdropFilter: 'blur(8px)',
+          border: `1px solid ${RULES_TOKENS.borderSoft}`, borderRadius: 12,
+          padding: 10, maxHeight: 'calc(100vh - 120px)', overflowY: 'auto',
+        }}>
+          <div style={{
+            fontFamily: RULES_HEAD, fontSize: 11, letterSpacing: 3, fontWeight: 700,
+            color: RULES_TOKENS.gold, padding: '6px 8px 10px', borderBottom: `1px solid ${RULES_TOKENS.borderSoft}`,
+            marginBottom: 6,
+          }}>CHAPTERS</div>
+          {filteredNav.length === 0 && (
+            <div style={{ padding: 10, fontSize: 12, color: RULES_TOKENS.mute }}>No matches.</div>
+          )}
+          {filteredNav.map(n => {
+            const active = openSection === n.id;
+            return (
+              <button key={n.id} onClick={() => goSection(n.id)} style={{
+                display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                padding: '9px 10px', marginBottom: 2,
+                background: active ? 'linear-gradient(90deg, rgba(212,175,55,0.18), transparent)' : 'transparent',
+                color: active ? RULES_TOKENS.gold : RULES_TOKENS.text,
+                border: 'none', borderLeft: `3px solid ${active ? RULES_TOKENS.gold : 'transparent'}`,
+                borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: active ? 700 : 500,
+                fontFamily: RULES_FONT, textAlign: 'left', transition: 'all 200ms ease',
+              }}>
+                <span style={{ fontSize: 15 }}>{n.icon}</span>
+                <span>{n.label}</span>
+              </button>
+            );
+          })}
+        </nav>
 
-        <H2>Gas (the mana system)</H2>
-        <UL items={[
-          <><B>Nodes generate Gas. Cards cost Gas.</B></>,
-          <>Tap a Node → <B>+1 Gas</B> of its color.</>,
-          <>Gas in your pool <B>drains at end of your turn</B> — spend it or lose it.</>,
-          <>A cost can be all one color (e.g. 3 purple) or mixed.</>,
-        ]} />
+        {/* Sections */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {RULES_NAV.map(n => {
+            const open = openSection === n.id;
+            const visible = !search.trim() || filteredNav.some(f => f.id === n.id);
+            if (!visible) return null;
+            return (
+              <RuleSection
+                key={n.id}
+                _ref={(el) => { sectionRefs.current[n.id] = el; }}
+                id={n.id} icon={n.icon} title={n.label}
+                open={open}
+                onToggle={() => setOpenSection(open ? n.id : n.id)}
+                onHeaderClick={() => setOpenSection(prev => prev === n.id ? n.id : n.id)}
+                summary={SECTION_SUMMARY[n.id]}
+                onClickHeader={() => setOpenSection(open ? ('goal' as RulesSectionId) : n.id)}
+              >
+                {renderSectionBody(n.id, highlight)}
+              </RuleSection>
+            );
+          })}
 
-        <H2>A turn, step by step</H2>
-        <OL items={[
-          <><B>Untap</B> — your Nodes/Memes/Machines untap. Summoning sickness wears off.</>,
-          <><B>Draw 1</B> (skipped on the very first turn of the game).</>,
-          <>
-            <B>Main phase</B> — in any order:
-            <UL items={[
-              <>Play <B>one Node</B> (free).</>,
-              <>Tap Nodes for Gas.</>,
-              <>Cast Memes (they enter <B>summoning sick</B> — can't attack until your next turn unless they have haste).</>,
-              <>Cast Machines (they stay on the battlefield).</>,
-              <>Cast Moves (they resolve, then go to the graveyard).</>,
-            ]} />
-          </>,
-          <>
-            <B>Combat</B> — click your untapped, non-sick Memes to mark them as <B>attackers</B>, then press <i>Attack with N meme(s)</i>.
-            <UL items={[
-              <>Each attacking Meme <B>taps</B>.</>,
-              <>Opponent picks Memes to <B>block</B>. Each blocker must be untapped.</>,
-              <><B>Damage resolves simultaneously</B>: attacker and blocker deal their Power to each other. Damage ≥ toughness → destroyed (to graveyard).</>,
-              <>Any attacker that <B>isn't blocked</B> deals its Power directly to the opponent's <B>life</B>.</>,
-            ]} />
-          </>,
-          <><B>End turn</B> — unspent Gas evaporates, discard down to 7 cards.</>,
-        ]} />
-
-        <H2>30-second teach</H2>
-        <UL items={[
-          <><B>Nodes = mana.</B> One per turn. Tap for gas.</>,
-          <><B>Memes = creatures.</B> Sick the turn they enter; can't attack.</>,
-          <><B>Machines = permanent passives.</B></>,
-          <><B>Moves = one-shot effects.</B></>,
-          <><B>Combat:</B> attack with untapped memes → opponent blocks → damage swaps.</>,
-          <><B>Life = 20.</B> Hit zero, you lose.</>,
-          <><B>Gas resets every turn — spend it.</B></>,
-        ]} />
-
-        <H2>UI cheat-sheet</H2>
-        <UL items={[
-          <><B>Click an untapped node</B> = tap for gas.</>,
-          <><B>Click a card in hand</B> = play it (move spells then ask you to pick a target).</>,
-          <><B>Click your own untapped meme</B> during your main phase = mark as attacker. Press <i>Attack with N</i>.</>,
-          <>During <B>declare blockers</B> (when the opponent attacks), click your untapped meme then click the attacker you want to block.</>,
-          <>Press <B>End Turn</B> to pass.</>,
-        ]} />
-
-        <P style={{ marginTop: 28, fontSize: 14, color: '#a99878', fontStyle: 'italic' }}>
-          That's the whole game. Have fun.
-        </P>
+          <div style={{
+            marginTop: 12, textAlign: 'center', fontSize: 13, color: RULES_TOKENS.mute, fontStyle: 'italic',
+          }}>
+            That's the whole game. Have fun.
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-function H1({ children }: { children: React.ReactNode }) {
-  return <h1 style={{
-    fontFamily: '"Cinzel", "Times New Roman", serif',
-    fontSize: 34, margin: '0 0 22px', letterSpacing: 1,
-    color: '#f0b32a',
-    textShadow: '0 0 18px rgba(240,179,42,0.4), 0 2px 0 #2a1a05',
-  }}>{children}</h1>;
-}
-function H2({ children }: { children: React.ReactNode }) {
-  return <h2 style={{
-    fontFamily: '"Cinzel", "Times New Roman", serif',
-    fontSize: 20, margin: '30px 0 10px', letterSpacing: 2,
-    color: '#b896ff',
-    textTransform: 'uppercase',
-    textShadow: '0 0 10px rgba(139,92,246,0.35)',
-    borderBottom: '1px solid rgba(139,92,246,0.25)', paddingBottom: 4,
-  }}>{children}</h2>;
-}
-function P({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  return <p style={{ margin: '8px 0', color: '#ece1c7', ...style }}>{children}</p>;
-}
-function B({ children }: { children: React.ReactNode }) {
-  return <b style={{ color: '#ffd66e' }}>{children}</b>;
-}
-function CC({ c, children }: { c: string; children: React.ReactNode }) {
-  return <span style={{ color: c, fontWeight: 700 }}>{children}</span>;
-}
-function UL({ items }: { items: React.ReactNode[] }) {
+const SECTION_SUMMARY: Record<RulesSectionId, string> = {
+  goal:       'Reduce your opponent\'s life from 20 → 0. Last player standing wins.',
+  setup:      '5 chains. 60-card deck. Start at 20 life with 7 cards.',
+  cards:      'Nodes, Memes, Machines, Moves — your full toolkit.',
+  gas:        'Tap Nodes to fuel your spells. Gas drains every turn.',
+  turn:       'Untap → Draw → Main → Combat → End.',
+  advanced:   'Summoning sickness, blockers, simultaneous damage, hand size.',
+  example:    'Walk through Turn 1 step-by-step.',
+  cheatsheet: 'Quick clicks for the in-match UI.',
+};
+
+function RuleSection({
+  id, icon, title, summary, open, onClickHeader, children, _ref,
+}: {
+  id: RulesSectionId; icon: string; title: string; summary: string;
+  open: boolean; onClickHeader: () => void; children: React.ReactNode;
+  _ref?: (el: HTMLDivElement | null) => void;
+  // unused props kept for API stability
+  onToggle?: () => void; onHeaderClick?: () => void;
+}) {
   return (
-    <ul style={{ margin: '6px 0 6px 22px', padding: 0, color: '#ece1c7' }}>
-      {items.map((it, i) => <li key={i} style={{ marginBottom: 5 }}>{it}</li>)}
-    </ul>
+    <div
+      ref={_ref}
+      id={`rule-${id}`}
+      style={{
+        background: open ? RULES_TOKENS.panelHi : RULES_TOKENS.panel,
+        border: `1px solid ${open ? RULES_TOKENS.border : RULES_TOKENS.borderSoft}`,
+        borderRadius: 12, overflow: 'hidden',
+        boxShadow: open
+          ? `0 14px 36px rgba(0,0,0,0.55), 0 0 0 1px ${RULES_TOKENS.goldGlow}44`
+          : '0 8px 22px rgba(0,0,0,0.4)',
+        transition: 'all 250ms ease',
+      }}>
+      <button onClick={onClickHeader} style={{
+        width: '100%', display: 'flex', alignItems: 'center', gap: 14,
+        padding: '16px 18px', background: 'transparent', border: 'none',
+        cursor: 'pointer', textAlign: 'left', fontFamily: RULES_FONT,
+      }}>
+        <span style={{
+          width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+          background: `linear-gradient(135deg, rgba(212,175,55,0.20), rgba(138,43,226,0.20))`,
+          border: `1px solid ${RULES_TOKENS.border}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 20,
+        }}>{icon}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontFamily: RULES_HEAD, fontWeight: 700, fontSize: 18,
+            letterSpacing: 2, color: RULES_TOKENS.gold,
+          }}>{title.toUpperCase()}</div>
+          <div style={{ fontSize: 12, color: RULES_TOKENS.mute, marginTop: 2 }}>{summary}</div>
+        </div>
+        <span style={{
+          color: RULES_TOKENS.gold, fontSize: 16, transition: 'transform 250ms ease',
+          transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+        }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          padding: '4px 22px 22px', animation: 'rulesFade 280ms ease both',
+          color: RULES_TOKENS.text, fontSize: 14.5, lineHeight: 1.65,
+        }}>{children}</div>
+      )}
+    </div>
   );
 }
-function OL({ items }: { items: React.ReactNode[] }) {
+
+function renderSectionBody(id: RulesSectionId, hl: (s: string) => React.ReactNode) {
+  switch (id) {
+    case 'goal':
+      return (
+        <div>
+          <p>{hl('Reduce your opponent\'s life from 20 to 0. Last player standing wins.')}</p>
+          <div style={{
+            marginTop: 14, display: 'flex', justifyContent: 'center', gap: 18, flexWrap: 'wrap',
+          }}>
+            <LifeOrb label="Start" value={20} color={RULES_TOKENS.green} />
+            <div style={{
+              alignSelf: 'center', fontSize: 22, color: RULES_TOKENS.gold, fontWeight: 900,
+              animation: 'rulesArrow 1.6s ease-in-out infinite',
+            }}>➜</div>
+            <LifeOrb label="Win" value={0} color={RULES_TOKENS.red} />
+          </div>
+        </div>
+      );
+    case 'setup':
+      return (
+        <div>
+          <p>{hl('Each player picks one of 5 chains, shuffles their 60-card deck, draws 7 cards, and starts at 20 life.')}</p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '14px 0' }}>
+            {[
+              { n: 'BnB',        c: '#f3ba2f' },
+              { n: 'Solana',     c: '#9945ff' },
+              { n: 'Hyperliquid',c: '#50d2c1' },
+              { n: 'Ethereum',   c: '#cfd8dc' },
+              { n: 'XRP',        c: '#8a8a8a' },
+            ].map(x => (
+              <div key={x.n} style={{
+                padding: '8px 14px', borderRadius: 999,
+                background: `${x.c}22`, color: x.c, border: `1px solid ${x.c}66`,
+                fontWeight: 700, fontSize: 13,
+              }}>{x.n}</div>
+            ))}
+          </div>
+          <ul style={{ marginLeft: 18 }}>
+            <li>{hl('60-card deck in your chain color.')}</li>
+            <li>{hl('Draw 7 cards. Start at 20 life.')}</li>
+            <li>{hl('Max hand size 7 — discard down at end of turn.')}</li>
+            <li>{hl('The first player skips their turn-1 draw.')}</li>
+          </ul>
+        </div>
+      );
+    case 'cards':
+      return <CardTypesGrid hl={hl} />;
+    case 'gas':
+      return (
+        <div>
+          <p>{hl('Nodes generate Gas. Cards cost Gas. Gas drains at end of your turn — spend it or lose it.')}</p>
+          <GasFlowViz />
+          <ul style={{ marginLeft: 18, marginTop: 10 }}>
+            <li>{hl('Tap a Node → +1 Gas of its color.')}</li>
+            <li>{hl('A cost can be one color or mixed.')}</li>
+            <li>{hl('Unspent Gas evaporates when your turn ends.')}</li>
+          </ul>
+        </div>
+      );
+    case 'turn':
+      return <TurnTimeline hl={hl} />;
+    case 'advanced':
+      return (
+        <div>
+          <ul style={{ marginLeft: 18 }}>
+            <li><b style={{ color: RULES_TOKENS.gold }}>Summoning sickness</b> — {hl('Memes can\'t attack the turn they enter (unless they have haste).')}</li>
+            <li><b style={{ color: RULES_TOKENS.gold }}>Blocking</b> — {hl('Defender chooses blockers from untapped Memes. Unblocked attackers hit life directly.')}</li>
+            <li><b style={{ color: RULES_TOKENS.gold }}>Simultaneous damage</b> — {hl('Attacker and blocker deal Power to each other. Damage ≥ toughness destroys it.')}</li>
+            <li><b style={{ color: RULES_TOKENS.gold }}>Graveyard</b> — {hl('Destroyed Memes, used Moves go here. Some cards interact with the graveyard.')}</li>
+            <li><b style={{ color: RULES_TOKENS.gold }}>Max hand 7</b> — {hl('Discard down at end of turn.')}</li>
+          </ul>
+        </div>
+      );
+    case 'example':
+      return <ExampleTurn hl={hl} />;
+    case 'cheatsheet':
+      return (
+        <div>
+          <ul style={{ marginLeft: 18 }}>
+            <li>{hl('Click an untapped Node → tap for Gas.')}</li>
+            <li>{hl('Click a card in hand → play it (Moves then ask for a target).')}</li>
+            <li>{hl('Click your own untapped Meme → mark attacker. Press "Attack with N".')}</li>
+            <li>{hl('During declare blockers → click your Meme, then click the attacker to block.')}</li>
+            <li>{hl('Press End Turn to pass.')}</li>
+          </ul>
+        </div>
+      );
+  }
+}
+
+function LifeOrb({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <ol style={{ margin: '6px 0 6px 22px', padding: 0, color: '#ece1c7' }}>
-      {items.map((it, i) => <li key={i} style={{ marginBottom: 10 }}>{it}</li>)}
-    </ol>
+    <div style={{ textAlign: 'center' }}>
+      <div style={{
+        width: 92, height: 92, borderRadius: '50%',
+        background: `radial-gradient(circle at 35% 30%, ${color}, ${color}33 65%, transparent 80%)`,
+        border: `2px solid ${color}aa`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: RULES_HEAD, fontSize: 36, fontWeight: 900, color: '#fff',
+        textShadow: '0 2px 8px rgba(0,0,0,0.8)',
+        boxShadow: `0 0 28px ${color}66, inset 0 0 18px rgba(0,0,0,0.4)`,
+      }}>{value}</div>
+      <div style={{ fontSize: 12, color: RULES_TOKENS.mute, marginTop: 6, letterSpacing: 2 }}>{label.toUpperCase()}</div>
+    </div>
   );
 }
-function Table({ rows }: { rows: [string, string][] }) {
+
+function CardTypesGrid({ hl }: { hl: (s: string) => React.ReactNode }) {
+  const types = [
+    { name: 'NODE',    icon: '⛓️', color: RULES_TOKENS.gold,   short: 'Produces Gas',        details: 'Your "land". Free to play, but only 1 per turn. Tap on a later turn to add 1 Gas of its color to your pool.' },
+    { name: 'MEME',    icon: '🐸', color: RULES_TOKENS.purple, short: 'Creature Card',       details: 'Your fighters. Each has Power / Toughness. Attack to deal damage to the opponent. Summoning sick the turn they enter.' },
+    { name: 'MACHINE', icon: '⚙️', color: RULES_TOKENS.blue,   short: 'Permanent Effect',    details: 'Artifact / enchantment. Stays in play with an ongoing effect until destroyed.' },
+    { name: 'MOVE',    icon: '⚡', color: RULES_TOKENS.red,    short: 'Instant Action',      details: 'A one-shot spell. Resolves immediately, then goes to the graveyard.' },
+  ];
+  const [expanded, setExpanded] = useState<string | null>(null);
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', margin: '10px 0' }}>
-      <tbody>
-        {rows.map(([k, v], i) => (
-          <tr key={i} style={{ borderTop: '1px solid rgba(139,92,246,0.22)' }}>
-            <td style={{
-              padding: '10px 12px', width: 160,
-              fontFamily: '"Cinzel", "Times New Roman", serif',
-              fontWeight: 700, color: '#f0b32a',
-              letterSpacing: 1, textTransform: 'uppercase', fontSize: 13,
-              verticalAlign: 'top',
-            }}>{k}</td>
-            <td style={{ padding: '10px 12px', color: '#ece1c7' }}>{v}</td>
-          </tr>
+    <div style={{
+      display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginTop: 10,
+    }}>
+      {types.map(t => {
+        const isOpen = expanded === t.name;
+        return (
+          <button key={t.name} onClick={() => setExpanded(isOpen ? null : t.name)} style={{
+            background: `linear-gradient(160deg, ${t.color}22 0%, rgba(0,0,0,0.55) 70%)`,
+            border: `1px solid ${t.color}66`, borderRadius: 12,
+            padding: '18px 16px', cursor: 'pointer', color: RULES_TOKENS.text,
+            textAlign: 'left', fontFamily: RULES_FONT,
+            transition: 'transform 220ms ease, box-shadow 220ms ease',
+            boxShadow: isOpen ? `0 0 28px ${t.color}66` : '0 4px 14px rgba(0,0,0,0.4)',
+            transform: isOpen ? 'translateY(-3px) scale(1.02)' : 'none',
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-3px) scale(1.02)'; }}
+          onMouseLeave={(e) => { if (!isOpen) (e.currentTarget as HTMLButtonElement).style.transform = 'none'; }}
+          >
+            <div style={{
+              fontSize: 38, lineHeight: 1, marginBottom: 8,
+              filter: `drop-shadow(0 0 10px ${t.color})`,
+            }}>{t.icon}</div>
+            <div style={{
+              fontFamily: RULES_HEAD, fontWeight: 800, letterSpacing: 4,
+              color: t.color, fontSize: 16, marginBottom: 4,
+            }}>{t.name}</div>
+            <div style={{ fontSize: 12, color: RULES_TOKENS.mute, marginBottom: 6 }}>{t.short}</div>
+            {isOpen && (
+              <div style={{
+                marginTop: 8, paddingTop: 10, fontSize: 13,
+                borderTop: `1px solid ${t.color}44`, lineHeight: 1.55,
+                animation: 'rulesFade 220ms ease both',
+              }}>{hl(t.details)}</div>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function GasFlowViz() {
+  return (
+    <div style={{
+      margin: '14px 0', padding: '18px 12px',
+      background: 'rgba(138,43,226,0.08)', border: `1px solid ${RULES_TOKENS.purple}33`,
+      borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      gap: 18, flexWrap: 'wrap',
+    }}>
+      <FlowNode icon="⛓️" label="NODE" color={RULES_TOKENS.gold} />
+      <FlowArrow />
+      <div style={{
+        position: 'relative', padding: '10px 16px',
+        border: `1px solid ${RULES_TOKENS.purple}88`, borderRadius: 8,
+        background: 'rgba(138,43,226,0.18)',
+        fontFamily: RULES_HEAD, letterSpacing: 2, fontWeight: 800,
+        color: RULES_TOKENS.purple, fontSize: 14,
+        boxShadow: `0 0 18px ${RULES_TOKENS.purpleSoft}`,
+        overflow: 'hidden',
+      }}>
+        +1 GAS
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: `linear-gradient(180deg, transparent, ${RULES_TOKENS.purple}55, transparent)`,
+          animation: 'rulesEnergy 1.8s ease-in-out infinite', pointerEvents: 'none',
+        }} />
+      </div>
+      <FlowArrow />
+      <FlowNode icon="🐸" label="CAST MEME" color={RULES_TOKENS.purple} />
+    </div>
+  );
+}
+
+function FlowNode({ icon, label, color }: { icon: string; label: string; color: string }) {
+  return (
+    <div style={{ textAlign: 'center', minWidth: 80 }}>
+      <div style={{
+        width: 60, height: 60, borderRadius: 12, margin: '0 auto 6px',
+        background: `radial-gradient(circle, ${color}33, transparent 75%)`,
+        border: `1px solid ${color}77`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28,
+        boxShadow: `0 0 20px ${color}55`,
+      }}>{icon}</div>
+      <div style={{
+        fontFamily: RULES_HEAD, fontSize: 11, letterSpacing: 2, fontWeight: 700, color,
+      }}>{label}</div>
+    </div>
+  );
+}
+
+function FlowArrow() {
+  return (
+    <span style={{
+      fontSize: 24, color: RULES_TOKENS.gold,
+      animation: 'rulesArrow 1.6s ease-in-out infinite',
+    }}>➜</span>
+  );
+}
+
+function TurnTimeline({ hl }: { hl: (s: string) => React.ReactNode }) {
+  const phases = [
+    { id: 'untap',  name: 'UNTAP',  icon: '🔄', color: RULES_TOKENS.blue,   desc: 'Untap your Nodes, Memes, and Machines. Summoning sickness wears off.' },
+    { id: 'draw',   name: 'DRAW',   icon: '🃏', color: RULES_TOKENS.green,  desc: 'Draw 1 card (skipped on the very first turn of the game).' },
+    { id: 'main',   name: 'MAIN',   icon: '⚙️', color: RULES_TOKENS.gold,   desc: 'Play 1 Node, tap for Gas, cast Memes, Machines, and Moves in any order.' },
+    { id: 'combat', name: 'COMBAT', icon: '⚔️', color: RULES_TOKENS.red,    desc: 'Click Memes to attack. Opponent blocks. Damage resolves simultaneously.' },
+    { id: 'end',    name: 'END',    icon: '🌙', color: RULES_TOKENS.purple, desc: 'Unspent Gas evaporates. Discard down to 7 cards.' },
+  ];
+  const [active, setActive] = useState<string>('untap');
+  const cur = phases.find(p => p.id === active)!;
+  return (
+    <div>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 6, margin: '10px 0 16px', flexWrap: 'wrap',
+      }}>
+        {phases.map((p, i) => (
+          <React.Fragment key={p.id}>
+            <button onClick={() => setActive(p.id)} style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+              padding: '6px 4px', background: 'transparent', border: 'none', cursor: 'pointer',
+              fontFamily: RULES_FONT,
+            }} title={p.desc}>
+              <span style={{
+                width: 48, height: 48, borderRadius: '50%',
+                background: active === p.id
+                  ? `radial-gradient(circle, ${p.color}, ${p.color}55 65%, transparent 80%)`
+                  : `radial-gradient(circle, ${p.color}55, ${p.color}11 65%, transparent 80%)`,
+                border: `2px solid ${active === p.id ? p.color : `${p.color}66`}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20,
+                boxShadow: active === p.id ? `0 0 20px ${p.color}aa` : 'none',
+                animation: active === p.id ? 'rulesPulse 2s ease-out infinite' : 'none',
+                transition: 'all 250ms ease',
+              }}>{p.icon}</span>
+              <span style={{
+                fontFamily: RULES_HEAD, fontSize: 10, letterSpacing: 2, fontWeight: 800,
+                color: active === p.id ? p.color : RULES_TOKENS.mute,
+              }}>{p.name}</span>
+            </button>
+            {i < phases.length - 1 && (
+              <span style={{
+                fontSize: 18, color: RULES_TOKENS.gold, opacity: 0.55,
+              }}>→</span>
+            )}
+          </React.Fragment>
         ))}
-      </tbody>
-    </table>
+      </div>
+      <div style={{
+        background: `linear-gradient(135deg, ${cur.color}22, transparent)`,
+        border: `1px solid ${cur.color}55`, borderRadius: 10,
+        padding: '14px 16px', animation: 'rulesFade 240ms ease both',
+      }}>
+        <div style={{
+          fontFamily: RULES_HEAD, letterSpacing: 3, fontWeight: 800, color: cur.color, marginBottom: 4,
+        }}>{cur.name} PHASE</div>
+        <div style={{ fontSize: 13.5, color: RULES_TOKENS.text }}>{hl(cur.desc)}</div>
+      </div>
+    </div>
+  );
+}
+
+function ExampleTurn({ hl }: { hl: (s: string) => React.ReactNode }) {
+  const steps = [
+    { t: 'Play Purple Node',         d: 'You start your turn. You spend your free Node drop and play a Solana Node onto the battlefield.' },
+    { t: 'Tap Node for 1 Purple Gas',d: 'Click your untapped Node. It rotates and adds 1 Purple Gas to your pool.' },
+    { t: 'Cast a Meme',              d: 'You spend 1 Purple Gas to cast a cheap Meme like Pepe Warrior. It enters summoning sick — it can\'t attack this turn.' },
+    { t: 'End Turn',                 d: 'No combat this turn. Unspent Gas evaporates, and you pass to the opponent.' },
+  ];
+  const [i, setI] = useState(0);
+  const s = steps[i];
+  return (
+    <div>
+      <div style={{
+        background: 'rgba(0,0,0,0.4)', border: `1px solid ${RULES_TOKENS.borderSoft}`,
+        borderRadius: 10, padding: '16px 18px',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8,
+        }}>
+          <div style={{
+            fontFamily: RULES_HEAD, letterSpacing: 3, fontSize: 12, fontWeight: 800, color: RULES_TOKENS.gold,
+          }}>TURN 1 — STEP {i + 1} / {steps.length}</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {steps.map((_, idx) => (
+              <span key={idx} style={{
+                width: 8, height: 8, borderRadius: '50%',
+                background: idx === i ? RULES_TOKENS.gold : 'rgba(255,255,255,0.18)',
+                boxShadow: idx === i ? `0 0 8px ${RULES_TOKENS.goldGlow}` : 'none',
+                transition: 'all 200ms ease',
+              }} />
+            ))}
+          </div>
+        </div>
+        <div style={{
+          fontFamily: RULES_HEAD, fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 6,
+        }}>{s.t}</div>
+        <div style={{ fontSize: 13.5, color: RULES_TOKENS.text, lineHeight: 1.6, animation: 'rulesFade 220ms ease both' }}>
+          {hl(s.d)}
+        </div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 12 }}>
+        <button onClick={() => setI(v => Math.max(0, v - 1))} disabled={i === 0} style={{
+          ...ghostBtn, opacity: i === 0 ? 0.4 : 1, cursor: i === 0 ? 'not-allowed' : 'pointer',
+        }}>← Previous</button>
+        <button onClick={() => setI(v => Math.min(steps.length - 1, v + 1))} disabled={i === steps.length - 1} style={{
+          padding: '8px 18px', background: `linear-gradient(180deg, ${RULES_TOKENS.gold}, #8a6a16)`,
+          color: '#1a1408', border: 'none', borderRadius: 6,
+          fontWeight: 800, fontSize: 13, letterSpacing: 1,
+          cursor: i === steps.length - 1 ? 'not-allowed' : 'pointer',
+          opacity: i === steps.length - 1 ? 0.4 : 1,
+          boxShadow: `0 0 14px ${RULES_TOKENS.goldGlow}`,
+        }}>Next →</button>
+      </div>
+    </div>
   );
 }
 
