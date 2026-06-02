@@ -103,7 +103,7 @@ const IMAGES: Record<string, string> = {
   hl_hpos:      cmc(26873),
   hl_hfun:      cmc(34103),
   hl_rage:      cmc(33952),
-  hl_purr:      cmc(30668),
+  hl_purr:      '/cards/purr.jpg?v=1',
 
   // Ethereum memes
   eth_andy:     cmc(29879),
