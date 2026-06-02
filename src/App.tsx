@@ -1806,7 +1806,7 @@ export default function App() {
 
   // Landing + Profile share the same audio element so music keeps playing
   // (and the user's mute state is preserved) when switching between them.
-  const showMusic = view === 'landing' || view === 'profile' || view === 'rules';
+  const showMusic = view === 'landing' || view === 'profile' || view === 'rules' || view === 'lobby';
   return (
     <>
       {showMusic && <MenuMusic />}
