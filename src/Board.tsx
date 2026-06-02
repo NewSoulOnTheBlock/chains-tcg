@@ -632,72 +632,72 @@ function RulesPanel({ side }: { side: 'left' | 'right' }) {
   const sections: Array<{ heading: string; body: React.ReactNode }> = side === 'left'
     ? [
         {
-          heading: '🎯 Goal',
+          heading: 'Goal',
           body: 'Reduce your opponent\u2019s life from 20 to 0. You win when they hit zero (or run out of cards in their deck and can\u2019t draw).',
         },
         {
-          heading: '🪙 Gas (mana)',
+          heading: 'Gas (mana)',
           body: 'Every non-Node card has a cost shown by colored pips: Orange\u00A0BnB, Purple\u00A0Solana, Green\u00A0Hyperliquid, White\u00A0Ethereum, Black\u00A0XRP. You pay that cost by tapping your Nodes.',
         },
         {
-          heading: '🗼 Nodes',
+          heading: 'Nodes',
           body: 'Nodes are your land. Once per turn you may play one Node from hand — it enters untapped. Click it any time on your turn to tap it for 1 gas of its color. Nodes untap at the start of your next turn.',
         },
         {
-          heading: '🃏 The 4 card types',
+          heading: 'The 4 card types',
           body: (
             <>
-              <div><b>Node</b> — land, generates 1 gas of its color when tapped.</div>
-              <div><b>Meme</b> — creature with Power/Toughness. Attacks and blocks.</div>
-              <div><b>Machine</b> — artifact. Stays in play and gives a constant effect.</div>
-              <div><b>Move</b> — single-use spell. Resolves once then goes to graveyard.</div>
+              <div><b style={{ color: '#ffd66e' }}>Node</b> — land, generates 1 gas of its color when tapped.</div>
+              <div><b style={{ color: '#ffd66e' }}>Meme</b> — creature with Power/Toughness. Attacks and blocks.</div>
+              <div><b style={{ color: '#ffd66e' }}>Machine</b> — artifact. Stays in play and gives a constant effect.</div>
+              <div><b style={{ color: '#ffd66e' }}>Move</b> — single-use spell. Resolves once then goes to graveyard.</div>
             </>
           ),
         },
         {
-          heading: '😴 Summoning sickness',
+          heading: 'Summoning sickness',
           body: 'Memes you just played CAN\u2019T attack the turn they enter. They can block right away though. A small SICK badge marks them.',
         },
         {
-          heading: '🔄 Turn order',
+          heading: 'Turn order',
           body: (
             <>
-              <div>1. <b>Untap</b> — your Nodes and Memes untap.</div>
-              <div>2. <b>Draw</b> — draw 1 card.</div>
-              <div>3. <b>Main</b> — play 1 Node, summon Memes, deploy Machines, cast Moves, tap Nodes for gas.</div>
-              <div>4. <b>Combat</b> — pick attackers, opponent picks blockers, damage resolves.</div>
-              <div>5. <b>End</b> — press <i>Pass Turn</i>.</div>
+              <div>1. <b style={{ color: '#ffd66e' }}>Untap</b> — your Nodes and Memes untap.</div>
+              <div>2. <b style={{ color: '#ffd66e' }}>Draw</b> — draw 1 card.</div>
+              <div>3. <b style={{ color: '#ffd66e' }}>Main</b> — play 1 Node, summon Memes, deploy Machines, cast Moves, tap Nodes for gas.</div>
+              <div>4. <b style={{ color: '#ffd66e' }}>Combat</b> — pick attackers, opponent picks blockers, damage resolves.</div>
+              <div>5. <b style={{ color: '#ffd66e' }}>End</b> — press <i>Pass Turn</i>.</div>
             </>
           ),
         },
       ]
     : [
         {
-          heading: '⚔️ Attacking',
+          heading: 'Attacking',
           body: 'During your turn click an untapped, non-sick meme to add it to the attack. Press the Attack button to swing — attackers tap.',
         },
         {
-          heading: '🛡️ Blocking',
+          heading: 'Blocking',
           body: 'When opponent attacks, click ONE of your untapped memes to select it as a blocker, then click the attacker you want it to block. Repeat for each block. Press Confirm Blocks when done.',
         },
         {
-          heading: '💥 Damage',
+          heading: 'Damage',
           body: 'In a fight, both memes deal their Power to each other. If a meme takes damage ≥ its Toughness it dies and goes to the graveyard. Unblocked attackers hit the defender\u2019s life total directly.',
         },
         {
-          heading: '🎴 Hand limit',
+          heading: 'Hand limit',
           body: 'No hand size limit during your turn. Drawing from an empty deck means you lose. Start with 7 cards.',
         },
         {
-          heading: '⚙️ Machines',
+          heading: 'Machines',
           body: 'Machines are permanent. As long as one is on the battlefield, its effect is active — e.g. "your memes get +1/+1." Stack multiple for stronger effects.',
         },
         {
-          heading: '🔥 Moves',
+          heading: 'Moves',
           body: 'Casting a Move resolves its effect right away, then sends it to the graveyard. Targeted Moves will ask you to click a target (meme, machine, or player).',
         },
         {
-          heading: '💡 First-game tips',
+          heading: 'First-game tips',
           body: (
             <>
               <div>• Play a Node every turn if you can — gas is everything.</div>
@@ -711,31 +711,40 @@ function RulesPanel({ side }: { side: 'left' | 'right' }) {
 
   return (
     <aside style={{
-      flex: '0 0 200px',
-      maxWidth: 220,
+      flex: '0 0 210px',
+      maxWidth: 230,
       alignSelf: 'stretch',
-      padding: 10,
-      background: 'rgba(15, 15, 22, 0.85)',
-      border: '1px solid #2a2a36',
+      padding: 12,
+      background: 'linear-gradient(180deg, rgba(26,18,64,0.92) 0%, rgba(10,10,30,0.92) 100%)',
+      border: '1px solid #4c1d95',
       borderRadius: 8,
-      color: '#dcdce4',
-      fontSize: 11.5,
-      lineHeight: 1.4,
-      fontFamily: 'system-ui, sans-serif',
+      boxShadow: '0 0 22px rgba(139,92,246,0.25), inset 0 0 24px rgba(0,0,0,0.45)',
+      color: '#ece1c7',
+      fontSize: 12,
+      lineHeight: 1.45,
+      fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif',
       maxHeight: '1100px',
       overflowY: 'auto',
     }}>
       <div style={{
-        fontWeight: 800, fontSize: 13, letterSpacing: 1,
-        color: '#ffd479', textTransform: 'uppercase',
-        borderBottom: '1px solid #3a3a48', paddingBottom: 6, marginBottom: 8,
+        fontFamily: '"Cinzel", "Times New Roman", serif',
+        fontWeight: 800, fontSize: 13, letterSpacing: 2,
+        color: '#f0b32a', textTransform: 'uppercase',
+        textShadow: '0 0 8px rgba(240,179,42,0.4)',
+        borderBottom: '1px solid rgba(240,179,42,0.35)', paddingBottom: 6, marginBottom: 10,
+        textAlign: 'center',
       }}>
-        {side === 'left' ? 'How to Play · Part 1' : 'How to Play · Part 2'}
+        {side === 'left' ? 'How to Play · I' : 'How to Play · II'}
       </div>
       {sections.map((s, i) => (
-        <div key={i} style={{ marginBottom: 10 }}>
-          <div style={{ fontWeight: 700, color: '#f0c674', marginBottom: 3 }}>{s.heading}</div>
-          <div style={{ color: '#bcbcc8' }}>{s.body}</div>
+        <div key={i} style={{ marginBottom: 12 }}>
+          <div style={{
+            fontFamily: '"Cinzel", "Times New Roman", serif',
+            fontWeight: 700, fontSize: 11.5, letterSpacing: 1.5,
+            color: '#b896ff', textTransform: 'uppercase',
+            marginBottom: 4,
+          }}>{s.heading}</div>
+          <div style={{ color: '#ece1c7' }}>{s.body}</div>
         </div>
       ))}
     </aside>

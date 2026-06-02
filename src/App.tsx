@@ -270,37 +270,50 @@ function BattleMusic() { return <BgMusic src="/battle-music.mp3" storageKey="bat
 // ── Rules page ─────────────────────────────────────────────────────────────
 function RulesPage({ onBack }: { onBack: () => void }) {
   return (
-    <div style={{ fontFamily: 'system-ui', background: '#0a0a0c', minHeight: '100vh', color: '#eee' }}>
-      <div style={{ padding: '14px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #222', position: 'sticky', top: 0, background: '#0a0a0c', zIndex: 5 }}>
+    <div style={{
+      fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif',
+      background: 'radial-gradient(ellipse at top, #1a1240 0%, #0a0a1e 55%, #050510 100%)',
+      minHeight: '100vh', color: '#ece1c7',
+    }}>
+      <div style={{
+        padding: '14px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        borderBottom: '1px solid #3a2a6a', position: 'sticky', top: 0,
+        background: 'linear-gradient(180deg, #0a0a1e 0%, rgba(10,10,30,0.92) 100%)', zIndex: 5,
+      }}>
         <button onClick={onBack} style={ghostBtn}>← Back</button>
-        <div style={{ fontWeight: 800, letterSpacing: 1.5 }}>RULES</div>
+        <div style={{
+          fontFamily: '"Cinzel", "Times New Roman", serif',
+          fontWeight: 800, letterSpacing: 4, fontSize: 18,
+          color: '#f0b32a',
+          textShadow: '0 0 14px rgba(240,179,42,0.45)',
+        }}>RULES</div>
         <div style={{ width: 80 }} />
       </div>
 
-      <div style={{ maxWidth: 820, margin: '0 auto', padding: '28px 22px 60px', lineHeight: 1.55 }}>
+      <div style={{ maxWidth: 820, margin: '0 auto', padding: '28px 22px 60px', lineHeight: 1.6, fontSize: 16 }}>
         <H1>Chains TCG — Quick Rules</H1>
 
-        <H2>🎯 Goal</H2>
+        <H2>Goal</H2>
         <P>Reduce your opponent's life from <B>20 → 0</B>. Last player standing wins.</P>
 
-        <H2>🛠️ Setup</H2>
+        <H2>Setup</H2>
         <UL items={[
-          <>Each player picks one of <B>5 chains</B>: 🟠 <CC c="#f3ba2f">BnB</CC> · 🟣 <CC c="#9945ff">Solana</CC> · 🟢 <CC c="#50d2c1">Hyperliquid</CC> · ⚪ <CC c="#cfd8dc">Ethereum</CC> · ⚫ <CC c="#8a8a8a">XRP</CC></>,
+          <>Each player picks one of <B>5 chains</B>: <CC c="#f3ba2f">BnB</CC> · <CC c="#9945ff">Solana</CC> · <CC c="#50d2c1">Hyperliquid</CC> · <CC c="#cfd8dc">Ethereum</CC> · <CC c="#8a8a8a">XRP</CC></>,
           <>Each gets a <B>60-card deck</B> in that color, shuffled.</>,
           <>Draw <B>7 cards</B>. Start at <B>20 life</B>.</>,
           <>Max hand size <B>7</B> at end of turn — discard down.</>,
           <>The player going <B>first does not draw on turn 1</B>; everyone else draws 1 at the start of their turn.</>,
         ]} />
 
-        <H2>🃏 The 4 Card Types</H2>
+        <H2>The 4 Card Types</H2>
         <Table rows={[
-          ['🟫 Node',    'Your "land". Free to play but only 1 per turn. Tap on a later turn to add 1 Gas of its color.'],
-          ['👹 Meme',    'Your creatures. Have Power / Toughness. Attack to deal damage to the opponent.'],
-          ['⚙️ Machine', 'Permanent ongoing effect (like an artifact/enchantment). Stays in play until destroyed.'],
-          ['⚡ Move',    'One-shot spell. Resolves immediately, then goes to the graveyard.'],
+          ['Node',    'Your "land". Free to play but only 1 per turn. Tap on a later turn to add 1 Gas of its color.'],
+          ['Meme',    'Your creatures. Have Power / Toughness. Attack to deal damage to the opponent.'],
+          ['Machine', 'Permanent ongoing effect (like an artifact/enchantment). Stays in play until destroyed.'],
+          ['Move',    'One-shot spell. Resolves immediately, then goes to the graveyard.'],
         ]} />
 
-        <H2>⛽ Gas (the mana system)</H2>
+        <H2>Gas (the mana system)</H2>
         <UL items={[
           <><B>Nodes generate Gas. Cards cost Gas.</B></>,
           <>Tap a Node → <B>+1 Gas</B> of its color.</>,
@@ -308,7 +321,7 @@ function RulesPage({ onBack }: { onBack: () => void }) {
           <>A cost can be all one color (e.g. 3 purple) or mixed.</>,
         ]} />
 
-        <H2>🔄 A turn, step by step</H2>
+        <H2>A turn, step by step</H2>
         <OL items={[
           <><B>Untap</B> — your Nodes/Memes/Machines untap. Summoning sickness wears off.</>,
           <><B>Draw 1</B> (skipped on the very first turn of the game).</>,
@@ -334,18 +347,18 @@ function RulesPage({ onBack }: { onBack: () => void }) {
           <><B>End turn</B> — unspent Gas evaporates, discard down to 7 cards.</>,
         ]} />
 
-        <H2>⏱️ 30-second teach</H2>
+        <H2>30-second teach</H2>
         <UL items={[
-          <>🟢 <B>Nodes = mana.</B> One per turn. Tap for gas.</>,
-          <>👹 <B>Memes = creatures.</B> Sick the turn they enter; can't attack.</>,
-          <>⚙️ <B>Machines = permanent passives.</B></>,
-          <>⚡ <B>Moves = one-shot effects.</B></>,
-          <>⚔️ <B>Combat:</B> attack with untapped memes → opponent blocks → damage swaps.</>,
-          <>💀 <B>Life = 20.</B> Hit zero, you lose.</>,
-          <>🔥 <B>Gas resets every turn — spend it.</B></>,
+          <><B>Nodes = mana.</B> One per turn. Tap for gas.</>,
+          <><B>Memes = creatures.</B> Sick the turn they enter; can't attack.</>,
+          <><B>Machines = permanent passives.</B></>,
+          <><B>Moves = one-shot effects.</B></>,
+          <><B>Combat:</B> attack with untapped memes → opponent blocks → damage swaps.</>,
+          <><B>Life = 20.</B> Hit zero, you lose.</>,
+          <><B>Gas resets every turn — spend it.</B></>,
         ]} />
 
-        <H2>🖱️ UI cheat-sheet</H2>
+        <H2>UI cheat-sheet</H2>
         <UL items={[
           <><B>Click an untapped node</B> = tap for gas.</>,
           <><B>Click a card in hand</B> = play it (move spells then ask you to pick a target).</>,
@@ -354,8 +367,8 @@ function RulesPage({ onBack }: { onBack: () => void }) {
           <>Press <B>End Turn</B> to pass.</>,
         ]} />
 
-        <P style={{ marginTop: 28, fontSize: 13, color: '#888' }}>
-          That's the whole game. Have fun. 🎉
+        <P style={{ marginTop: 28, fontSize: 14, color: '#a99878', fontStyle: 'italic' }}>
+          That's the whole game. Have fun.
         </P>
       </div>
     </div>
@@ -363,42 +376,60 @@ function RulesPage({ onBack }: { onBack: () => void }) {
 }
 
 function H1({ children }: { children: React.ReactNode }) {
-  return <h1 style={{ fontSize: 30, margin: '0 0 18px', letterSpacing: -0.5 }}>{children}</h1>;
+  return <h1 style={{
+    fontFamily: '"Cinzel", "Times New Roman", serif',
+    fontSize: 34, margin: '0 0 22px', letterSpacing: 1,
+    color: '#f0b32a',
+    textShadow: '0 0 18px rgba(240,179,42,0.4), 0 2px 0 #2a1a05',
+  }}>{children}</h1>;
 }
 function H2({ children }: { children: React.ReactNode }) {
-  return <h2 style={{ fontSize: 18, margin: '26px 0 8px', color: '#ffd066', letterSpacing: 0.3 }}>{children}</h2>;
+  return <h2 style={{
+    fontFamily: '"Cinzel", "Times New Roman", serif',
+    fontSize: 20, margin: '30px 0 10px', letterSpacing: 2,
+    color: '#b896ff',
+    textTransform: 'uppercase',
+    textShadow: '0 0 10px rgba(139,92,246,0.35)',
+    borderBottom: '1px solid rgba(139,92,246,0.25)', paddingBottom: 4,
+  }}>{children}</h2>;
 }
 function P({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  return <p style={{ margin: '6px 0', color: '#dcdcdc', ...style }}>{children}</p>;
+  return <p style={{ margin: '8px 0', color: '#ece1c7', ...style }}>{children}</p>;
 }
 function B({ children }: { children: React.ReactNode }) {
-  return <b style={{ color: '#fff' }}>{children}</b>;
+  return <b style={{ color: '#ffd66e' }}>{children}</b>;
 }
 function CC({ c, children }: { c: string; children: React.ReactNode }) {
   return <span style={{ color: c, fontWeight: 700 }}>{children}</span>;
 }
 function UL({ items }: { items: React.ReactNode[] }) {
   return (
-    <ul style={{ margin: '6px 0 6px 22px', padding: 0, color: '#dcdcdc' }}>
-      {items.map((it, i) => <li key={i} style={{ marginBottom: 4 }}>{it}</li>)}
+    <ul style={{ margin: '6px 0 6px 22px', padding: 0, color: '#ece1c7' }}>
+      {items.map((it, i) => <li key={i} style={{ marginBottom: 5 }}>{it}</li>)}
     </ul>
   );
 }
 function OL({ items }: { items: React.ReactNode[] }) {
   return (
-    <ol style={{ margin: '6px 0 6px 22px', padding: 0, color: '#dcdcdc' }}>
-      {items.map((it, i) => <li key={i} style={{ marginBottom: 8 }}>{it}</li>)}
+    <ol style={{ margin: '6px 0 6px 22px', padding: 0, color: '#ece1c7' }}>
+      {items.map((it, i) => <li key={i} style={{ marginBottom: 10 }}>{it}</li>)}
     </ol>
   );
 }
 function Table({ rows }: { rows: [string, string][] }) {
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', margin: '8px 0' }}>
+    <table style={{ width: '100%', borderCollapse: 'collapse', margin: '10px 0' }}>
       <tbody>
         {rows.map(([k, v], i) => (
-          <tr key={i} style={{ borderTop: '1px solid #222' }}>
-            <td style={{ padding: '8px 10px', width: 140, fontWeight: 700, color: '#fff', verticalAlign: 'top' }}>{k}</td>
-            <td style={{ padding: '8px 10px', color: '#dcdcdc' }}>{v}</td>
+          <tr key={i} style={{ borderTop: '1px solid rgba(139,92,246,0.22)' }}>
+            <td style={{
+              padding: '10px 12px', width: 160,
+              fontFamily: '"Cinzel", "Times New Roman", serif',
+              fontWeight: 700, color: '#f0b32a',
+              letterSpacing: 1, textTransform: 'uppercase', fontSize: 13,
+              verticalAlign: 'top',
+            }}>{k}</td>
+            <td style={{ padding: '10px 12px', color: '#ece1c7' }}>{v}</td>
           </tr>
         ))}
       </tbody>
