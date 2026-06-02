@@ -59,6 +59,13 @@ const local = {
 type Seat = { matchID: string; playerID: string; credentials: string; playerName: string };
 
 // ── Login screen ────────────────────────────────────────────────────────────
+// ── Login screen (premium fantasy gateway) ──────────────────────────────────
+const LOGIN_NAMES = [
+  'MoonPepe', 'GasWizard', 'RuneKnight', 'ChainLord', 'HyperMage',
+  'DegenPaladin', 'VoidPepe', 'CryptoWarden', 'ArcaneBull', 'MemeKing',
+  'NodeShaman', 'AlphaSeer', 'PixelOracle', 'ShardSorcerer', 'FrogLord',
+];
+
 function Login({ onLogin, onFirstTime }: {
   onLogin: (name: string) => void;
   onFirstTime: (wallet: ConnectedWallet) => void;
@@ -79,41 +86,356 @@ function Login({ onLogin, onFirstTime }: {
     } finally { setBusy(null); }
   }
 
-  return (
-    <Screen title="Memetic Masters TCG — Sign In">
-      <p style={{ color: '#aaa', marginTop: 0 }}>Connect your wallet to play. Your W/L is tracked globally.</p>
+  function randomName() {
+    const pick = LOGIN_NAMES[Math.floor(Math.random() * LOGIN_NAMES.length)];
+    const suffix = Math.floor(Math.random() * 9000) + 1000;
+    setName(`${pick}${suffix}`);
+  }
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 380 }}>
-        <button onClick={() => doConnect('evm')} disabled={!!busy}
-          style={{ ...primaryBtn(true), background: 'linear-gradient(90deg,#f6851b,#e2761b)', padding: '14px 18px', fontSize: 14, letterSpacing: 0.5 }}>
-          {busy === 'evm' ? 'Connecting…' : '🦊  Connect EVM Wallet (MetaMask / Rabby / Coinbase)'}
-        </button>
-        <button onClick={() => doConnect('sol')} disabled={!!busy}
-          style={{ ...primaryBtn(true), background: 'linear-gradient(90deg,#9945ff,#14f195)', padding: '14px 18px', fontSize: 14, letterSpacing: 0.5 }}>
-          {busy === 'sol' ? 'Connecting…' : '👻  Connect Phantom (Solana)'}
-        </button>
+  const GOLD = '#D4AF37';
+  const PURPLE = '#8A2BE2';
+  const CYAN = '#4FD1C5';
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, overflow: 'auto',
+      fontFamily: "'Inter', 'Geist', 'Satoshi', system-ui, -apple-system, sans-serif",
+      color: '#F8F8F8',
+      background: 'linear-gradient(180deg, #050514 0%, #0A0A22 35%, #120A35 70%, #1A103D 100%)',
+    }}>
+      <style>{`
+        @keyframes loginGlow {
+          0%, 100% { text-shadow: 0 0 22px rgba(212,175,55,0.50), 0 0 6px rgba(212,175,55,0.7); }
+          50%      { text-shadow: 0 0 40px rgba(212,175,55,0.95), 0 0 10px rgba(212,175,55,1); }
+        }
+        @keyframes loginFloat {
+          0%   { transform: translateY(0) translateX(0); opacity: 0; }
+          12%  { opacity: 0.55; }
+          88%  { opacity: 0.45; }
+          100% { transform: translateY(-120vh) translateX(24px); opacity: 0; }
+        }
+        @keyframes loginFade {
+          from { opacity: 0; transform: translateY(10px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes loginIdleFloat {
+          0%, 100% { transform: translateY(0); }
+          50%      { transform: translateY(-10px); }
+        }
+        @keyframes loginFog {
+          0%   { transform: translateX(-6%); }
+          100% { transform: translateX(6%); }
+        }
+        @keyframes loginPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(212,175,55,0.55); }
+          70%      { box-shadow: 0 0 0 14px rgba(212,175,55,0); }
+        }
+        @keyframes loginCount { from { opacity: 0; } to { opacity: 1; } }
+        .login-fadein { animation: loginFade 500ms ease both; }
+        .login-walletcard { transition: transform 220ms ease, box-shadow 220ms ease, filter 220ms ease; }
+        .login-walletcard:hover { transform: translateY(-4px) scale(1.02); filter: brightness(1.08); }
+        .login-cta { transition: transform 200ms ease, filter 200ms ease; }
+        .login-cta:hover { transform: scale(1.03); filter: brightness(1.08); }
+      `}</style>
+
+      {/* Background image layer */}
+      <div aria-hidden style={{
+        position: 'fixed', inset: 0, zIndex: 0,
+        backgroundImage: 'url(/lobby-bg.png?v=2)',
+        backgroundSize: 'cover', backgroundPosition: 'center',
+        filter: 'blur(3px) brightness(0.35) saturate(0.85)',
+      }} />
+      <div aria-hidden style={{
+        position: 'fixed', inset: 0, zIndex: 0,
+        background: 'radial-gradient(ellipse at 30% 20%, rgba(138,43,226,0.30), transparent 55%), radial-gradient(ellipse at 80% 80%, rgba(79,209,197,0.18), transparent 55%), linear-gradient(180deg, rgba(5,5,20,0.65), rgba(5,5,20,0.85))',
+      }} />
+      {/* Drifting fog */}
+      <div aria-hidden style={{
+        position: 'fixed', inset: '-10%', zIndex: 0,
+        background: 'radial-gradient(circle at 20% 30%, rgba(138,43,226,0.10), transparent 40%), radial-gradient(circle at 80% 70%, rgba(212,175,55,0.08), transparent 45%)',
+        animation: 'loginFog 22s ease-in-out infinite alternate',
+      }} />
+      {/* Floating particles */}
+      <div aria-hidden style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 1 }}>
+        {Array.from({ length: 22 }).map((_, i) => {
+          const left = (i * 47) % 100;
+          const dur = 14 + (i % 8) * 2;
+          const delay = (i % 11) * 1.3;
+          const size = 2 + (i % 4);
+          const tint = i % 4 === 0 ? CYAN : (i % 3 === 0 ? PURPLE : GOLD);
+          return (
+            <span key={i} style={{
+              position: 'absolute', bottom: -10, left: `${left}%`,
+              width: size, height: size, borderRadius: '50%',
+              background: tint, boxShadow: `0 0 ${size * 3}px ${tint}`,
+              animation: `loginFloat ${dur}s linear ${delay}s infinite`,
+            }} />
+          );
+        })}
       </div>
 
-      {err && <Banner kind="error">{err}</Banner>}
+      {/* Content grid */}
+      <div style={{
+        position: 'relative', zIndex: 2,
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '40px 22px',
+      }}>
+        <div style={{
+          display: 'grid', gap: 36, alignItems: 'center',
+          gridTemplateColumns: 'minmax(0, 1fr)',
+          maxWidth: 1180, width: '100%',
+        }} className="login-layout">
+          <style>{`
+            @media (min-width: 980px) {
+              .login-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 560px) !important; }
+              .login-char { display: flex !important; }
+            }
+          `}</style>
 
-      <div style={{ marginTop: 30, paddingTop: 18, borderTop: '1px solid #222' }}>
-        <div style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>or continue as guest</div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input
-            value={name}
-            onChange={e => setName(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && name.trim()) onLogin(name.trim()); }}
-            placeholder="display name"
-            style={inputStyle}
-          />
-          <button
-            onClick={() => name.trim() && onLogin(name.trim())}
-            disabled={!name.trim()}
-            style={primaryBtn(!!name.trim())}
-          >Continue</button>
+          {/* Character artwork (desktop) */}
+          <div className="login-char login-fadein" style={{
+            display: 'none', justifyContent: 'center', alignItems: 'center',
+            position: 'relative', minHeight: 480,
+          }}>
+            <div style={{
+              position: 'absolute', width: 460, height: 460,
+              background: `radial-gradient(circle, ${PURPLE}33 0%, transparent 65%)`,
+              filter: 'blur(8px)',
+            }} />
+            <img src="/intro.png" alt="" style={{
+              position: 'relative', zIndex: 1,
+              maxWidth: '100%', maxHeight: '70vh', width: 'auto',
+              borderRadius: 18,
+              filter: `drop-shadow(0 18px 38px ${PURPLE}55) drop-shadow(0 4px 18px ${GOLD}33)`,
+              animation: 'loginIdleFloat 6s ease-in-out infinite',
+            }} />
+          </div>
+
+          {/* Login + extras column */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            {/* Hero */}
+            <div className="login-fadein" style={{ textAlign: 'center', marginBottom: 4 }}>
+              <div style={{
+                fontFamily: '"Cinzel", "Times New Roman", serif',
+                fontWeight: 900, fontSize: 'clamp(28px, 4.2vw, 44px)', letterSpacing: 6,
+                color: GOLD,
+                animation: 'loginGlow 3.6s ease-in-out infinite',
+                background: 'linear-gradient(180deg, #ffe28a 0%, #d4af37 55%, #8a6a16 100%)',
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.7))',
+              }}>⚔ MEMETIC MASTERS</div>
+              <div style={{
+                fontFamily: '"Cinzel", "Times New Roman", serif',
+                fontWeight: 600, letterSpacing: 8, fontSize: 14, color: PURPLE,
+                marginTop: 4, textShadow: `0 0 14px ${PURPLE}88`,
+              }}>ENTER THE ARENA</div>
+              <div style={{
+                marginTop: 8, fontSize: 13, color: '#bdb6a8', maxWidth: 460, marginLeft: 'auto', marginRight: 'auto',
+              }}>A fantasy trading card game where memes become legends.</div>
+            </div>
+
+            {/* Login panel */}
+            <div className="login-fadein" style={{
+              background: 'rgba(20,20,40,0.78)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+              border: `1px solid ${GOLD}40`, borderRadius: 24,
+              padding: 24,
+              boxShadow: `0 0 40px ${PURPLE}33, 0 16px 50px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)`,
+            }}>
+              <div style={{
+                fontFamily: '"Cinzel", "Times New Roman", serif',
+                fontSize: 13, fontWeight: 700, letterSpacing: 4, color: GOLD,
+                textAlign: 'center', marginBottom: 14,
+              }}>CONNECT YOUR REALM</div>
+
+              {/* Wallet cards */}
+              <div style={{
+                display: 'grid', gap: 12,
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              }}>
+                {/* EVM */}
+                <button
+                  className="login-walletcard"
+                  onClick={() => doConnect('evm')}
+                  disabled={!!busy}
+                  style={{
+                    background: 'linear-gradient(135deg, #f7931a 0%, #ffb347 100%)',
+                    color: '#1a1408',
+                    border: 'none', borderRadius: 14,
+                    padding: '16px 16px', cursor: busy ? 'not-allowed' : 'pointer',
+                    textAlign: 'left', fontFamily: 'inherit',
+                    boxShadow: '0 10px 26px rgba(247,147,26,0.32), inset 0 1px 0 rgba(255,255,255,0.25)',
+                    opacity: busy ? 0.6 : 1,
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 3, opacity: 0.85 }}>🛡 EVM REALMS</div>
+                  <div style={{ fontFamily: '"Cinzel", serif', fontSize: 18, fontWeight: 800, letterSpacing: 1, marginTop: 4 }}>
+                    {busy === 'evm' ? 'Summoning…' : 'MetaMask · Rabby · Coinbase'}
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>
+                    {busy === 'evm' ? '…' : '→ Connect Wallet'}
+                  </div>
+                </button>
+
+                {/* Solana */}
+                <button
+                  className="login-walletcard"
+                  onClick={() => doConnect('sol')}
+                  disabled={!!busy}
+                  style={{
+                    background: 'linear-gradient(135deg, #8A2BE2 0%, #4FD1C5 100%)',
+                    color: '#0a0a18',
+                    border: 'none', borderRadius: 14,
+                    padding: '16px 16px', cursor: busy ? 'not-allowed' : 'pointer',
+                    textAlign: 'left', fontFamily: 'inherit',
+                    boxShadow: '0 10px 26px rgba(138,43,226,0.40), inset 0 1px 0 rgba(255,255,255,0.25)',
+                    opacity: busy ? 0.6 : 1,
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 3, opacity: 0.85 }}>⚡ SOLANA KINGDOM</div>
+                  <div style={{ fontFamily: '"Cinzel", serif', fontSize: 18, fontWeight: 800, letterSpacing: 1, marginTop: 4 }}>
+                    {busy === 'sol' ? 'Summoning…' : 'Phantom Wallet'}
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>
+                    {busy === 'sol' ? '…' : '→ Connect Wallet'}
+                  </div>
+                </button>
+              </div>
+
+              {err && (
+                <div style={{
+                  marginTop: 14, padding: '10px 12px', borderRadius: 8,
+                  background: 'rgba(217,75,75,0.12)', border: '1px solid rgba(217,75,75,0.45)',
+                  color: '#ffb8b8', fontSize: 13,
+                }}>{err}</div>
+              )}
+
+              {/* Divider */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 12, margin: '20px 2px 16px',
+              }}>
+                <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, transparent, ${GOLD}66, transparent)` }} />
+                <div style={{
+                  fontFamily: '"Cinzel", serif', fontSize: 11, letterSpacing: 4, color: GOLD, fontWeight: 700,
+                }}>OR</div>
+                <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, transparent, ${GOLD}66, transparent)` }} />
+              </div>
+
+              {/* Guest */}
+              <div>
+                <div style={{
+                  fontFamily: '"Cinzel", serif', fontSize: 13, fontWeight: 700, letterSpacing: 4, color: GOLD,
+                  textAlign: 'center', marginBottom: 10,
+                }}>ENTER AS GUEST</div>
+                <label style={{
+                  display: 'block', fontSize: 11, color: '#9c9282', letterSpacing: 2, fontWeight: 700,
+                  textTransform: 'uppercase', marginBottom: 6,
+                }}>Choose your summoner name</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && name.trim()) onLogin(name.trim()); }}
+                    placeholder="e.g. MoonPepe"
+                    style={{
+                      flex: 1, padding: '12px 14px', fontSize: 14,
+                      background: 'rgba(10,10,20,0.75)', color: '#fff',
+                      border: `1px solid ${GOLD}55`, borderRadius: 10, outline: 'none',
+                      fontFamily: 'inherit',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={randomName}
+                    title="Generate name"
+                    style={{
+                      padding: '0 14px', fontSize: 13, fontWeight: 700,
+                      background: 'rgba(138,43,226,0.18)', color: '#d6c4ff',
+                      border: `1px solid ${PURPLE}66`, borderRadius: 10, cursor: 'pointer',
+                      fontFamily: 'inherit', whiteSpace: 'nowrap',
+                    }}
+                  >🎲 Random</button>
+                </div>
+
+                <button
+                  className="login-cta"
+                  onClick={() => name.trim() && onLogin(name.trim())}
+                  disabled={!name.trim()}
+                  style={{
+                    marginTop: 14, width: '100%',
+                    padding: '14px 18px',
+                    background: name.trim()
+                      ? 'linear-gradient(135deg, #D4AF37 0%, #F6D365 100%)'
+                      : 'rgba(60,55,30,0.45)',
+                    color: name.trim() ? '#050514' : '#7a7060',
+                    border: 'none', borderRadius: 12,
+                    fontFamily: '"Cinzel", serif', fontWeight: 800,
+                    letterSpacing: 4, fontSize: 15, textTransform: 'uppercase',
+                    cursor: name.trim() ? 'pointer' : 'not-allowed',
+                    boxShadow: name.trim() ? `0 0 24px ${GOLD}66, 0 8px 22px rgba(0,0,0,0.5)` : 'none',
+                    animation: name.trim() ? 'loginPulse 2.4s ease-out infinite' : 'none',
+                  }}
+                >⚔ Enter Arena</button>
+              </div>
+            </div>
+
+            {/* Feature cards */}
+            <div className="login-fadein" style={{
+              display: 'grid', gap: 8,
+              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+            }}>
+              {[
+                { i: '⚔️', t: 'Strategic Battles' },
+                { i: '🃏', t: 'Collect Cards' },
+                { i: '⛽', t: 'Master Gas' },
+                { i: '🌐', t: 'Multi-Chain' },
+                { i: '🏆', t: 'Climb Ranked' },
+              ].map(f => (
+                <div key={f.t} style={{
+                  background: 'rgba(20,20,40,0.55)', backdropFilter: 'blur(6px)',
+                  border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10,
+                  padding: '10px 8px', textAlign: 'center',
+                }}>
+                  <div style={{ fontSize: 18, filter: `drop-shadow(0 0 6px ${GOLD}88)` }}>{f.i}</div>
+                  <div style={{ marginTop: 2, fontSize: 11, color: '#c8bea8', fontWeight: 600, letterSpacing: 0.5 }}>{f.t}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Live stats */}
+            <div className="login-fadein" style={{
+              display: 'grid', gap: 8,
+              gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+            }}>
+              <LoginStat label="Players Online" value="1,284" color={CYAN} />
+              <LoginStat label="Games Today"   value="6,492" color={GOLD} />
+              <LoginStat label="Cards"         value="427"   color={PURPLE} />
+              <LoginStat label="Season"        value="Genesis" color={'#ff6b6b'} />
+            </div>
+
+            <div style={{ textAlign: 'center', fontSize: 11, color: '#6a6253', letterSpacing: 1, marginTop: 6 }}>
+              $MASTER · DpPowzjETiU6421ReuwBB8XmDB7sMyB2JGzFLssYpump
+            </div>
+          </div>
         </div>
       </div>
-    </Screen>
+    </div>
+  );
+}
+
+function LoginStat({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div style={{
+      background: 'rgba(20,20,40,0.55)', backdropFilter: 'blur(6px)',
+      border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10,
+      padding: '10px 12px', textAlign: 'center',
+      animation: 'loginCount 700ms ease both',
+    }}>
+      <div style={{
+        fontFamily: '"Cinzel", serif', fontWeight: 800, fontSize: 18, color,
+        textShadow: `0 0 12px ${color}55`,
+      }}>{value}</div>
+      <div style={{ fontSize: 10, color: '#9c9282', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', marginTop: 2 }}>{label}</div>
+    </div>
   );
 }
 
