@@ -13,7 +13,7 @@ import {
   getDeckApi, saveDeckApi, formatRecord, type Profile, type LibraryCard,
   createChallengeApi, listIncomingChallengesApi, listOutgoingChallengesApi, respondChallengeApi, type Challenge,
 } from './profiles';
-import { connectEvm, connectSolana, getPhantom, shortAddr, type ConnectedWallet } from './wallet';
+import { connectEvm, connectSolana, getSolanaWallet, detectSolanaWallets, shortAddr, type ConnectedWallet, type SolanaWalletKind } from './wallet';
 import { CardHover } from './CardPreview';
 import { RankedAPI, tierColors, rankLabel, type PublicRankedProfile, type LeaderboardEntry } from './ranked-client';
 import { Connection } from '@solana/web3.js';
@@ -2696,6 +2696,14 @@ function Lobby({
     return () => { alive = false; };
   }, [myName]);
 
+  // ── Solana wallet picker (Phantom / Solflare / Backpack) ───────────────────
+  const [walletPicker, setWalletPicker] = useState<null | {
+    resolve: (kind: SolanaWalletKind) => void; reject: (e: Error) => void;
+  }>(null);
+  const pickSolanaWallet = useCallback((): Promise<SolanaWalletKind> => {
+    return new Promise((resolve, reject) => setWalletPicker({ resolve, reject }));
+  }, []);
+
   // ── Challenges: poll both incoming and outgoing every 5s ────────────────────
   const [incomingChallenges, setIncomingChallenges] = useState<Challenge[]>([]);
   const [outgoingChallenges, setOutgoingChallenges] = useState<Challenge[]>([]);
@@ -2766,7 +2774,8 @@ function Lobby({
       // we never have a "ghost" wagered match that the creator didn't actually
       // back. Phantom prompts for signature.
       if (wager && wager.kind === 'master') {
-        const phantom = await getPhantom();
+        const kind = await pickSolanaWallet();
+        const phantom = await getSolanaWallet(kind);
         const matchIdBuf = newMatchId();
         const conn = solConn();
         const ixs = await ixCreateMatch({
@@ -2830,7 +2839,8 @@ function Lobby({
         return;
       }
       if (wager && wager.kind === 'master') {
-        const phantom = await getPhantom();
+        const kind = await pickSolanaWallet();
+        const phantom = await getSolanaWallet(kind);
         const matchIdBuf = newMatchId();
         const conn = solConn();
         const ixs = await ixCreateMatch({
@@ -2968,7 +2978,8 @@ function Lobby({
           setError('This wagered match was created without on-chain escrow; cannot join.');
           return;
         }
-        const phantom = await getPhantom();
+        const kind = await pickSolanaWallet();
+        const phantom = await getSolanaWallet(kind);
         const matchIdBuf = matchIdFromHex(w.onchainId);
         const conn = solConn();
         const ixs = await ixJoinMatch({
@@ -3056,6 +3067,13 @@ function Lobby({
               onDecline={declineChallenge}
             />
           </div>
+        )}
+
+        {walletPicker && (
+          <SolanaWalletPicker
+            onPick={k => { walletPicker.resolve(k); setWalletPicker(null); }}
+            onCancel={() => { walletPicker.reject(new Error('Wallet selection canceled.')); setWalletPicker(null); }}
+          />
         )}
 
         <div style={{
@@ -3835,6 +3853,79 @@ function ChallengePanel(props: {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INCOMING CHALLENGES BANNER
+// ─────────────────────────────────────────────────────────────────────────────
+function SolanaWalletPicker({ onPick, onCancel }: {
+  onPick: (kind: SolanaWalletKind) => void;
+  onCancel: () => void;
+}) {
+  const wallets = useMemo(() => detectSolanaWallets(), []);
+  const installLinks: Record<SolanaWalletKind, string> = {
+    phantom:  'https://phantom.app/',
+    solflare: 'https://solflare.com/',
+    backpack: 'https://backpack.app/',
+  };
+  return (
+    <div onClick={onCancel} style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(4,6,12,0.78)', backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 16,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        ...glassPanelStyle(),
+        width: 'min(440px, 100%)', padding: 22,
+        borderColor: 'rgba(143,92,255,0.55)',
+        boxShadow: '0 0 32px rgba(143,92,255,0.25)',
+      }}>
+        <div style={{
+          fontFamily: '"Cinzel", serif', fontSize: 18, fontWeight: 800,
+          color: '#fff', letterSpacing: 1, marginBottom: 4,
+        }}>Choose Your Wallet</div>
+        <div style={{ fontSize: 12, color: LOBBY_TOKENS.muted, marginBottom: 16 }}>
+          Sign the $MASTER wager deposit with your preferred Solana wallet.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {wallets.map(w => (
+            <button
+              key={w.kind}
+              onClick={() => w.installed ? onPick(w.kind) : window.open(installLinks[w.kind], '_blank', 'noopener')}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '12px 16px', borderRadius: 10,
+                background: w.installed
+                  ? 'linear-gradient(135deg, rgba(143,92,255,0.18), rgba(143,92,255,0.06))'
+                  : 'rgba(255,255,255,0.03)',
+                border: `1px solid ${w.installed ? 'rgba(143,92,255,0.55)' : LOBBY_TOKENS.border}`,
+                color: '#fff', fontFamily: PROFILE_FONT, fontSize: 14, fontWeight: 700,
+                cursor: 'pointer', transition: 'all 180ms ease',
+              }}
+              onMouseEnter={e => { if (w.installed) e.currentTarget.style.transform = 'translateY(-1px)'; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 20 }}>
+                  {w.kind === 'phantom' ? '👻' : w.kind === 'solflare' ? '🔥' : '🎒'}
+                </span>
+                <span>{w.label}</span>
+              </span>
+              <span style={{
+                fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase',
+                color: w.installed ? '#c8a3ff' : LOBBY_TOKENS.muted,
+              }}>{w.installed ? 'Connect' : 'Install →'}</span>
+            </button>
+          ))}
+        </div>
+        <button onClick={onCancel} style={{
+          marginTop: 14, width: '100%', padding: '8px',
+          background: 'transparent', border: `1px solid ${LOBBY_TOKENS.border}`,
+          color: LOBBY_TOKENS.muted, borderRadius: 8, cursor: 'pointer',
+          fontSize: 12, fontWeight: 700, letterSpacing: 1,
+        }}>CANCEL</button>
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 function IncomingChallengesBanner({ challenges, onAccept, onDecline }: {
   challenges: Challenge[];
