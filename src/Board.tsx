@@ -77,13 +77,18 @@ function CardFace({
   if (!def) return null;
   const meta = COLOR_META[def.color];
   const dimmed = instance?.summoningSick || instance?.tapped;
+  const isHl = def.color === 'hl';
   return (
     <CardHover defId={defId}>
     <div onClick={onClick}
       style={{
-        width: W, height: H, margin: 2, padding: 5, borderRadius: 8,
-        background: meta.hex, color: meta.ink,
-        border: selected ? '3px solid #ff0' : '1px solid #000',
+        width: W, height: H, margin: 2, padding: isHl ? 0 : 5, borderRadius: 8,
+        background: isHl ? undefined : meta.hex,
+        backgroundImage: isHl ? 'url(/template-hl.jpg)' : undefined,
+        backgroundSize: isHl ? '100% 100%' : undefined,
+        backgroundRepeat: 'no-repeat',
+        color: meta.ink,
+        border: selected ? '3px solid #ff0' : (isHl ? 'none' : '1px solid #000'),
         cursor: onClick ? 'pointer' : 'default',
         boxShadow: instance?.tapped ? 'inset 0 0 0 4px #0008' : undefined,
         transform: instance?.tapped ? 'rotate(8deg)' : undefined,
@@ -92,6 +97,7 @@ function CardFace({
         display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
         position: 'relative', flex: '0 0 auto',
       }}>
+      {isHl ? <HlCardFaceContent def={def} instance={instance} footer={footer} /> : <>
       <div style={{ fontWeight: 700, fontSize: 10, lineHeight: 1.05 }}>{def.name}</div>
       <div style={{ fontSize: 8, opacity: 0.85, marginTop: 1, lineHeight: 1.1 }}>
         {def.type.toUpperCase()}
@@ -106,8 +112,84 @@ function CardFace({
       )}
       <CostPips def={def} />
       {footer && <div style={{ fontSize: 8, lineHeight: 1.1 }}>{footer}</div>}
+      </>}
     </div>
     </CardHover>
+  );
+}
+
+/** Content placed inside the Hyperliquid green frame template. */
+function HlCardFaceContent({ def, instance, footer }: { def: CardDef; instance?: Instance; footer?: React.ReactNode }) {
+  const meta = COLOR_META[def.color];
+  return (
+    <>
+      {/* Name on the top grey bar */}
+      <div style={{
+        position: 'absolute', top: '5.6%', left: '9%', right: '9%', height: '5%',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 4, padding: '0 4px',
+        fontSize: 8, fontWeight: 800, color: '#1a1a1a',
+      }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.name}</span>
+        {def.cost && (
+          <span style={{ display: 'flex', gap: 1 }}>
+            {COLORS.map(c => {
+              const n = def.cost?.[c] ?? 0; if (!n) return null;
+              const cm = COLOR_META[c];
+              return (
+                <span key={c} style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 10, height: 10, borderRadius: 5,
+                  background: cm.hex, color: cm.ink,
+                  fontWeight: 800, fontSize: 7,
+                }}>{n}</span>
+              );
+            })}
+          </span>
+        )}
+      </div>
+      {/* Art zone — chain glyph */}
+      <div style={{
+        position: 'absolute', top: '13%', left: '8.5%', right: '8.5%', height: '44%',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: `radial-gradient(circle at 50% 40%, ${meta.hex}, #061a0c 75%)`,
+        color: meta.ink, fontWeight: 900, fontSize: 18, letterSpacing: 2,
+        textShadow: '0 2px 6px #000',
+      }}>
+        HL
+        {instance?.summoningSick && <span style={{ marginLeft: 3, color: '#000', background: '#ffeb3b', padding: '0 3px', borderRadius: 2, fontSize: 6 }}>SICK</span>}
+        {instance?.tapped && !instance?.summoningSick && <span style={{ marginLeft: 3, color: '#000', background: '#aaa', padding: '0 3px', borderRadius: 2, fontSize: 6 }}>TAP</span>}
+      </div>
+      {/* Type bar */}
+      <div style={{
+        position: 'absolute', top: '58.5%', left: '9%', right: '9%', height: '4.5%',
+        display: 'flex', alignItems: 'center', padding: '0 4px',
+        fontSize: 7, fontWeight: 700, color: '#1a1a1a',
+        letterSpacing: 0.5, textTransform: 'uppercase',
+      }}>
+        {def.type}
+      </div>
+      {/* Rules text box */}
+      <div style={{
+        position: 'absolute', top: '67%', left: '9%', right: '9%', bottom: '7%',
+        padding: '3px 5px',
+        fontSize: 7, lineHeight: 1.15, color: '#1a1a1a',
+        overflow: 'hidden',
+      }}>
+        {def.text}
+        {def.type === 'meme' && (
+          <div style={{
+            position: 'absolute', right: 4, bottom: 2,
+            fontWeight: 800, fontSize: 10, color: '#1a1a1a',
+            padding: '0 4px', background: '#e8e6c8',
+            border: '1px solid #4a5a3a', borderRadius: 2,
+          }}>
+            {def.power}/{(def.toughness ?? 1) - (instance?.damage ?? 0)}
+          </div>
+        )}
+        {footer && <div style={{ fontSize: 6, lineHeight: 1.05, marginTop: 2 }}>{footer}</div>}
+      </div>
+    </>
   );
 }
 

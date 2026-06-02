@@ -8,6 +8,7 @@ const PREVIEW_W = 280;
 const PREVIEW_H = 400;
 
 export function CardPreview({ def }: { def: CardDef }) {
+  if (def.color === 'hl') return <HyperliquidPreview def={def} />;
   const meta = COLOR_META[def.color];
   return (
     <div style={{
@@ -71,6 +72,92 @@ export function CardPreview({ def }: { def: CardDef }) {
           {def.power}/{def.toughness}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Hyperliquid template — renders content into the slots of the green MTG-style
+ * frame in /public/template-hl.jpg. Used for any card whose color is 'hl'.
+ */
+export function HyperliquidPreview({ def }: { def: CardDef }) {
+  const meta = COLOR_META[def.color];
+  return (
+    <div style={{
+      position: 'relative', width: PREVIEW_W, height: PREVIEW_H,
+      backgroundImage: 'url(/template-hl.jpg)',
+      backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat',
+      borderRadius: 10, boxShadow: '0 12px 40px rgba(0,0,0,0.75)',
+      fontFamily: 'system-ui, sans-serif', color: '#1a1a1a',
+      pointerEvents: 'none',
+    }}>
+      {/* Title bar */}
+      <div style={{
+        position: 'absolute', top: '5.6%', left: '9%', right: '9%', height: '5%',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0 8px', gap: 6,
+      }}>
+        <div style={{ fontWeight: 800, fontSize: 14, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {def.name}
+        </div>
+        {def.cost && (
+          <div style={{ display: 'flex', gap: 3 }}>
+            {COLORS.map(c => {
+              const n = def.cost?.[c] ?? 0; if (!n) return null;
+              const cm = COLOR_META[c];
+              return (
+                <span key={c} style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 18, height: 18, borderRadius: 9,
+                  background: cm.hex, color: cm.ink,
+                  border: '1px solid #0007', fontWeight: 800, fontSize: 11,
+                }}>{n}</span>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Art area — solid color block over the black frame, with the chain glyph */}
+      <div style={{
+        position: 'absolute', top: '13%', left: '8.5%', right: '8.5%', height: '44%',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: `radial-gradient(circle at 50% 40%, ${meta.hex}, #061a0c 75%)`,
+        color: meta.ink,
+      }}>
+        <div style={{ fontWeight: 900, fontSize: 56, letterSpacing: 4, textShadow: '0 3px 10px #000' }}>
+          HL
+        </div>
+      </div>
+
+      {/* Type bar */}
+      <div style={{
+        position: 'absolute', top: '58.5%', left: '9%', right: '9%', height: '4.5%',
+        display: 'flex', alignItems: 'center', padding: '0 8px',
+        fontSize: 11, fontWeight: 700, color: '#1a1a1a', letterSpacing: 1, textTransform: 'uppercase',
+      }}>
+        {def.type} · {meta.name}
+      </div>
+
+      {/* Text box */}
+      <div style={{
+        position: 'absolute', top: '67%', left: '9%', right: '9%', bottom: '7%',
+        padding: '8px 10px',
+        fontSize: 12, lineHeight: 1.35, color: '#1a1a1a',
+        overflow: 'hidden',
+      }}>
+        {def.text || (def.type === 'meme' ? `A ${def.power}/${def.toughness} ${meta.name} meme.` : '—')}
+        {def.type === 'meme' && (
+          <div style={{
+            position: 'absolute', right: 12, bottom: 6,
+            fontWeight: 800, fontSize: 20, color: '#1a1a1a',
+            padding: '2px 8px', background: '#e8e6c8',
+            border: '1px solid #4a5a3a', borderRadius: 4,
+          }}>
+            {def.power}/{def.toughness}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
