@@ -58,6 +58,37 @@ export async function initDb() {
   await pool.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS wallet_chain TEXT;`);
   await pool.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS custom_deck TEXT;`);
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS profiles_wallet_idx ON profiles (LOWER(wallet_address)) WHERE wallet_address IS NOT NULL;`);
+  // Deck Library: per-profile named decks + active pointer.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS decks (
+      id          SERIAL PRIMARY KEY,
+      profile_key TEXT NOT NULL REFERENCES profiles(name_key) ON DELETE CASCADE,
+      name        TEXT NOT NULL,
+      cards       JSONB NOT NULL,
+      created_at  TIMESTAMPTZ DEFAULT now(),
+      updated_at  TIMESTAMPTZ DEFAULT now(),
+      UNIQUE(profile_key, name)
+    );
+  `);
+  await pool.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS active_deck_id INT REFERENCES decks(id) ON DELETE SET NULL;`);
+  // One-time migration: hoist every legacy custom_deck JSON into a "Default" deck row.
+  await pool.query(`
+    INSERT INTO decks (profile_key, name, cards)
+    SELECT p.name_key, 'Default', p.custom_deck::jsonb
+      FROM profiles p
+     WHERE p.custom_deck IS NOT NULL
+       AND p.active_deck_id IS NULL
+       AND NOT EXISTS (SELECT 1 FROM decks d WHERE d.profile_key = p.name_key AND d.name = 'Default')
+    ON CONFLICT (profile_key, name) DO NOTHING;
+  `);
+  await pool.query(`
+    UPDATE profiles p
+       SET active_deck_id = d.id
+      FROM decks d
+     WHERE d.profile_key = p.name_key
+       AND d.name = 'Default'
+       AND p.active_deck_id IS NULL;
+  `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS recorded_matches (
       match_id   TEXT PRIMARY KEY,
@@ -186,34 +217,232 @@ export async function listProfiles(): Promise<Profile[]> {
   return rows.map(rowToProfile);
 }
 
-// ── Custom decks ────────────────────────────────────────────────────────────
-const memDecks: Map<string, string[]> = new Map();
+// ── Custom decks / Deck Library ─────────────────────────────────────────────
 
-export async function getDeck(name: string): Promise<string[] | null> {
-  const k = key(name);
-  if (!pool) return memDecks.get(k) ?? null;
-  const { rows } = await pool.query(`SELECT custom_deck FROM profiles WHERE name_key = $1`, [k]);
-  const raw = rows[0]?.custom_deck;
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map(String) : null;
-  } catch { return null; }
+export type DeckEntry = { id: number; name: string; cards: string[]; isActive: boolean };
+
+// In-memory fallback: per-profile map of {id,name,cards} + active pointer.
+type MemDeckRow = { id: number; name: string; cards: string[] };
+const memDecksByProfile: Map<string, MemDeckRow[]>  = new Map();
+const memActiveDeckId:   Map<string, number>        = new Map();
+let _memDeckId = 0;
+
+function memList(k: string): MemDeckRow[] {
+  if (!memDecksByProfile.has(k)) memDecksByProfile.set(k, []);
+  return memDecksByProfile.get(k)!;
 }
 
+export async function listDecks(name: string): Promise<DeckEntry[]> {
+  const k = key(name);
+  if (!pool) {
+    const list = memList(k);
+    const active = memActiveDeckId.get(k);
+    return list.map(d => ({ id: d.id, name: d.name, cards: [...d.cards], isActive: d.id === active }));
+  }
+  const { rows } = await pool.query(
+    `SELECT d.id, d.name, d.cards,
+            (p.active_deck_id = d.id) AS is_active
+       FROM decks d
+       JOIN profiles p ON p.name_key = d.profile_key
+      WHERE d.profile_key = $1
+      ORDER BY d.created_at ASC, d.id ASC`,
+    [k],
+  );
+  return rows.map(r => ({
+    id: Number(r.id),
+    name: String(r.name),
+    cards: Array.isArray(r.cards) ? (r.cards as any[]).map(String) : [],
+    isActive: !!r.is_active,
+  }));
+}
+
+export async function createDeck(name: string, deckName: string, cards: string[]): Promise<DeckEntry> {
+  const n = name.trim();
+  const dn = deckName.trim();
+  if (!n)  throw new Error('Profile name required');
+  if (!dn) throw new Error('Deck name required');
+  await upsertProfile(n);
+  const k = key(n);
+  if (!pool) {
+    const list = memList(k);
+    if (list.some(d => d.name.toLowerCase() === dn.toLowerCase())) {
+      throw new Error('A deck with that name already exists.');
+    }
+    _memDeckId += 1;
+    const row: MemDeckRow = { id: _memDeckId, name: dn, cards: [...cards] };
+    list.push(row);
+    if (!memActiveDeckId.has(k)) memActiveDeckId.set(k, row.id);
+    return { id: row.id, name: row.name, cards: [...row.cards], isActive: memActiveDeckId.get(k) === row.id };
+  }
+  const { rows } = await pool.query(
+    `INSERT INTO decks (profile_key, name, cards) VALUES ($1, $2, $3::jsonb) RETURNING id`,
+    [k, dn, JSON.stringify(cards)],
+  );
+  const id = Number(rows[0].id);
+  // If profile has no active deck yet, set this one.
+  await pool.query(
+    `UPDATE profiles SET active_deck_id = $2 WHERE name_key = $1 AND active_deck_id IS NULL`,
+    [k, id],
+  );
+  const all = await listDecks(n);
+  return all.find(d => d.id === id) ?? { id, name: dn, cards: [...cards], isActive: false };
+}
+
+export async function updateDeck(
+  name: string, deckId: number, patch: { name?: string; cards?: string[] },
+): Promise<DeckEntry> {
+  const k = key(name);
+  if (!pool) {
+    const list = memList(k);
+    const row = list.find(d => d.id === deckId);
+    if (!row) throw new Error('Deck not found');
+    if (patch.name !== undefined) {
+      const dn = patch.name.trim();
+      if (!dn) throw new Error('Deck name required');
+      if (list.some(d => d.id !== deckId && d.name.toLowerCase() === dn.toLowerCase())) {
+        throw new Error('A deck with that name already exists.');
+      }
+      row.name = dn;
+    }
+    if (patch.cards) row.cards = [...patch.cards];
+    return { id: row.id, name: row.name, cards: [...row.cards], isActive: memActiveDeckId.get(k) === row.id };
+  }
+  const sets: string[] = [];
+  const args: any[] = [deckId, k];
+  if (patch.name !== undefined) {
+    const dn = patch.name.trim();
+    if (!dn) throw new Error('Deck name required');
+    args.push(dn); sets.push(`name = $${args.length}`);
+  }
+  if (patch.cards !== undefined) {
+    args.push(JSON.stringify(patch.cards)); sets.push(`cards = $${args.length}::jsonb`);
+  }
+  if (sets.length === 0) {
+    const all = await listDecks(name);
+    const d = all.find(x => x.id === deckId);
+    if (!d) throw new Error('Deck not found');
+    return d;
+  }
+  sets.push(`updated_at = now()`);
+  const { rowCount } = await pool.query(
+    `UPDATE decks SET ${sets.join(', ')} WHERE id = $1 AND profile_key = $2`,
+    args,
+  );
+  if (rowCount === 0) throw new Error('Deck not found');
+  const all = await listDecks(name);
+  const d = all.find(x => x.id === deckId);
+  if (!d) throw new Error('Deck not found');
+  return d;
+}
+
+export async function deleteDeck(name: string, deckId: number): Promise<void> {
+  const k = key(name);
+  if (!pool) {
+    const list = memList(k);
+    const idx = list.findIndex(d => d.id === deckId);
+    if (idx < 0) throw new Error('Deck not found');
+    list.splice(idx, 1);
+    if (memActiveDeckId.get(k) === deckId) {
+      const fallback = list[0]?.id;
+      if (fallback != null) memActiveDeckId.set(k, fallback);
+      else memActiveDeckId.delete(k);
+    }
+    return;
+  }
+  // If the active deck is being deleted, fall back to whatever remains (or null).
+  const wasActive = await pool.query(
+    `SELECT 1 FROM profiles WHERE name_key = $1 AND active_deck_id = $2`,
+    [k, deckId],
+  );
+  await pool.query(`DELETE FROM decks WHERE id = $1 AND profile_key = $2`, [deckId, k]);
+  if ((wasActive.rowCount ?? 0) > 0) {
+    const { rows } = await pool.query(
+      `SELECT id FROM decks WHERE profile_key = $1 ORDER BY created_at ASC, id ASC LIMIT 1`,
+      [k],
+    );
+    const fallback = rows[0]?.id ?? null;
+    await pool.query(`UPDATE profiles SET active_deck_id = $2 WHERE name_key = $1`, [k, fallback]);
+  }
+}
+
+export async function activateDeck(name: string, deckId: number): Promise<DeckEntry> {
+  const k = key(name);
+  if (!pool) {
+    const list = memList(k);
+    if (!list.some(d => d.id === deckId)) throw new Error('Deck not found');
+    memActiveDeckId.set(k, deckId);
+    const row = list.find(d => d.id === deckId)!;
+    return { id: row.id, name: row.name, cards: [...row.cards], isActive: true };
+  }
+  const { rowCount } = await pool.query(
+    `UPDATE profiles p SET active_deck_id = $2
+       FROM decks d
+      WHERE p.name_key = $1 AND d.id = $2 AND d.profile_key = $1`,
+    [k, deckId],
+  );
+  if (rowCount === 0) throw new Error('Deck not found');
+  const all = await listDecks(name);
+  const d = all.find(x => x.id === deckId);
+  if (!d) throw new Error('Deck not found');
+  return d;
+}
+
+/**
+ * Back-compat: return the player's active deck cards (or null).
+ * Existing callers (Game.ts, ranked queue-service, joinMatch flow, etc.)
+ * keep working without modification.
+ */
+export async function getDeck(name: string): Promise<string[] | null> {
+  const k = key(name);
+  if (!pool) {
+    const active = memActiveDeckId.get(k);
+    if (active == null) return null;
+    const row = memList(k).find(d => d.id === active);
+    return row ? [...row.cards] : null;
+  }
+  const { rows } = await pool.query(
+    `SELECT d.cards
+       FROM profiles p JOIN decks d ON d.id = p.active_deck_id
+      WHERE p.name_key = $1`,
+    [k],
+  );
+  const raw = rows[0]?.cards;
+  if (!raw) return null;
+  return Array.isArray(raw) ? (raw as any[]).map(String) : null;
+}
+
+/**
+ * Back-compat: save into the player's active deck (creating one named "Default"
+ * if they have none). Old call sites assumed "the deck" and shouldn't break.
+ */
 export async function saveDeck(name: string, cards: string[]): Promise<void> {
   const n = name.trim();
   if (!n) throw new Error('Profile name required');
+  await upsertProfile(n);
   const k = key(n);
-  const json = JSON.stringify(cards);
   if (!pool) {
-    // Ensure profile exists (in-memory mode).
-    await upsertProfile(n);
-    memDecks.set(k, [...cards]);
+    const active = memActiveDeckId.get(k);
+    if (active != null) {
+      const row = memList(k).find(d => d.id === active);
+      if (row) { row.cards = [...cards]; return; }
+    }
+    // Otherwise create a Default deck and activate it.
+    await createDeck(n, 'Default', cards);
     return;
   }
-  await upsertProfile(n);
-  await pool.query(`UPDATE profiles SET custom_deck = $2 WHERE name_key = $1`, [k, json]);
+  // Find active deck id; if none, create + activate a Default.
+  const { rows } = await pool.query(
+    `SELECT active_deck_id FROM profiles WHERE name_key = $1`, [k],
+  );
+  const activeId: number | null = rows[0]?.active_deck_id ?? null;
+  if (activeId) {
+    await pool.query(
+      `UPDATE decks SET cards = $3::jsonb, updated_at = now() WHERE id = $1 AND profile_key = $2`,
+      [activeId, k, JSON.stringify(cards)],
+    );
+    return;
+  }
+  await createDeck(n, 'Default', cards);
 }
 
 /**

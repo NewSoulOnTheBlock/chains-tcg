@@ -11,6 +11,7 @@ import { CARDS, COLOR_META, COLORS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MA
 import {
   listProfilesApi, getProfileApi, getProfileByWalletApi, upsertProfileApi, updateProfileApi, getLibraryApi,
   getDeckApi, saveDeckApi, formatRecord, type Profile, type LibraryCard,
+  listDecksApi, createDeckApi, updateDeckApi, deleteDeckApi, activateDeckApi, type DeckEntry,
   createChallengeApi, listIncomingChallengesApi, listOutgoingChallengesApi, respondChallengeApi, type Challenge,
 } from './profiles';
 import { connectEvm, connectSolana, getSolanaWallet, detectSolanaWallets, shortAddr, type ConnectedWallet, type SolanaWalletKind } from './wallet';
@@ -2385,14 +2386,42 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
   const [filter, setFilter] = useState<Color | 'all'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'node' | 'meme' | 'machine' | 'move'>('all');
 
+  // ── Deck Library state ─────────────────────────────────────────────────────
+  const [decks, setDecks] = useState<DeckEntry[]>([]);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState<string>('');
+  const [libBusy, setLibBusy] = useState(false);
+
+  function countsFromCards(cards: string[]): Record<string, number> {
+    const next: Record<string, number> = {};
+    for (const id of cards) next[id] = (next[id] ?? 0) + 1;
+    return next;
+  }
+
+  // Initial load: list decks, populate editor with active (or first).
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const cards = await getDeckApi(myName);
-        const next: Record<string, number> = {};
-        for (const id of cards) next[id] = (next[id] ?? 0) + 1;
-        setCounts(next);
+        const list = await listDecksApi(myName);
+        setDecks(list);
+        const pick = list.find(d => d.isActive) ?? list[0] ?? null;
+        if (pick) {
+          setEditingId(pick.id);
+          setEditingName(pick.name);
+          setCounts(countsFromCards(pick.cards));
+        } else {
+          // Legacy fallback: pull "the deck" via back-compat endpoint.
+          const cards = await getDeckApi(myName);
+          setCounts(countsFromCards(cards));
+          setEditingId(null);
+          setEditingName('');
+        }
+      } catch {
+        try {
+          const cards = await getDeckApi(myName);
+          setCounts(countsFromCards(cards));
+        } catch { /* leave empty */ }
       } finally { setLoading(false); }
     })();
   }, [myName]);
@@ -2422,16 +2451,96 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
     setSaving(true); setStatus('');
     try {
       if (!validation.ok) { setStatus(validation.issues[0]?.message ?? 'Invalid deck.'); return; }
-      await saveDeckApi(myName, deckList);
-      setStatus('Saved!');
+      if (editingId != null) {
+        const updated = await updateDeckApi(myName, editingId, { cards: deckList });
+        setDecks(prev => prev.map(d => d.id === editingId ? { ...d, cards: updated.cards } : d));
+        setStatus(`Saved “${editingName}”!`);
+      } else {
+        // Create a new deck row (legacy fallback path).
+        const name = window.prompt('Name this deck:', 'Default') ?? '';
+        if (!name.trim()) { setStatus('Save cancelled.'); return; }
+        const created = await createDeckApi(myName, name.trim(), deckList);
+        setDecks(prev => [...prev, created]);
+        setEditingId(created.id);
+        setEditingName(created.name);
+        setStatus(`Saved “${created.name}”!`);
+      }
+      // Also write the back-compat single-deck slot so old callers see latest.
+      try { await saveDeckApi(myName, deckList); } catch { /* non-fatal */ }
     } catch (e: any) {
       setStatus(String(e?.message ?? e));
     } finally { setSaving(false); }
   }
   function clear() {
-    if (!confirm('Clear your custom deck?')) return;
+    if (!confirm('Clear cards from this deck (does not delete the deck)?')) return;
     setCounts({});
     setStatus('');
+  }
+
+  async function newDeck() {
+    const name = window.prompt('Name your new deck:', `Deck ${decks.length + 1}`) ?? '';
+    if (!name.trim()) return;
+    setLibBusy(true); setStatus('');
+    try {
+      const created = await createDeckApi(myName, name.trim(), []);
+      setDecks(prev => [...prev, created]);
+      setEditingId(created.id);
+      setEditingName(created.name);
+      setCounts({});
+      setStatus(`Created “${created.name}”.`);
+    } catch (e: any) {
+      setStatus(String(e?.message ?? e));
+    } finally { setLibBusy(false); }
+  }
+
+  function loadDeck(d: DeckEntry) {
+    if (saving || libBusy) return;
+    if (editingId === d.id) return;
+    setEditingId(d.id);
+    setEditingName(d.name);
+    setCounts(countsFromCards(d.cards));
+    setStatus('');
+  }
+
+  async function setActive(d: DeckEntry) {
+    setLibBusy(true); setStatus('');
+    try {
+      await activateDeckApi(myName, d.id);
+      setDecks(prev => prev.map(x => ({ ...x, isActive: x.id === d.id })));
+      setStatus(`“${d.name}” is now active.`);
+    } catch (e: any) {
+      setStatus(String(e?.message ?? e));
+    } finally { setLibBusy(false); }
+  }
+
+  async function renameDeck(d: DeckEntry) {
+    const name = window.prompt('Rename deck:', d.name) ?? '';
+    if (!name.trim() || name.trim() === d.name) return;
+    setLibBusy(true); setStatus('');
+    try {
+      const updated = await updateDeckApi(myName, d.id, { name: name.trim() });
+      setDecks(prev => prev.map(x => x.id === d.id ? { ...x, name: updated.name } : x));
+      if (editingId === d.id) setEditingName(updated.name);
+    } catch (e: any) {
+      setStatus(String(e?.message ?? e));
+    } finally { setLibBusy(false); }
+  }
+
+  async function removeDeck(d: DeckEntry) {
+    if (!confirm(`Delete deck “${d.name}”? This cannot be undone.`)) return;
+    setLibBusy(true); setStatus('');
+    try {
+      await deleteDeckApi(myName, d.id);
+      const remaining = decks.filter(x => x.id !== d.id);
+      setDecks(remaining);
+      if (editingId === d.id) {
+        const next = remaining.find(x => x.isActive) ?? remaining[0] ?? null;
+        if (next) { setEditingId(next.id); setEditingName(next.name); setCounts(countsFromCards(next.cards)); }
+        else      { setEditingId(null); setEditingName(''); setCounts({}); }
+      }
+    } catch (e: any) {
+      setStatus(String(e?.message ?? e));
+    } finally { setLibBusy(false); }
   }
 
   const visible = useMemo(() => {
@@ -2443,6 +2552,63 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
 
   return (
     <div>
+      {/* Deck Library sidebar (rendered as a horizontal bar on mobile, top on desktop too for simplicity) */}
+      <div style={{
+        marginBottom: 14, padding: 12, borderRadius: 12,
+        background: '#0a1224', border: `1px solid ${PROFILE_TOKENS.border}`,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ fontSize: 11, letterSpacing: 1.5, fontWeight: 700, color: PROFILE_TOKENS.muted, textTransform: 'uppercase' }}>
+            📚 Deck Library {decks.length > 0 && <span style={{ color: PROFILE_TOKENS.accent }}>({decks.length})</span>}
+          </div>
+          <button onClick={newDeck} disabled={libBusy || saving}
+            style={{ ...profileChip(true), opacity: (libBusy || saving) ? 0.5 : 1 }}>
+            + New Deck
+          </button>
+        </div>
+        {decks.length === 0 ? (
+          <div style={{ fontSize: 12, color: PROFILE_TOKENS.muted }}>
+            No saved decks yet. Build cards below and hit <b>Save Deck</b> to create your first.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {decks.map(d => {
+              const isEditing = d.id === editingId;
+              return (
+                <div key={d.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px',
+                  borderRadius: 8,
+                  background: isEditing ? `${PROFILE_TOKENS.accent}22` : '#0f1830',
+                  border: `1px solid ${isEditing ? PROFILE_TOKENS.accent : PROFILE_TOKENS.border}`,
+                }}>
+                  <button onClick={() => loadDeck(d)} title="Load into editor"
+                    style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, padding: 0 }}>
+                    {d.isActive ? '⭐ ' : ''}{d.name}
+                    <span style={{ marginLeft: 6, fontSize: 10, color: PROFILE_TOKENS.muted, fontWeight: 600 }}>
+                      ({d.cards.length})
+                    </span>
+                  </button>
+                  {!d.isActive && (
+                    <button onClick={() => setActive(d)} disabled={libBusy} title="Set as active deck"
+                      style={{ background: 'transparent', border: 'none', color: PROFILE_TOKENS.accent, cursor: 'pointer', fontSize: 12 }}>
+                      ⭐
+                    </button>
+                  )}
+                  <button onClick={() => renameDeck(d)} disabled={libBusy} title="Rename"
+                    style={{ background: 'transparent', border: 'none', color: PROFILE_TOKENS.muted, cursor: 'pointer', fontSize: 12 }}>
+                    ✎
+                  </button>
+                  <button onClick={() => removeDeck(d)} disabled={libBusy} title="Delete"
+                    style={{ background: 'transparent', border: 'none', color: PROFILE_TOKENS.danger, cursor: 'pointer', fontSize: 12 }}>
+                    🗑
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* Header — deck progress + actions */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12,
@@ -2453,15 +2619,15 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
             {total}<span style={{ fontSize: 18, color: PROFILE_TOKENS.muted, fontWeight: 700 }}>/{DECK_SIZE}</span>
           </div>
           <div style={{ fontSize: 11, color: PROFILE_TOKENS.muted, letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase' }}>
-            Cards in Deck
+            {editingName ? `Editing: ${editingName}` : 'Cards in Deck'}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {status && <span style={{ fontSize: 12, color: status === 'Saved!' ? PROFILE_TOKENS.accent : PROFILE_TOKENS.danger }}>{status}</span>}
+          {status && <span style={{ fontSize: 12, color: status.startsWith('Saved') || status.startsWith('Created') || status.endsWith('active.') ? PROFILE_TOKENS.accent : PROFILE_TOKENS.danger }}>{status}</span>}
           <button onClick={clear} style={profileChip(false)}>Clear</button>
           <button onClick={save} disabled={!validation.ok || saving}
             style={{ ...profileChip(true), opacity: (!validation.ok || saving) ? 0.5 : 1, cursor: (!validation.ok || saving) ? 'not-allowed' : 'pointer' }}>
-            {saving ? 'Saving…' : '💾 Save Deck'}
+            {saving ? 'Saving…' : (editingId != null ? '💾 Save Deck' : '💾 Save as New')}
           </button>
         </div>
       </div>

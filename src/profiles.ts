@@ -91,6 +91,44 @@ export async function saveDeckApi(name: string, cards: string[]): Promise<void> 
   });
 }
 
+// ── Deck Library (multi-deck) ────────────────────────────────────────────────
+
+export type DeckEntry = { id: number; name: string; cards: string[]; isActive: boolean };
+
+export async function listDecksApi(name: string): Promise<DeckEntry[]> {
+  const { decks } = await http<{ decks: DeckEntry[] }>(`/api/decks?name=${encodeURIComponent(name)}`);
+  return decks;
+}
+
+export async function createDeckApi(name: string, deckName: string, cards: string[]): Promise<DeckEntry> {
+  const { deck } = await http<{ deck: DeckEntry }>(`/api/decks?name=${encodeURIComponent(name)}`, {
+    method: 'POST', body: JSON.stringify({ name: deckName, cards }),
+  });
+  return deck;
+}
+
+export async function updateDeckApi(
+  name: string, deckId: number, patch: { name?: string; cards?: string[] },
+): Promise<DeckEntry> {
+  const { deck } = await http<{ deck: DeckEntry }>(`/api/decks/${deckId}?name=${encodeURIComponent(name)}`, {
+    method: 'PUT', body: JSON.stringify(patch),
+  });
+  return deck;
+}
+
+export async function deleteDeckApi(name: string, deckId: number): Promise<void> {
+  await http<{ ok: true }>(`/api/decks/${deckId}?name=${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function activateDeckApi(name: string, deckId: number): Promise<DeckEntry> {
+  const { deck } = await http<{ deck: DeckEntry }>(`/api/decks/${deckId}/activate?name=${encodeURIComponent(name)}`, {
+    method: 'POST',
+  });
+  return deck;
+}
+
 // ── Challenges ────────────────────────────────────────────────────────────────
 
 export type Challenge = {

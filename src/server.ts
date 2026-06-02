@@ -5,6 +5,7 @@ import { Server, Origins } from 'boardgame.io/server';
 import serveStatic from 'koa-static';
 import { ChainsTCG } from './Game';
 import { initDb, upsertProfile, updateProfile, getProfile, getProfileByWallet, listProfiles, recordMatch, getDeck, saveDeck,
+  listDecks, createDeck, updateDeck, deleteDeck, activateDeck,
   createChallenge, listIncomingChallenges, listOutgoingChallenges, getChallenge, updateChallengeStatus,
 } from './db';
 import { validateDeck } from './cards';
@@ -166,6 +167,71 @@ app.use(async (ctx, next) => {
       await saveDeck(String(body.name), cards);
       ctx.body = { ok: true };
       return;
+    }
+    // ── Deck Library (multi-deck per profile) ────────────────────────────────
+    // All routes require ?name=<profile> (case-insensitive). Trusted in this
+    // single-user-per-name model; no auth header needed for now.
+    if (method === 'GET' && url.startsWith('/api/decks')) {
+      const u = new URL('http://x' + url);
+      const name = (u.searchParams.get('name') ?? '').trim();
+      if (!name) { ctx.status = 400; ctx.body = { error: 'name required' }; return; }
+      ctx.body = { decks: await listDecks(name) };
+      return;
+    }
+    if (method === 'POST' && url.startsWith('/api/decks?')) {
+      const u = new URL('http://x' + url);
+      const name = (u.searchParams.get('name') ?? '').trim();
+      if (!name) { ctx.status = 400; ctx.body = { error: 'name required' }; return; }
+      const body = await readJson(ctx);
+      const deckName = String(body?.name ?? '').trim();
+      const cards    = Array.isArray(body?.cards) ? body.cards.map(String) : null;
+      if (!deckName)   { ctx.status = 400; ctx.body = { error: 'deck name required' }; return; }
+      if (!cards)      { ctx.status = 400; ctx.body = { error: 'cards[] required' }; return; }
+      const v = validateDeck(cards);
+      if (!v.ok) { ctx.status = 400; ctx.body = { error: 'invalid deck', issues: v.issues }; return; }
+      try {
+        const deck = await createDeck(name, deckName, cards);
+        ctx.body = { deck };
+      } catch (e: any) {
+        ctx.status = 400; ctx.body = { error: String(e?.message ?? e) };
+      }
+      return;
+    }
+    {
+      // PUT /api/decks/:id  | DELETE /api/decks/:id  | POST /api/decks/:id/activate
+      const m = url.match(/^\/api\/decks\/(\d+)(\/activate)?(?:\?(.*))?$/);
+      if (m) {
+        const deckId  = Number(m[1]);
+        const isAct   = !!m[2];
+        const params  = new URLSearchParams(m[3] ?? '');
+        const name    = (params.get('name') ?? '').trim();
+        if (!name) { ctx.status = 400; ctx.body = { error: 'name required' }; return; }
+        if (method === 'POST' && isAct) {
+          try { ctx.body = { deck: await activateDeck(name, deckId) }; }
+          catch (e: any) { ctx.status = 404; ctx.body = { error: String(e?.message ?? e) }; }
+          return;
+        }
+        if (method === 'PUT' && !isAct) {
+          const body = await readJson(ctx);
+          const patch: { name?: string; cards?: string[] } = {};
+          if (body?.name !== undefined) patch.name = String(body.name);
+          if (body?.cards !== undefined) {
+            if (!Array.isArray(body.cards)) { ctx.status = 400; ctx.body = { error: 'cards[] required' }; return; }
+            const cards = body.cards.map(String);
+            const v = validateDeck(cards);
+            if (!v.ok) { ctx.status = 400; ctx.body = { error: 'invalid deck', issues: v.issues }; return; }
+            patch.cards = cards;
+          }
+          try { ctx.body = { deck: await updateDeck(name, deckId, patch) }; }
+          catch (e: any) { ctx.status = 400; ctx.body = { error: String(e?.message ?? e) }; }
+          return;
+        }
+        if (method === 'DELETE' && !isAct) {
+          try { await deleteDeck(name, deckId); ctx.body = { ok: true }; }
+          catch (e: any) { ctx.status = 400; ctx.body = { error: String(e?.message ?? e) }; }
+          return;
+        }
+      }
     }
     if (method === 'GET' && url.startsWith('/api/library/')) {
       const addr = decodeURIComponent(url.slice('/api/library/'.length));
