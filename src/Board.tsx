@@ -412,7 +412,7 @@ export function ChainsBoard(props: Props) {
   // ── Render ────────────────────────────────────────────────────────────────
   const [showRules, setShowRules] = useState(false);
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', padding: mobile ? 6 : 8, color: '#eee', background: '#0a0a10', minHeight: '100vh' }}>
+    <div style={{ fontFamily: 'system-ui, sans-serif', padding: mobile ? 6 : 8, color: '#eee', background: '#0a0a10', minHeight: '100vh', height: mobile ? 'auto' : '100dvh', display: 'flex', flexDirection: 'column', overflow: mobile ? 'visible' : 'hidden' }}>
       {/* Compact top status bar */}
       <TurnBanner
         myTurn={myTurn} turn={ctx.turn}
@@ -532,10 +532,11 @@ export function ChainsBoard(props: Props) {
       {/* Combat zone display */}
       <CombatStrip G={G} ctx={ctx} myId={myId} />
 
-      {/* Playmat — now full-width, no flanking rule panels */}
+      {/* Playmat — sized to fit alongside hand without scrolling */}
       <div style={{
         margin: '8px auto',
-        maxWidth: mobile ? '100%' : 1280,
+        width: '100%',
+        maxWidth: mobile ? '100%' : 'min(1280px, calc(100dvh - 280px))',
       }}>
         <Playmat
         me={me} opp={opp} myId={myId} oppId={oppId}
@@ -591,7 +592,7 @@ export function ChainsBoard(props: Props) {
           WebkitOverflowScrolling: 'touch',
           paddingBottom: mobile ? 6 : 0,
           justifyContent: 'center', alignItems: 'flex-end',
-          minHeight: mobile ? 130 : 175,
+          minHeight: mobile ? 130 : 160,
           perspective: 1200,
         }}>
           {me.hand.map((id, i) => {
@@ -1157,7 +1158,10 @@ function Playmat(props: {
 
   return (
     <div style={{
-      position: 'relative', width: '100%', maxWidth: 1280, aspectRatio: '1 / 1',
+      position: 'relative',
+      width: '100%',
+      maxWidth: 'min(1280px, calc(100dvh - 280px))',
+      aspectRatio: '1 / 1',
       margin: '8px auto', borderRadius: 10, overflow: 'hidden',
       boxShadow: '0 0 30px #000a inset, 0 4px 24px #000c',
       isolation: 'isolate',
