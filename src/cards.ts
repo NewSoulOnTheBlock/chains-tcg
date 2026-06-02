@@ -80,8 +80,8 @@ const IMAGES: Record<string, string> = {
   bnb_broccoli: '/cards/broccoli.png?v=1',
   bnb_tut:      cmc(33687),
   bnb_tst:      '/cards/tst.png?v=1',
-  bnb_banana:   cmc(28066),
-  bnb_mubarak:  cmc(34147),
+  bnb_banana:   '/cards/banana.jpg?v=1',
+  bnb_mubarak:  '/cards/mubarak.png?v=1',
   bnb_cheems:   '/cards/cheems.png?v=1',
   bnb_floki:    cmc(10804),
 
@@ -97,7 +97,7 @@ const IMAGES: Record<string, string> = {
 
   // Hyperliquid memes
   hl_buddy:     cmc(33718),
-  hl_pip:       cmc(32196),
+  hl_pip:       '/cards/pip.png?v=1',
   hl_farm:      cmc(32196),
   hl_jeff:      cmc(32196),
   hl_hpos:      cmc(26873),
