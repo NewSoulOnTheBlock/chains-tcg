@@ -7,7 +7,7 @@ import { SocketIO } from 'boardgame.io/multiplayer';
 import { LobbyClient } from 'boardgame.io/client';
 import { ChainsTCG } from './Game';
 import { ChainsBoard } from './Board';
-import { COLOR_META, COLORS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MAX_COPIES_NONBASIC, isBasicNode, type Color } from './cards';
+import { CARDS, COLOR_META, COLORS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MAX_COPIES_NONBASIC, isBasicNode, type Color } from './cards';
 import {
   listProfilesApi, getProfileApi, getProfileByWalletApi, upsertProfileApi, updateProfileApi, getLibraryApi,
   getDeckApi, saveDeckApi, formatRecord, type Profile, type LibraryCard,
@@ -618,6 +618,181 @@ function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void })
   );
 }
 
+// ── Public (read-only) profile shown when clicking a leaderboard name ──────
+function PublicProfile({ name, onBack }: { name: string; onBack: () => void }) {
+  const mobile = useIsMobile();
+  const [prof, setProf] = useState<Profile | null>(null);
+  const [deck, setDeck] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true); setErr('');
+      try {
+        const [p, d] = await Promise.all([
+          getProfileApi(name).catch(() => null),
+          getDeckApi(name).catch(() => [] as string[]),
+        ]);
+        if (cancelled) return;
+        setProf(p);
+        setDeck(d);
+      } catch (e: any) {
+        if (!cancelled) setErr(String(e?.message ?? e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [name]);
+
+  const games = prof ? prof.wins + prof.losses + prof.draws : 0;
+  const winPct = games ? Math.round((prof!.wins / games) * 100) : 0;
+
+  // Group deck list by card def, count copies, then sort by color then cost.
+  const deckGrouped = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const id of deck) counts[id] = (counts[id] ?? 0) + 1;
+    const rows = Object.entries(counts)
+      .map(([id, n]) => ({ id, n, def: CARDS[id] }))
+      .filter(r => !!r.def);
+    rows.sort((a, b) => {
+      if (a.def.color !== b.def.color) return COLORS.indexOf(a.def.color) - COLORS.indexOf(b.def.color);
+      const typeOrder = ['node', 'meme', 'machine', 'move'];
+      const ta = typeOrder.indexOf(a.def.type), tb = typeOrder.indexOf(b.def.type);
+      if (ta !== tb) return ta - tb;
+      return a.def.name.localeCompare(b.def.name);
+    });
+    return rows;
+  }, [deck]);
+
+  const deckValid = validateDeck(deck);
+
+  return (
+    <div style={{ fontFamily: 'system-ui', background: '#0a0a0c', minHeight: '100vh', color: '#eee' }}>
+      <div style={{ padding: '14px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #222' }}>
+        <button onClick={onBack} style={ghostBtn}>← Back</button>
+        <div style={{ fontWeight: 800, letterSpacing: 1.5 }}>PROFILE</div>
+        <div style={{ width: 80 }} />
+      </div>
+
+      {loading ? (
+        <div style={{ padding: 40, color: '#888' }}>Loading…</div>
+      ) : !prof ? (
+        <div style={{ padding: 40, color: '#888' }}>No profile found for "{name}".</div>
+      ) : (
+        <>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: mobile ? '1fr' : 'minmax(220px, 280px) 1fr',
+            gap: mobile ? 16 : 24,
+            padding: mobile ? 14 : 24,
+            maxWidth: 980, margin: '0 auto',
+          }}>
+            {/* Avatar + record */}
+            <div>
+              <div style={{
+                width: '100%', aspectRatio: '1', borderRadius: 12, overflow: 'hidden',
+                background: '#181820', border: '1px solid #2a2a32',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {prof.avatarUrl ? (
+                  <img src={prof.avatarUrl} alt={prof.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <div style={{ fontSize: 64, color: '#444' }}>👤</div>
+                )}
+              </div>
+              <div style={{ marginTop: 18, padding: 14, background: '#101015', border: '1px solid #25252e', borderRadius: 8 }}>
+                <div style={{ fontSize: 11, color: '#888', letterSpacing: 1.5, marginBottom: 8 }}>RECORD</div>
+                <div style={{ display: 'flex', justifyContent: 'space-around', textAlign: 'center' }}>
+                  <Stat label="Wins"   value={prof.wins}   color="#7fdc7f" />
+                  <Stat label="Losses" value={prof.losses} color="#ef7373" />
+                  <Stat label="Draws"  value={prof.draws}  color="#cccc77" />
+                </div>
+                <div style={{ marginTop: 12, textAlign: 'center', color: '#aaa', fontSize: 13 }}>
+                  {games} games · <b style={{ color: '#fff' }}>{winPct}%</b> win rate
+                </div>
+              </div>
+            </div>
+
+            {/* Name + bio */}
+            <div>
+              <div style={labelStyle}>NAME</div>
+              <div style={{
+                padding: '10px 12px', background: '#101015', border: '1px solid #25252e', borderRadius: 6,
+                fontSize: 22, fontWeight: 800, color: '#fff',
+              }}>{prof.name}</div>
+
+              <div style={{ marginTop: 18 }}>
+                <div style={labelStyle}>BIO</div>
+                <div style={{
+                  padding: '10px 12px', background: '#101015', border: '1px solid #25252e', borderRadius: 6,
+                  minHeight: 80, color: '#ccc', whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.5,
+                }}>
+                  {prof.bio?.trim() || <span style={{ color: '#555' }}>No bio.</span>}
+                </div>
+              </div>
+
+              {err && <div style={{ marginTop: 10, color: '#ef7373', fontSize: 12 }}>{err}</div>}
+            </div>
+          </div>
+
+          {/* Custom deck */}
+          <div style={{ maxWidth: 980, margin: '0 auto', padding: mobile ? '0 14px 40px' : '0 24px 50px' }}>
+            <div style={{ padding: 14, background: '#101015', border: '1px solid #25252e', borderRadius: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ fontWeight: 800, color: '#9cf', letterSpacing: 1.5, fontSize: 14 }}>
+                  🛠️ {prof.name.toUpperCase()}'S CUSTOM DECK ({deckGrouped.reduce((s, r) => s + r.n, 0)}/{DECK_SIZE})
+                </div>
+                {deck.length > 0 && (
+                  <div style={{ fontSize: 11, color: deckValid.ok ? '#7fdc7f' : '#fc8' }}>
+                    {deckValid.ok ? '✓ Legal' : 'Incomplete deck'}
+                  </div>
+                )}
+              </div>
+
+              {deck.length === 0 ? (
+                <div style={{ marginTop: 12, fontSize: 13, color: '#777' }}>
+                  This player hasn't published a custom deck yet.
+                </div>
+              ) : (
+                <div style={{
+                  marginTop: 12, display: 'grid',
+                  gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 150 : 220}px, 1fr))`,
+                  gap: 6,
+                }}>
+                  {deckGrouped.map(r => {
+                    const meta = COLOR_META[r.def.color];
+                    return (
+                      <div key={r.id} style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '6px 8px',
+                        background: '#161620', border: '1px solid #2a2a32', borderRadius: 4,
+                      }}>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          minWidth: 22, height: 20, padding: '0 5px',
+                          background: meta.hex, color: meta.ink,
+                          borderRadius: 4, fontWeight: 800, fontSize: 12,
+                        }}>{r.n}×</span>
+                        <span style={{ flex: 1, fontSize: 12, color: '#eee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.def.name}
+                        </span>
+                        <span style={{ fontSize: 10, color: '#888', textTransform: 'uppercase' }}>{r.def.type}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── NFT library (Memetic Masters via Helius) ────────────────────────────────
 function LibrarySection({ prof }: { prof: Profile | null }) {
   const mobile = useIsMobile();
@@ -889,8 +1064,8 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
 
 // ── Lobby screen ────────────────────────────────────────────────────────────
 function Lobby({
-  myName, onJoined, onBack,
-}: { myName: string; onJoined: (seat: Seat) => void; onBack: () => void }) {
+  myName, onJoined, onBack, onViewProfile,
+}: { myName: string; onJoined: (seat: Seat) => void; onBack: () => void; onViewProfile: (name: string) => void }) {
   const mobile = useIsMobile();
   const [matches, setMatches] = useState<any[]>([]);
   const [leaderboard, setLeaderboard] = useState<Profile[]>([]);
@@ -1311,7 +1486,18 @@ function Lobby({
                 return (
                   <tr key={p.name} style={{ borderTop: '1px solid #222' }}>
                     <td style={{ padding: 4, color: '#888' }}>{i + 1}</td>
-                    <td style={{ padding: 4, fontWeight: 700 }}>{p.name}</td>
+                    <td style={{ padding: 4, fontWeight: 700 }}>
+                      <button
+                        onClick={() => onViewProfile(p.name)}
+                        title={`View ${p.name}'s profile`}
+                        style={{
+                          background: 'none', border: 'none', padding: 0,
+                          color: '#9cf', fontWeight: 700, fontSize: 'inherit',
+                          fontFamily: 'inherit', cursor: 'pointer',
+                          textDecoration: 'underline dotted', textUnderlineOffset: 3,
+                        }}
+                      >{p.name}</button>
+                    </td>
                     <td style={{ padding: 4, color: '#9f9' }}>{p.wins}</td>
                     <td style={{ padding: 4, color: '#f99' }}>{p.losses}</td>
                     <td style={{ padding: 4 }}>{p.draws}</td>
@@ -1443,13 +1629,14 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
 }
 
 // ── Root ────────────────────────────────────────────────────────────────────
-type View = 'landing' | 'profile' | 'rules' | 'lobby';
+type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile';
 
 export default function App() {
   const [name, setName] = useState<string>(() => local.get<string>('myName', ''));
   const [seat, setSeat] = useState<Seat | null>(() => local.get<Seat | null>('seat', null));
   const [view, setView] = useState<View>(() => sess.get<View>('view', 'landing'));
   const [pendingWallet, setPendingWallet] = useState<ConnectedWallet | null>(null);
+  const [viewedProfile, setViewedProfile] = useState<string | null>(null);
 
   // On boot: if we have a saved seat from a previous tab, verify the match
   // still exists and our seat is still claimed by us. Otherwise clear it so
@@ -1543,9 +1730,16 @@ export default function App() {
         ? <ProfilePage myName={name} onBack={() => goto('landing')} />
         : view === 'rules'
           ? <RulesPage onBack={() => goto('landing')} />
-          : view === 'lobby'
-            ? <Lobby myName={name} onJoined={joinedSeat} onBack={() => goto('landing')} />
-            : <Landing myName={name} onPlay={() => goto('lobby')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
+          : view === 'view-profile' && viewedProfile
+            ? <PublicProfile name={viewedProfile} onBack={() => goto('lobby')} />
+            : view === 'lobby'
+              ? <Lobby
+                  myName={name}
+                  onJoined={joinedSeat}
+                  onBack={() => goto('landing')}
+                  onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
+                />
+              : <Landing myName={name} onPlay={() => goto('lobby')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
     </>
   );
 }
