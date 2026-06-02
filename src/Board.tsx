@@ -345,9 +345,22 @@ export function ChainsBoard(props: Props) {
 
       {/* Deck-pick overlay — second player picks here if they arrived without a stashed color */}
       {iMustPick && (
-        <div style={{ padding: 16, marginBottom: 10, background: '#0e1c30', border: '1px solid #2a4a78', borderRadius: 6 }}>
-          <div style={{ fontWeight: 800, color: '#9cf', marginBottom: 6 }}>🎴 Choose your deck</div>
-          <div style={{ fontSize: 12, color: '#bbb', marginBottom: 10 }}>
+        <div style={{
+          padding: 16, marginBottom: 10,
+          background: 'linear-gradient(180deg, rgba(26,18,64,0.92), rgba(10,10,30,0.92))',
+          border: '1px solid #4c1d95', borderRadius: 6,
+          boxShadow: '0 0 14px rgba(139,92,246,0.25)',
+          fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif',
+          color: '#ece1c7',
+        }}>
+          <div style={{
+            fontFamily: '"Cinzel", "Times New Roman", serif',
+            fontWeight: 800, fontSize: 14, letterSpacing: 2,
+            color: '#f0b32a', textTransform: 'uppercase',
+            textShadow: '0 0 8px rgba(240,179,42,0.35)',
+            marginBottom: 6,
+          }}>Choose your deck</div>
+          <div style={{ fontSize: 12, color: '#cdbf99', marginBottom: 10 }}>
             The match has begun. Pick a chain to play with — your deck will be shuffled and dealt.
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -367,25 +380,41 @@ export function ChainsBoard(props: Props) {
 
       {/* Waiting banner — opponent hasn't picked yet */}
       {!iMustPick && opp?.needsColorPick && (
-        <div style={{ padding: '8px 12px', marginBottom: 10, fontSize: 13, background: '#1a1a05', border: '1px solid #665'  , borderRadius: 6, color: '#ffd' }}>
-          ⏳ Waiting for opponent to choose their deck…
+        <div style={{
+          padding: '8px 14px', marginBottom: 10, fontSize: 13,
+          fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif',
+          background: 'linear-gradient(180deg, rgba(26,18,64,0.92), rgba(10,10,30,0.92))',
+          border: '1px solid #4c1d95', borderRadius: 6, color: '#ece1c7',
+          boxShadow: '0 0 14px rgba(139,92,246,0.25)',
+        }}>
+          Waiting for opponent to choose their deck…
         </div>
       )}
 
       {/* Step instructions */}
       {!ctx.gameover && !pickPhase && (
         <div style={{
-          padding: '6px 10px', marginBottom: 6, fontSize: 12,
-          background: inBlockers ? '#3a2a05' : (myTurn ? '#053a2a' : '#222'),
-          border: '1px solid #555', borderRadius: 4,
+          padding: '8px 14px', marginBottom: 6, fontSize: 13,
+          fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif',
+          background: inBlockers
+            ? 'linear-gradient(180deg, rgba(64,40,8,0.92), rgba(28,16,4,0.92))'
+            : (myTurn
+                ? 'linear-gradient(180deg, rgba(26,18,64,0.92), rgba(10,10,30,0.92))'
+                : 'linear-gradient(180deg, rgba(20,20,28,0.92), rgba(10,10,16,0.92))'),
+          border: `1px solid ${inBlockers ? '#a8740f' : (myTurn ? '#4c1d95' : '#2a2a36')}`,
+          borderRadius: 6,
+          color: '#ece1c7',
+          boxShadow: inBlockers
+            ? '0 0 14px rgba(240,179,42,0.25)'
+            : (myTurn ? '0 0 14px rgba(139,92,246,0.25)' : 'none'),
         }}>
           {inBlockers
-            ? <>🛡️ <b>Declare blockers:</b> click an untapped meme below to select it, then click an attacking opponent meme above. Press <i>Confirm Blocks</i> when done (or with no blockers to take damage).</>
+            ? <><CTA color="#f0b32a">Declare blockers:</CTA> click an untapped meme below to select it, then click an attacking opponent meme above. Press <i>Confirm Blocks</i> when done (or with no blockers to take damage).</>
             : myTurn
               ? (G.combat.attackers.length > 0
-                  ? <>⚔️ <b>{G.combat.attackers.length} attacker(s) selected.</b> Click another untapped meme to add, or press <i>Attack with {G.combat.attackers.length} meme(s)</i> to swing.</>
-                  : <>🟢 <b>Your main phase.</b> Play nodes, tap them for gas, cast cards. Click an untapped, non-sick meme to mark it as an attacker, then press <i>Attack</i>.</>)
-              : <>⏳ Waiting for opponent…</>}
+                  ? <><CTA color="#f0b32a">{G.combat.attackers.length} attacker(s) selected.</CTA> Click another untapped meme to add, or press <i>Attack with {G.combat.attackers.length} meme(s)</i> to swing.</>
+                  : <><CTA color="#b896ff">Your main phase.</CTA> Play nodes, tap them for gas, cast cards. Click an untapped, non-sick meme to mark it as an attacker, then press <i>Attack</i>.</>)
+              : <>Waiting for opponent…</>}
         </div>
       )}
 
@@ -451,7 +480,7 @@ export function ChainsBoard(props: Props) {
             // Assigning a block: must have a blocker selected and the clicked
             // opponent meme must actually be an attacker.
             if (!blockSel.blockerUid) { flash('Click one of your untapped memes first to select a blocker.'); return; }
-            if (!G.combat.attackers.some(a => a.memeUid === uid)) { flash('That opponent meme is not attacking — pick one with ⚔️.'); return; }
+            if (!G.combat.attackers.some(a => a.memeUid === uid)) { flash('That opponent meme is not attacking — pick one of the attackers above.'); return; }
             moves.declareBlocker(blockSel.blockerUid, uid);
             setBlockSel({});
           }
@@ -607,6 +636,14 @@ function ChatPanel({
       </div>
     </div>
   );
+}
+
+function CTA({ color, children }: { color: string; children: React.ReactNode }) {
+  return <b style={{
+    fontFamily: '"Cinzel", "Times New Roman", serif',
+    color, letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 700,
+    textShadow: `0 0 6px ${color}55`,
+  }}>{children}</b>;
 }
 
 function PlayerHeaderTargetable({ label, clickable, onClick }: { label: string; clickable: boolean; onClick: () => void }) {
