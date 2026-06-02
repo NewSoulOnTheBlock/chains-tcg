@@ -1315,7 +1315,7 @@ function Lobby({
   }
 
   return (
-    <Screen title={`Choose your deck — ${myName}`}
+    <Screen title={`Choose your deck — ${myName}`} fullBleed={!mobile}
       right={<button onClick={onBack} style={ghostBtn}>← Back</button>}>
       {error && <Banner kind="error">{error}</Banner>}
 
@@ -1406,11 +1406,12 @@ function Lobby({
         </div>
       ) : (
       <div style={{
-        position: 'relative', width: '100%', maxWidth: 1200, margin: '0 auto',
-        aspectRatio: '1536 / 1024',
-        backgroundImage: 'url(/lobby-bg.png)',
+        position: 'relative', width: '100vw', margin: 0,
+        aspectRatio: '1248 / 832',
+        maxHeight: '100vh',
+        backgroundImage: 'url(/lobby-bg.png?v=2)',
         backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat',
-        borderRadius: 8, overflow: 'hidden',
+        overflow: 'hidden',
       }}>
         {/* Left panel — available matches */}
         <div style={{
@@ -1828,12 +1829,20 @@ export default function App() {
 }
 
 // ── Tiny UI primitives ──────────────────────────────────────────────────────
-function Screen({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+function Screen({ title, right, children, fullBleed }: { title: string; right?: React.ReactNode; children: React.ReactNode; fullBleed?: boolean }) {
   const mobile = useIsMobile();
+  const pad = fullBleed ? 0 : (mobile ? 12 : 24);
   return (
-    <div style={{ fontFamily: 'system-ui', background: '#000', minHeight: '100vh', padding: mobile ? 12 : 24, color: '#eee' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 8, flexWrap: 'wrap' }}>
-        <h1 style={{ margin: 0, fontSize: mobile ? 18 : 22 }}>{title}</h1>
+    <div style={{ fontFamily: 'system-ui', background: '#000', minHeight: '100vh', padding: pad, color: '#eee' }}>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: fullBleed ? 0 : 16, gap: 8, flexWrap: 'wrap',
+        padding: fullBleed ? (mobile ? '8px 12px' : '10px 18px') : 0,
+        position: fullBleed ? 'absolute' : 'static',
+        top: 0, left: 0, right: 0, zIndex: 4,
+        background: fullBleed ? 'linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0))' : 'transparent',
+      }}>
+        <h1 style={{ margin: 0, fontSize: mobile ? 18 : 22, textShadow: fullBleed ? '0 2px 8px #000' : undefined }}>{title}</h1>
         <div>{right}</div>
       </div>
       {children}
