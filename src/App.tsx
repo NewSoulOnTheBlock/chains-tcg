@@ -1117,6 +1117,8 @@ function Lobby({
   // Match stakes — 'free' or a SOL wager. Currently UI-only metadata stored in setupData.
   const [wagerKind, setWagerKind] = useState<'free' | 'sol'>('free');
   const [wagerAmount, setWagerAmount] = useState<string>('0.1');
+  // Optional human-readable match name so opponents can find each other in the lobby.
+  const [matchName, setMatchName] = useState<string>('');
 
   // Load this player's saved custom deck on mount (if any).
   useEffect(() => {
@@ -1168,9 +1170,10 @@ function Lobby({
       const decks: Array<string[] | null> = ['0', '1'].map(s =>
         s === seatChoice && useCustom ? myDeck : null
       ) as Array<string[] | null>;
+      const trimmedName = matchName.trim().slice(0, 40);
       const created = await lobby.createMatch(GAME_NAME, {
         numPlayers: 2,
-        setupData: { colors, names: ['Player 0', 'Player 1'], decks, wager },
+        setupData: { colors, names: ['Player 0', 'Player 1'], decks, wager, matchName: trimmedName || undefined },
       });
       const joined = await lobby.joinMatch(GAME_NAME, created.matchID, {
         playerID: seatChoice,
@@ -1273,9 +1276,21 @@ function Lobby({
         background: 'rgba(8,14,26,0.78)', border: '1px solid rgba(180,150,80,0.45)',
         borderRadius: 6, padding: 10, color: '#e9e4d0', boxShadow: '0 2px 10px rgba(0,0,0,0.45)',
       }}>
-        <div style={{ fontSize: 12, color: '#c9b97a', letterSpacing: 1, textTransform: 'uppercase' }}>
-          Match {m.matchID.slice(0, 6)}
-        </div>
+        {(() => {
+          const mName = readMatchName(m.setupData);
+          return (
+            <>
+              <div style={{ fontSize: 12, color: '#c9b97a', letterSpacing: 1, textTransform: 'uppercase' }}>
+                {mName ? mName : `Match ${m.matchID.slice(0, 6)}`}
+              </div>
+              {mName && (
+                <div style={{ fontSize: 9, color: '#7d7050', letterSpacing: 0.5, marginTop: 1 }}>
+                  ID {m.matchID.slice(0, 6)}
+                </div>
+              )}
+            </>
+          );
+        })()}
         <div style={{ fontWeight: 700, marginTop: 2, fontSize: 14 }}>
           {creator?.name ?? 'Open'}
           {creatorCol && (
@@ -1380,6 +1395,19 @@ function Lobby({
                 }}>P{s}</button>
               ))}
             </div>
+            <input
+              type="text"
+              value={matchName}
+              onChange={e => setMatchName(e.target.value.slice(0, 40))}
+              placeholder="Match name (optional)"
+              maxLength={40}
+              style={{
+                width: '100%', padding: '6px 8px', fontSize: 12,
+                background: 'rgba(10,12,20,0.7)', color: '#e9e4d0',
+                border: '1px solid rgba(180,150,80,0.55)', borderRadius: 3,
+                fontFamily: 'inherit',
+              }}
+            />
             <WagerControls kind={wagerKind} amount={wagerAmount}
               onKind={setWagerKind} onAmount={setWagerAmount} />
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -1498,6 +1526,19 @@ function Lobby({
               }}>P{s}</button>
             ))}
           </div>
+          <input
+            type="text"
+            value={matchName}
+            onChange={e => setMatchName(e.target.value.slice(0, 40))}
+            placeholder="Match name (optional)"
+            maxLength={40}
+            style={{
+              width: '100%', padding: '4px 6px', fontSize: 11,
+              background: 'rgba(10,12,20,0.7)', color: '#e9e4d0',
+              border: '1px solid rgba(180,150,80,0.55)', borderRadius: 3,
+              fontFamily: 'inherit',
+            }}
+          />
           <WagerControls compact kind={wagerKind} amount={wagerAmount}
             onKind={setWagerKind} onAmount={setWagerAmount} />
         </div>
@@ -1590,6 +1631,17 @@ function Lobby({
             <p style={{ color: '#aaa', marginTop: 0, fontSize: 13 }}>
               You're joining as <b style={{ color: '#fff' }}>P{joinTarget.seat}</b>. Pick the deck you want to play with.
             </p>
+            {(() => {
+              const mName = readMatchName(joinTarget.match.setupData);
+              if (!mName) return null;
+              return (
+                <div style={{
+                  fontSize: 13, marginBottom: 10, padding: '6px 10px',
+                  background: 'rgba(240,179,42,0.10)', border: '1px solid rgba(240,179,42,0.45)',
+                  borderRadius: 4, color: '#ffd66e', fontWeight: 700,
+                }}>Match: <span style={{ color: '#fff' }}>{mName}</span></div>
+              );
+            })()}
             {(() => {
               const otherSeat = joinTarget.seat === '0' ? '1' : '0';
               const oppCol = (joinTarget.match.setupData?.colors ?? [])[Number(otherSeat)] as Color | null | undefined;
@@ -1880,6 +1932,11 @@ function readWager(setupData: any): Wager {
   const w = setupData?.wager;
   if (w && (w.kind === 'free' || w.kind === 'sol')) return w as Wager;
   return { kind: 'free' };
+}
+
+function readMatchName(setupData: any): string {
+  const n = setupData?.matchName;
+  return typeof n === 'string' ? n.trim().slice(0, 40) : '';
 }
 
 function wagerLabel(w: Wager): string {
