@@ -68,12 +68,12 @@ const emo = (cp: string) =>
 
 /** Image overrides keyed by card id. Cards without an entry render the chain glyph. */
 const IMAGES: Record<string, string> = {
-  // Chain nodes
-  node_bnb: cmc(1839),
-  node_sol: cmc(5426),
-  node_hl:  cmc(32196), // HYPE
-  node_eth: cmc(1027),
-  node_xrp: cmc(52),
+  // Chain nodes — larger, more artistic official logos hosted locally.
+  node_bnb: '/nodes/bnb.png',
+  node_sol: '/nodes/sol.png',
+  node_hl:  '/nodes/hl.png',
+  node_eth: '/nodes/eth.png',
+  node_xrp: '/nodes/xrp.png',
 
   // BnB memes
   bnb_babydoge: cmc(10407),
