@@ -154,17 +154,18 @@ function TemplatedCardFaceContent({ def, instance, footer, tpl }: { def: CardDef
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         overflow: 'hidden',
       }}>
-        {def.image ? (
+        <span style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: meta.ink, fontWeight: 900,
+          fontSize: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 11 : 18,
+          letterSpacing: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 1 : 2,
+          textShadow: '0 2px 6px #000',
+        }}>{tpl.glyph ?? meta.glyph ?? meta.name}</span>
+        {def.image && (
           <img src={def.image} alt="" loading="lazy"
             onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        ) : (
-          <span style={{
-            color: meta.ink, fontWeight: 900,
-            fontSize: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 11 : 18,
-            letterSpacing: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 1 : 2,
-            textShadow: '0 2px 6px #000',
-          }}>{tpl.glyph ?? meta.glyph ?? meta.name}</span>
+            style={{ position: 'relative', width: '100%', height: '100%', objectFit: 'cover' }} />
         )}
         {/* Status badges overlay on top-right of art */}
         {instance?.summoningSick && <span style={{ position: 'absolute', top: 2, right: 2, color: '#000', background: '#ffeb3b', padding: '0 3px', borderRadius: 2, fontSize: 6, fontWeight: 800 }}>SICK</span>}

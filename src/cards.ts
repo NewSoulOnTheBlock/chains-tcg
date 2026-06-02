@@ -58,6 +58,14 @@ export interface CardDef {
 /** CoinMarketCap static logo CDN; the trailing id is the CMC coin id. */
 const cmc = (id: number) => `https://s2.coinmarketcap.com/static/img/coins/128x128/${id}.png`;
 
+/**
+ * Twemoji CDN (Twitter's open-source emoji set, MIT/CC-BY licensed).
+ * Used as art for Machines/Moves since these aren't tokens with logos.
+ * Pass the unicode codepoint(s) in lowercase hex, joined with '-' for ZWJ sequences.
+ */
+const emo = (cp: string) =>
+  `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/${cp}.png`;
+
 /** Image overrides keyed by card id. Cards without an entry render the chain glyph. */
 const IMAGES: Record<string, string> = {
   // Chain nodes
@@ -116,6 +124,51 @@ const IMAGES: Record<string, string> = {
   xrp_oze:      cmc(34221),
   xrp_army:     cmc(33966),
   xrp_coreum:   cmc(24411),
+
+  // ── BnB machines/moves ──
+  bnb_farm:     emo('1f916'), // 🤖 robot (Volume Bot)
+  bnb_bridge:   emo('1f680'), // 🚀 rocket (Token Launchpad)
+  bnb_sniper:   emo('1f3af'), // 🎯 dart (Sniper Bot)
+  bnb_mmalgo:   emo('1f4ca'), // 📊 bar chart (Market Maker Algo)
+  bnb_rugpull:  emo('1f4b8'), // 💸 money-with-wings (Rug Pull)
+  bnb_airdrop:  emo('1fa82'), // 🪂 parachute (Airdrop Farm)
+  bnb_honeypot: emo('1f36f'), // 🍯 honey pot (Honeypot)
+
+  // ── Solana machines/moves ──
+  sol_priority: emo('1f4e6'), // 📦 package (MEV Bundler)
+  sol_oracle:   emo('1f9e0'), // 🧠 brain (AI Trading Agent)
+  sol_amm:      emo('1f500'), // 🔀 shuffle (AMM Router)
+  sol_tgbot:    emo('1f4ac'), // 💬 chat bubble (Telegram Bot Suite)
+  sol_zap:      emo('1f3f9'), // 🏹 bow & arrow (Snipe)
+  sol_bounce:   emo('1f3c3'), // 🏃 runner (Frontrun)
+  sol_tgpump:   emo('1f4e2'), // 📢 loudspeaker (Telegram Pump)
+
+  // ── Hyperliquid machines/moves ──
+  hl_orderbook: emo('1f4c8'), // 📈 chart up (Market Maker Bot)
+  hl_lifelink:  emo('1f33e'), // 🌾 sheaf of rice (Funding Rate Farm)
+  hl_vault:     emo('1f3e6'), // 🏦 bank (Perps Vault)
+  hl_leverage:  emo('2696'),  // ⚖️ scales (Leverage Desk)
+  hl_squeeze:   emo('1f4a5'), // 💥 collision (Short Squeeze)
+  hl_heal:      emo('1f4b0'), // 💰 money bag (Take Profit)
+  hl_margin:    emo('1f4de'), // 📞 telephone (Margin Call)
+
+  // ── Ethereum machines/moves ──
+  eth_eip1559:  emo('1f4dc'), // 📜 scroll (Smart Contract Suite)
+  eth_temple:   emo('1f310'), // 🌐 globe with meridians (Dapp Ecosystem)
+  eth_l2:       emo('26d3'),  // ⛓ chains (Layer 2 Rollup)
+  eth_yield:    emo('1fa99'), // 🪙 coin (Yield Aggregator)
+  eth_smite:    emo('1f426'), // 🐦 bird (FUD Tweet)
+  eth_heal:     emo('1f4b5'), // 💵 dollar banknote (DCA In)
+  eth_exploit:  emo('1f41b'), // 🐛 bug (Exploit Disclosure)
+
+  // ── XRP machines/moves ──
+  xrp_ledger:   emo('1f4d2'), // 📒 ledger (Indexer Daemon)
+  xrp_lifelink: emo('1f30a'), // 🌊 wave (AMM Pool)
+  xrp_arb:      emo('26a1'),  // ⚡ high voltage (Arbitrage Bot)
+  xrp_algo:     emo('1f9ee'), // 🧮 abacus (Trading Algorithm)
+  xrp_assassin: emo('1f50d'), // 🔍 magnifying glass (Doxx)
+  xrp_strike:   emo('1f40b'), // 🐋 whale (Whale Dump)
+  xrp_subpoena: emo('1f4dd'), // 📝 memo (SEC Subpoena)
 };
 
 /**
