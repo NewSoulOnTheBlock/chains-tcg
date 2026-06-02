@@ -6,6 +6,7 @@ import serveStatic from 'koa-static';
 import { ChainsTCG } from './Game';
 import { initDb, upsertProfile, updateProfile, getProfile, getProfileByWallet, listProfiles, recordMatch, getDeck, saveDeck } from './db';
 import { validateDeck } from './cards';
+import { bootRanked, routeRanked } from './ranked';
 
 const distDir = path.resolve(__dirname, '..', 'dist');
 
@@ -111,6 +112,8 @@ app.use(async (ctx, next) => {
   }
 
   try {
+    if (await routeRanked(ctx)) return;
+
     if (method === 'GET' && url === '/api/health') {
       ctx.body = { ok: true, ts: Date.now() };
       return;
@@ -172,6 +175,26 @@ app.use(async (ctx, next) => {
       const { matchID, winner, loser, draw } = body ?? {};
       if (!matchID) { ctx.status = 400; ctx.body = { error: 'matchID required' }; return; }
       const status = await recordMatch(String(matchID), winner ?? null, loser ?? null, !!draw);
+      // Ranked ingestion: clients flag ranked matches with `ranked: true` and the season id.
+      if (body?.ranked && body?.seasonId && body?.player0 && body?.player1) {
+        try {
+          const { RatingService } = await import('./ranked');
+          await RatingService.ingestMatchResult({
+            matchId: String(matchID),
+            seasonId: String(body.seasonId),
+            player0: String(body.player0),
+            player1: String(body.player1),
+            winner: winner ? String(winner) : null,
+            draw: !!draw,
+            startedAt: Number(body.startedAt ?? Date.now()),
+            endedAt: Date.now(),
+            replaySeed: String(body.replaySeed ?? matchID),
+            disconnectedPlayer: body.disconnectedPlayer ? String(body.disconnectedPlayer) : null,
+          });
+        } catch (e) {
+          console.warn('[server] ranked ingest failed', e);
+        }
+      }
       ctx.body = { status };
       return;
     }
@@ -214,6 +237,7 @@ if (fs.existsSync(distDir)) {
 // ── Boot ────────────────────────────────────────────────────────────────────
 (async () => {
   await initDb();
+  await bootRanked({ lobbyServerUrl: `http://localhost:${PORT}` });
   server.run(PORT, () => {
     console.log(`[server] Chains TCG listening on :${PORT}`);
   });

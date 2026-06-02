@@ -22,6 +22,9 @@ let pool: pg.Pool | null = null;
 const memProfiles: Map<string, Profile> = new Map();
 const recordedMatches: Set<string> = new Set(); // matchID dedupe for in-memory mode
 
+/** Exposed for the ranked subsystem so it can share the same Pool. */
+export function getPool(): pg.Pool | null { return pool; }
+
 export async function initDb() {
   if (!DATABASE_URL) {
     console.warn('[db] DATABASE_URL not set — using in-memory store (data will not persist).');
