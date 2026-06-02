@@ -29,6 +29,74 @@ function useIsMobile(breakpoint = 720) {
   return m;
 }
 
+/**
+ * Mobile-only zoom wrapper for the playmat. Renders +/-/⤧ buttons.
+ * When zoom > 1, the inner element scales up via width%; the outer container
+ * gets overflow: auto so the user can flick around with native momentum.
+ * Single-finger taps go straight through to cards underneath.
+ */
+function MobilePlaymatScaler({
+  enabled, children,
+}: { enabled: boolean; children: React.ReactNode }) {
+  const [zoom, setZoom] = useState(1);
+  if (!enabled) return <>{children}</>;
+  const ZOOMS = [1, 1.5, 2, 2.5];
+  const idx = ZOOMS.indexOf(zoom);
+  const zoomIn  = () => setZoom(ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, idx) + 1)]);
+  const zoomOut = () => setZoom(ZOOMS[Math.max(0, (idx >= 0 ? idx : 1) - 1)]);
+  const reset   = () => setZoom(1);
+  const scrolling = zoom > 1;
+  return (
+    <div style={{ position: 'relative' }}>
+      <div style={{
+        overflow: scrolling ? 'auto' : 'visible',
+        maxHeight: scrolling ? '70dvh' : 'none',
+        WebkitOverflowScrolling: 'touch',
+        overscrollBehavior: 'contain',
+        borderRadius: 10,
+        // Subtle frame so the zoomable region reads as a viewport.
+        outline: scrolling ? '1px solid rgba(255,215,106,0.25)' : 'none',
+      }}>
+        <div style={{
+          width: `${zoom * 100}%`,
+          margin: scrolling ? 0 : '0 auto',
+        }}>
+          {children}
+        </div>
+      </div>
+      {/* Floating zoom controls — top-right, above the mat. */}
+      <div style={{
+        position: 'absolute', top: 4, right: 4, zIndex: 5,
+        display: 'flex', gap: 4,
+        background: 'rgba(10,10,20,0.7)', padding: 3, borderRadius: 18,
+        border: '1px solid rgba(255,215,106,0.35)',
+      }}>
+        <button onClick={zoomOut} disabled={zoom <= ZOOMS[0]}
+          aria-label="Zoom out"
+          style={zoomBtnStyle(zoom <= ZOOMS[0])}>−</button>
+        <button onClick={reset}
+          aria-label="Reset zoom"
+          style={{ ...zoomBtnStyle(false), width: 'auto', padding: '0 8px', fontSize: 11 }}>
+          {Math.round(zoom * 100)}%
+        </button>
+        <button onClick={zoomIn} disabled={zoom >= ZOOMS[ZOOMS.length - 1]}
+          aria-label="Zoom in"
+          style={zoomBtnStyle(zoom >= ZOOMS[ZOOMS.length - 1])}>+</button>
+      </div>
+    </div>
+  );
+}
+function zoomBtnStyle(disabled: boolean): React.CSSProperties {
+  return {
+    width: 30, height: 30, borderRadius: '50%',
+    background: disabled ? '#222' : 'linear-gradient(180deg,#3a2a55,#22163a)',
+    color: disabled ? '#555' : '#ffd76a',
+    border: `1px solid ${disabled ? '#333' : '#ffd76a66'}`,
+    fontWeight: 800, fontSize: 16, lineHeight: 1,
+    cursor: disabled ? 'default' : 'pointer',
+  };
+}
+
 const COLOR_BAR: React.CSSProperties = { display: 'flex', gap: 6, fontSize: 12, marginTop: 4 };
 
 function Pip({ c, n }: { c: Color | 'any'; n: number }) {
@@ -231,6 +299,9 @@ export function ChainsBoard(props: Props) {
 
   const [selectedHand, setSelectedHand] = useState<number | null>(null);
   const [targetMode, setTargetMode] = useState<null | { kind: 'meme' | 'any' | 'machine' }>(null);
+  // Mobile hand drawer (bottom sheet). On mobile, the hand is collapsed to a
+  // peek bar; tapping ✋ opens a full-screen sheet to browse + play cards.
+  const [handOpen, setHandOpen] = useState(false);
 
   const myTurn = ctx.currentPlayer === myId;
   const inBlockers = ctx.activePlayers?.[myId] === 'blockers';
@@ -574,6 +645,7 @@ export function ChainsBoard(props: Props) {
         width: '100%',
         maxWidth: mobile ? '100%' : 'min(1280px, calc(100dvh - 280px))',
       }}>
+        <MobilePlaymatScaler enabled={mobile}>
         <Playmat
         me={me} opp={opp} myId={myId} oppId={oppId}
         myName={myName} oppName={oppName}
@@ -615,52 +687,82 @@ export function ChainsBoard(props: Props) {
         }}
         onMachineClick={uid => { if (targetMode?.kind === 'machine') pickTarget(uid); }}
       />
+      </MobilePlaymatScaler>
       </div>
 
-      {/* Hand — curved fan layout on desktop */}
-      <div style={{ marginTop: 8 }}>
-        <div style={{ fontSize: 11, opacity: 0.6, letterSpacing: 1, textTransform: 'uppercase', fontWeight: 700, textAlign: 'center', marginBottom: 4 }}>
-          ✋ Hand · {me.hand.length}
+      {/* Hand — curved fan layout on desktop, collapsed peek bar on mobile */}
+      {!mobile && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 11, opacity: 0.6, letterSpacing: 1, textTransform: 'uppercase', fontWeight: 700, textAlign: 'center', marginBottom: 4 }}>
+            ✋ Hand · {me.hand.length}
+          </div>
+          <div style={{
+            display: 'flex', flexWrap: 'nowrap',
+            overflowX: 'visible',
+            WebkitOverflowScrolling: 'touch',
+            paddingBottom: 0,
+            justifyContent: 'center', alignItems: 'flex-end',
+            minHeight: 160,
+            perspective: 1200,
+          }}>
+            {me.hand.map((id, i) => {
+              const n = me.hand.length;
+              const t = n === 1 ? 0 : (i - (n - 1) / 2) / Math.max(1, (n - 1) / 2);
+              const rot = t * 6;
+              const lift = Math.abs(t) * 8;
+              const overlap = -18;
+              return (
+                <div key={i} style={{
+                  transform: `translateY(${lift}px) rotate(${rot}deg)`,
+                  transformOrigin: '50% 100%',
+                  marginLeft: i === 0 ? 0 : overlap,
+                  transition: 'transform 0.18s ease',
+                  zIndex: selectedHand === i ? 10 : i,
+                }}
+                  onMouseEnter={e => { e.currentTarget.style.transform = `translateY(-14px) rotate(${rot * 0.4}deg) scale(1.08)`; }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = `translateY(${lift}px) rotate(${rot}deg)`; }}
+                >
+                  <CardFace
+                    defId={id}
+                    selected={selectedHand === i}
+                    onClick={() => isActive && myTurn && !inBlockers && tryPlay(i)}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
-        <div style={{
-          display: 'flex', flexWrap: mobile ? 'nowrap' : 'nowrap',
-          overflowX: mobile ? 'auto' : 'visible',
-          WebkitOverflowScrolling: 'touch',
-          paddingBottom: mobile ? 6 : 0,
-          justifyContent: 'center', alignItems: 'flex-end',
-          minHeight: mobile ? 130 : 160,
-          perspective: 1200,
-        }}>
-          {me.hand.map((id, i) => {
-            const n = me.hand.length;
-            // Curve: rotate cards around an arc, slight upward lift toward center.
-            const t = n === 1 ? 0 : (i - (n - 1) / 2) / Math.max(1, (n - 1) / 2);  // -1..1
-            const rot = mobile ? 0 : t * 6;          // ±6° fan
-            const lift = mobile ? 0 : Math.abs(t) * 8;
-            const overlap = mobile ? 0 : -18;        // slight overlap
-            return (
-              <div key={i} style={{
-                transform: `translateY(${lift}px) rotate(${rot}deg)`,
-                transformOrigin: '50% 100%',
-                marginLeft: i === 0 ? 0 : overlap,
-                transition: 'transform 0.18s ease',
-                zIndex: selectedHand === i ? 10 : i,
-              }}
-                onMouseEnter={e => { if (!mobile) e.currentTarget.style.transform = `translateY(-14px) rotate(${rot * 0.4}deg) scale(1.08)`; }}
-                onMouseLeave={e => { if (!mobile) e.currentTarget.style.transform = `translateY(${lift}px) rotate(${rot}deg)`; }}
-              >
-                <CardFace
-                  defId={id}
-                  selected={selectedHand === i}
-                  onClick={() => isActive && myTurn && !inBlockers && tryPlay(i)}
-                />
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      )}
 
-      {/* Action bar */}
+      {/* Mobile bottom action bar + hand drawer trigger */}
+      {mobile && (
+        <MobileActionBar
+          gas={me.gas}
+          handCount={me.hand.length}
+          onOpenHand={() => setHandOpen(true)}
+          attackerCount={G.combat.attackers.length}
+          canAttack={myTurn && !inBlockers && !ctx.gameover && !mulliganPhase && G.combat.attackers.length > 0}
+          onAttack={() => moves.confirmAttackers()}
+          canEndTurn={myTurn && !inBlockers && !ctx.gameover && !mulliganPhase}
+          onEndTurn={() => moves.passTurn()}
+          inBlockers={inBlockers}
+          onConfirmBlocks={() => moves.confirmBlocks()}
+          targetMode={!!targetMode}
+          onCancelTarget={() => { setSelectedHand(null); setTargetMode(null); }}
+        />
+      )}
+      {mobile && handOpen && (
+        <MobileHandSheet
+          hand={me.hand}
+          selectedIdx={selectedHand}
+          canPlay={isActive && myTurn && !inBlockers && !mulliganPhase}
+          onClose={() => setHandOpen(false)}
+          onPlay={(i) => { tryPlay(i); setHandOpen(false); }}
+        />
+      )}
+
+      {/* Action bar (desktop) — mobile uses the sticky bottom bar above */}
+      {!mobile && (
       <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <GasBar gas={me.gas} />
         {myTurn && !inBlockers && (
@@ -685,6 +787,7 @@ export function ChainsBoard(props: Props) {
           <button onClick={() => { setSelectedHand(null); setTargetMode(null); }}>Cancel target</button>
         )}
       </div>
+      )}
 
       {/* Block assignment row */}
       {inBlockers && blockSel.blockerUid && (
@@ -1529,6 +1632,159 @@ function LifeBadge({
 
 /** Top-of-screen turn banner with chain-color glow + pulse. */
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Mobile sticky bottom action bar. Holds the game-critical buttons + a
+ * compact GasBar + the ✋ Hand toggle. Sits above the iOS safe-area inset.
+ */
+function MobileActionBar({
+  gas, handCount, onOpenHand,
+  attackerCount, canAttack, onAttack,
+  canEndTurn, onEndTurn,
+  inBlockers, onConfirmBlocks,
+  targetMode, onCancelTarget,
+}: {
+  gas: Record<Color, number>;
+  handCount: number;
+  onOpenHand: () => void;
+  attackerCount: number;
+  canAttack: boolean;
+  onAttack: () => void;
+  canEndTurn: boolean;
+  onEndTurn: () => void;
+  inBlockers: boolean;
+  onConfirmBlocks: () => void;
+  targetMode: boolean;
+  onCancelTarget: () => void;
+}) {
+  return (
+    <div style={{
+      position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 90,
+      paddingBottom: 'env(safe-area-inset-bottom)',
+      background: 'linear-gradient(180deg, rgba(10,10,20,0.85), rgba(0,0,0,0.96))',
+      borderTop: '1px solid rgba(255,215,106,0.35)',
+      boxShadow: '0 -8px 24px rgba(0,0,0,0.6)',
+      backdropFilter: 'blur(8px)',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '8px 8px',
+        overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+      }}>
+        {/* Compact gas pips */}
+        <div style={{ display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
+          {COLORS.map(c => gas[c] > 0 && <Pip key={c} c={c} n={gas[c]} />)}
+        </div>
+        <div style={{ flex: 1 }} />
+        {targetMode && (
+          <button onClick={onCancelTarget} style={mobBtn('#888')}>✕ CANCEL</button>
+        )}
+        {canAttack && (
+          <button onClick={onAttack} style={mobBtn('#ff5d33')}>⚔ ATTACK ({attackerCount})</button>
+        )}
+        {inBlockers && (
+          <button onClick={onConfirmBlocks} style={mobBtn('#5fcfff')}>🛡 BLOCKS</button>
+        )}
+        {canEndTurn && (
+          <button onClick={onEndTurn} style={mobBtn('#f0d27a', '#1a1408')}>END TURN</button>
+        )}
+        <button onClick={onOpenHand} style={{ ...mobBtn('#9b6cff'), position: 'relative' }}>
+          ✋ HAND
+          <span style={{
+            marginLeft: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9,
+            background: '#fff', color: '#1a1408', fontWeight: 900, fontSize: 11,
+          }}>{handCount}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+function mobBtn(color: string, ink: string = '#fff'): React.CSSProperties {
+  return {
+    background: color, color: ink, border: `1px solid ${color}`,
+    borderRadius: 8, padding: '10px 12px', cursor: 'pointer',
+    fontWeight: 800, fontSize: 13, letterSpacing: 1,
+    minHeight: 44, flexShrink: 0,
+    boxShadow: `0 0 10px ${color}66`,
+  };
+}
+
+/**
+ * Full-screen bottom sheet listing the player's hand on mobile.
+ * Tapping a card plays it (closing the sheet).
+ */
+function MobileHandSheet({
+  hand, selectedIdx, canPlay, onClose, onPlay,
+}: {
+  hand: string[];
+  selectedIdx: number | null;
+  canPlay: boolean;
+  onClose: () => void;
+  onPlay: (i: number) => void;
+}) {
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 140,
+      background: 'rgba(4,6,12,0.78)', backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: '100%', maxHeight: '85dvh', overflowY: 'auto',
+        background: 'linear-gradient(180deg, rgba(28,18,52,0.98), rgba(10,8,22,0.99))',
+        borderTop: '1px solid rgba(143,92,255,0.55)',
+        boxShadow: '0 -8px 32px rgba(0,0,0,0.7)',
+        borderTopLeftRadius: 14, borderTopRightRadius: 14,
+        padding: 14, paddingBottom: 'calc(14px + env(safe-area-inset-bottom))',
+        display: 'flex', flexDirection: 'column', gap: 12,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontWeight: 800, fontSize: 14, letterSpacing: 1.5, color: '#ffd76a' }}>
+            ✋ YOUR HAND ({hand.length})
+          </div>
+          <button onClick={onClose} style={{
+            background: 'transparent', color: '#fff',
+            border: '1px solid #555', borderRadius: 6,
+            padding: '8px 14px', cursor: 'pointer', fontWeight: 700,
+            minHeight: 44, minWidth: 44,
+          }}>✕</button>
+        </div>
+        {hand.length === 0 ? (
+          <div style={{ padding: 20, color: '#aab', textAlign: 'center' }}>
+            No cards in hand.
+          </div>
+        ) : (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+            gap: 10,
+          }}>
+            {hand.map((id, i) => (
+              <div key={i} style={{
+                display: 'flex', justifyContent: 'center',
+                opacity: canPlay ? 1 : 0.7,
+                outline: selectedIdx === i ? '2px solid #ffd76a' : 'none',
+                borderRadius: 8,
+              }}>
+                <CardFace
+                  defId={id}
+                  selected={selectedIdx === i}
+                  onClick={() => canPlay && onPlay(i)}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+        {!canPlay && (
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#aab' }}>
+            Wait for your turn to play a card.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 function MulliganModal({
   hand, mulliganCount, done, oppDone, deadline, onKeep, onMulligan, onForceEnd,
 }: {

@@ -24,20 +24,28 @@
     <style>
       *, *::before, *::after { box-sizing: border-box; }
       html, body, #root { margin: 0; padding: 0; }
+      html, body { min-height: 100dvh; }
       body {
         background: #000;
         color: #eee;
         -webkit-text-size-adjust: 100%;
         -webkit-tap-highlight-color: transparent;
         overflow-x: hidden;
+        /* Honor iOS safe-area at the bottom (home indicator) and sides. */
+        padding-bottom: env(safe-area-inset-bottom);
       }
       /* Prevent iOS auto-zoom on input focus */
       input, select, textarea, button { font-size: 16px; }
-      button { touch-action: manipulation; }
+      /* Kill 300ms tap delay & double-tap zoom on every interactive element. */
+      button, [role="button"], a, [data-tap] { touch-action: manipulation; }
       img { max-width: 100%; }
       /* Tiny scrollbars where possible */
       ::-webkit-scrollbar { width: 8px; height: 8px; }
       ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+      /* Leave room for the mobile bottom action bar so nothing hides behind it. */
+      @media (max-width: 720px) {
+        body { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+      }
     </style>
   </head>
   <body>

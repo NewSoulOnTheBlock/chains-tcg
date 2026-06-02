@@ -209,13 +209,23 @@ export function CardHover({
   const onMouseLeave = () => { clear(); setPos(null); };
 
   // Long-press for touch
+  const startPt = useRef<{ x: number; y: number } | null>(null);
   const onTouchStart = (e: React.TouchEvent) => {
     if (!def) return;
     const t = e.touches[0];
+    startPt.current = { x: t.clientX, y: t.clientY };
     clear();
     longT.current = window.setTimeout(() => {
       setPos({ x: t.clientX, y: t.clientY });
     }, 350);
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (!longT.current || !startPt.current) return;
+    const t = e.touches[0];
+    const dx = t.clientX - startPt.current.x;
+    const dy = t.clientY - startPt.current.y;
+    // Any meaningful movement → user is scrolling/panning, not long-pressing.
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) clear();
   };
   const onTouchEnd = () => { clear(); /* keep preview until tap outside */ };
 
@@ -237,6 +247,7 @@ export function CardHover({
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
       onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
       style={{ display: 'inline-block', verticalAlign: 'top' }}
     >
