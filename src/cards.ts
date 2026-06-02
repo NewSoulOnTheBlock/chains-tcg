@@ -86,11 +86,11 @@ const IMAGES: Record<string, string> = {
   bnb_floki:    cmc(10804),
 
   // Solana memes
-  sol_pnut:     cmc(33558),
+  sol_pnut:     '/cards/pnut.webp',
   sol_bonk:     cmc(23095),
   sol_popcat:   cmc(28782),
   sol_mew:      cmc(30126),
-  sol_bome:     cmc(29870),
+  sol_bome:     '/cards/bome.jpg',
   sol_wif:      cmc(28752),
   sol_fartcoin: cmc(33597),
   sol_goat:     cmc(33440),
