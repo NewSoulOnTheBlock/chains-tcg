@@ -175,6 +175,20 @@ app.use(async (ctx, next) => {
       const { matchID, winner, loser, draw } = body ?? {};
       if (!matchID) { ctx.status = 400; ctx.body = { error: 'matchID required' }; return; }
       const status = await recordMatch(String(matchID), winner ?? null, loser ?? null, !!draw);
+      // Wagered-match settle: clients post `wager: { onchainId, winnerSeat }`.
+      if (body?.wager?.onchainId) {
+        try {
+          const { settleWagerMatch } = await import('./server-wager');
+          await settleWagerMatch({
+            onchainId: String(body.wager.onchainId),
+            winnerSeat: body.wager.winnerSeat === '0' || body.wager.winnerSeat === '1'
+              ? body.wager.winnerSeat : undefined,
+            draw: !!draw,
+          });
+        } catch (e) {
+          console.warn('[server] wager settle failed', e);
+        }
+      }
       // Ranked ingestion: clients flag ranked matches with `ranked: true` and the season id.
       if (body?.ranked && body?.seasonId && body?.player0 && body?.player1) {
         try {

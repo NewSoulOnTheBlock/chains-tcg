@@ -36,3 +36,11 @@ export async function connectSolana(): Promise<ConnectedWallet> {
   if (!address) throw new Error('Wallet returned no public key.');
   return { chain: 'solana', address };
 }
+
+/** Returns the live Phantom provider (with signTransaction), connecting if needed. */
+export async function getPhantom(): Promise<any> {
+  const sol = window.solana;
+  if (!sol || !sol.isPhantom) throw new Error('Phantom wallet required for $MASTER wagers. Install Phantom.');
+  if (!sol.publicKey) await sol.connect();
+  return sol;
+}

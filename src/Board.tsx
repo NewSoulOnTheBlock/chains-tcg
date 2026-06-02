@@ -397,11 +397,15 @@ export function ChainsBoard(props: Props) {
           replaySeed: matchID,
         }
       : {};
+    const wagerMeta = G.wager?.kind === 'master' && G.wager.onchainId && !draw
+      ? { wager: { onchainId: G.wager.onchainId, winnerSeat: winnerId === '0' ? '0' : '1' } }
+      : {};
     recordResultApi(matchID, {
       winner: draw ? null : winnerName,
       loser:  draw ? null : loserName,
       draw,
       ...rankedMeta,
+      ...wagerMeta,
     } as any).then(() => refreshProfiles()).catch(e => console.warn('record result failed', e));
   }, [ctx.gameover, matchID, myId, oppId, myName, oppName, refreshProfiles]);
 

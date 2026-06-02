@@ -12,9 +12,14 @@ import {
   listProfilesApi, getProfileApi, getProfileByWalletApi, upsertProfileApi, updateProfileApi, getLibraryApi,
   getDeckApi, saveDeckApi, formatRecord, type Profile, type LibraryCard,
 } from './profiles';
-import { connectEvm, connectSolana, shortAddr, type ConnectedWallet } from './wallet';
+import { connectEvm, connectSolana, getPhantom, shortAddr, type ConnectedWallet } from './wallet';
 import { CardHover } from './CardPreview';
 import { RankedAPI, tierColors, rankLabel, type PublicRankedProfile, type LeaderboardEntry } from './ranked-client';
+import { Connection } from '@solana/web3.js';
+import {
+  ixCreateMatch, ixJoinMatch, newMatchId, matchIdToHex, matchIdFromHex,
+  masterUi, sendIxs, fetchMatch,
+} from './wager-program';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 // Server base: in dev Vite proxies /games (lobby) and /socket.io to :8000.
@@ -24,6 +29,16 @@ const GAME_NAME = ChainsTCG.name!;
 const COLOR_ORDER: Color[] = ['bnb', 'sol', 'hl', 'eth', 'xrp'];
 
 const lobby = new LobbyClient({ server: SERVER_BASE || undefined });
+
+// Lazy-init Solana connection (only used for wagered matches).
+let _solConn: Connection | null = null;
+function solConn(): Connection {
+  if (!_solConn) {
+    const url = (import.meta.env.VITE_SOLANA_RPC as string | undefined) || 'https://api.mainnet-beta.solana.com';
+    _solConn = new Connection(url, 'confirmed');
+  }
+  return _solConn;
+}
 
 // ── Responsive helper ──────────────────────────────────────────────────────
 function useIsMobile(breakpoint = 720) {
@@ -2716,10 +2731,26 @@ function Lobby({
         setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile → Custom Deck.`);
         return;
       }
-      const wager = parseWager(wagerKind, wagerAmount);
+      let wager = parseWager(wagerKind, wagerAmount);
       if (wagerKind === 'master' && !wager) {
         setError('Enter a valid $MASTER wager amount greater than 0.');
         return;
+      }
+      // For $MASTER wagers, deposit on-chain BEFORE creating the BG.io match so
+      // we never have a "ghost" wagered match that the creator didn't actually
+      // back. Phantom prompts for signature.
+      if (wager && wager.kind === 'master') {
+        const phantom = await getPhantom();
+        const matchIdBuf = newMatchId();
+        const conn = solConn();
+        const ixs = await ixCreateMatch({
+          connection: conn,
+          creator:    phantom.publicKey,
+          matchId:    matchIdBuf,
+          wagerAmount: masterUi(wager.amount),
+        });
+        await sendIxs(conn, phantom, ixs);
+        wager = { kind: 'master', amount: wager.amount, onchainId: matchIdToHex(matchIdBuf) };
       }
       await upsertProfileApi(myName);
       // When using a custom deck, the color slot is null and the deck is passed
@@ -2767,8 +2798,8 @@ function Lobby({
     const w = readWager(m.setupData);
     if (w.kind === 'master') {
       const ok = window.confirm(
-        `This is a WAGERED match.\n\nStakes: ${w.amount} $MASTER — winner takes the pot.\n\n` +
-        `By continuing you agree to pay ${w.amount} $MASTER if you lose. Continue?`
+        `This is a WAGERED match.\n\nStakes: ${w.amount} $MASTER — winner takes 90% of the pot (10% burned).\n\n` +
+        `By continuing you will be prompted by Phantom to deposit ${w.amount} $MASTER into escrow. Continue?`
       );
       if (!ok) return;
     }
@@ -2794,6 +2825,24 @@ function Lobby({
         return;
       }
       await upsertProfileApi(myName);
+      // For $MASTER wagers, deposit on-chain BEFORE joining the BG.io match so
+      // that we never "join" a match we haven't actually backed.
+      const w = readWager(m.setupData);
+      if (w.kind === 'master') {
+        if (!w.onchainId) {
+          setError('This wagered match was created without on-chain escrow; cannot join.');
+          return;
+        }
+        const phantom = await getPhantom();
+        const matchIdBuf = matchIdFromHex(w.onchainId);
+        const conn = solConn();
+        const ixs = await ixJoinMatch({
+          connection: conn,
+          opponent:   phantom.publicKey,
+          matchId:    matchIdBuf,
+        });
+        await sendIxs(conn, phantom, ixs);
+      }
       // Stash the joiner's choice; Board.tsx will auto-call chooseColor on mount.
       try {
         if (joinUseCustom) {
@@ -4277,8 +4326,11 @@ function Banner({ kind, children }: { kind: 'error' | 'info'; children: React.Re
 // ── Wager helpers ───────────────────────────────────────────────────────────
 // Wagers are denominated in $MASTER (Solana SPL token).
 export const MASTER_TOKEN_ADDRESS = 'DpPowzjETiU6421ReuwBB8XmDB7sMyB2JGzFLssYpump';
+export const SOLANA_RPC_URL =
+  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SOLANA_RPC) ||
+  'https://api.mainnet-beta.solana.com';
 
-type Wager = { kind: 'free' } | { kind: 'master'; amount: number };
+type Wager = { kind: 'free' } | { kind: 'master'; amount: number; onchainId?: string };
 
 function parseWager(kind: 'free' | 'master', raw: string): Wager | null {
   if (kind === 'free') return { kind: 'free' };
@@ -4290,7 +4342,10 @@ function parseWager(kind: 'free' | 'master', raw: string): Wager | null {
 
 function readWager(setupData: any): Wager {
   const w = setupData?.wager;
-  if (w && (w.kind === 'free' || w.kind === 'master')) return w as Wager;
+  if (w && w.kind === 'free') return { kind: 'free' };
+  if (w && w.kind === 'master' && typeof w.amount === 'number') {
+    return { kind: 'master', amount: w.amount, onchainId: w.onchainId };
+  }
   // Back-compat: legacy 'sol' wagers map to the new 'master' kind so that
   // matches created before the rebrand still display correctly.
   if (w && w.kind === 'sol' && typeof w.amount === 'number') {
