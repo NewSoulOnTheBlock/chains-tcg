@@ -3364,6 +3364,7 @@ function MatchCard({ m, onJoin }: { m: any; onJoin: () => void }) {
       onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = LOBBY_TOKENS.border; }}
       style={{
         position: 'relative', overflow: 'hidden',
+        flex: '0 0 auto',
         background: `linear-gradient(180deg, rgba(16,22,38,0.85), rgba(8,12,22,0.85))`,
         border: `1px solid ${LOBBY_TOKENS.border}`,
         borderRadius: 12,
