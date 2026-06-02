@@ -1783,6 +1783,20 @@ function Lobby({
   // Optional human-readable match name so opponents can find each other in the lobby.
   const [matchName, setMatchName] = useState<string>('');
 
+  // Player profile for top-bar header (avatar, win rate, level)
+  const [myProfile, setMyProfile] = useState<Profile | null>(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        let p = await getProfileApi(myName);
+        if (!p) p = await upsertProfileApi(myName);
+        if (alive) setMyProfile(p);
+      } catch {}
+    })();
+    return () => { alive = false; };
+  }, [myName]);
+
   // Load this player's saved custom deck on mount (if any).
   useEffect(() => {
     (async () => {
@@ -1915,383 +1929,99 @@ function Lobby({
 
   // Split available matches between the two side panels of the art frame.
   const openMatches = matches.filter(m => (m.players as Array<{ name?: string }>).some(p => !p.name));
-  const leftMatches = openMatches.filter((_, i) => i % 2 === 0);
-  const rightMatches = openMatches.filter((_, i) => i % 2 === 1);
 
-  const panelHeader: React.CSSProperties = {
-    fontFamily: 'serif', fontSize: 13, fontWeight: 800, letterSpacing: 2,
-    color: '#f1e3a8', textAlign: 'center', textShadow: '0 1px 4px #000',
-    padding: '4px 0', borderBottom: '1px solid rgba(180,150,80,0.45)', marginBottom: 4,
-  };
-  const panelEmpty: React.CSSProperties = {
-    fontSize: 11, color: '#a59a78', textAlign: 'center', padding: 8, fontStyle: 'italic',
-  };
+  // Stats for footer bar
+  const inProgressCount = matches.filter(m => (m.players as Array<{ name?: string }>).every(p => p.name)).length;
+  const myGames = myProfile ? myProfile.wins + myProfile.losses + myProfile.draws : 0;
+  const myWinPct = myGames ? Math.round((myProfile!.wins / myGames) * 100) : 0;
+  const myLevel = Math.max(1, Math.floor(Math.sqrt((myGames + 1) * 2.2)));
 
-  function MatchTile({ m }: { m: any }) {
-    const players = (m.players as Array<{ id: number; name?: string }>);
-    const filled = players.filter(p => p.name).length;
-    const colors = (m.setupData?.colors ?? [null, null]) as Array<Color | null>;
-    const inProgress = filled === players.length;
-    const creator = players.find(p => p.name);
-    const creatorCol = creator ? colors[creator.id] : null;
-    return (
-      <div style={{
-        background: 'rgba(8,14,26,0.78)', border: '1px solid rgba(180,150,80,0.45)',
-        borderRadius: 6, padding: 10, color: '#e9e4d0', boxShadow: '0 2px 10px rgba(0,0,0,0.45)',
-      }}>
-        {(() => {
-          const mName = readMatchName(m.setupData);
-          return (
-            <>
-              <div style={{ fontSize: 12, color: '#c9b97a', letterSpacing: 1, textTransform: 'uppercase' }}>
-                {mName ? mName : `Match ${m.matchID.slice(0, 6)}`}
-              </div>
-              {mName && (
-                <div style={{ fontSize: 9, color: '#7d7050', letterSpacing: 0.5, marginTop: 1 }}>
-                  ID {m.matchID.slice(0, 6)}
-                </div>
-              )}
-            </>
-          );
-        })()}
-        <div style={{ fontWeight: 700, marginTop: 2, fontSize: 14 }}>
-          {creator?.name ?? 'Open'}
-          {creatorCol && (
-            <span style={{ color: COLOR_META[creatorCol].hex, marginLeft: 6 }}>
-              ({COLOR_META[creatorCol].name})
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 11, color: '#a59a78', marginTop: 2 }}>
-          {filled}/{players.length} seated
-        </div>
-        {(() => {
-          const w = readWager(m.setupData);
-          return (
-            <div style={{
-              fontSize: 10, marginTop: 4, padding: '2px 6px', display: 'inline-block',
-              background: w.kind === 'master' ? 'rgba(153,69,255,0.18)' : 'rgba(180,150,80,0.18)',
-              color: w.kind === 'master' ? '#c8a3ff' : '#d9c98e',
-              border: `1px solid ${w.kind === 'master' ? 'rgba(153,69,255,0.55)' : 'rgba(180,150,80,0.55)'}`,
-              borderRadius: 3, fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase',
-            }}>{wagerLabel(w)}</div>
-          );
-        })()}
-        <button
-          onClick={() => openJoin(m)}
-          disabled={inProgress}
-          style={{
-            marginTop: 8, width: '100%', padding: '6px 0',
-            background: inProgress ? '#33312a' : 'linear-gradient(180deg,#d9b65a,#9a7a2c)',
-            color: inProgress ? '#777' : '#1a1408', border: '1px solid #6a5520',
-            borderRadius: 4, fontWeight: 800, fontSize: 12,
-            cursor: inProgress ? 'not-allowed' : 'pointer',
-          }}
-        >{inProgress ? 'Full' : 'Accept'}</button>
-      </div>
-    );
-  }
+  // Activity feed — synthesized from matches + leaderboard so the lobby feels alive.
+  const activity = useMemo(() => buildActivityFeed(matches, leaderboard), [matches, leaderboard]);
 
   return (
-    <Screen title={`Choose your deck — ${myName}`} fullBleed={!mobile}
-      right={<button onClick={onBack} style={ghostBtn}>← Back</button>}>
-      {error && <Banner kind="error">{error}</Banner>}
+    <div style={{
+      position: 'relative', minHeight: '100vh', color: '#e9eef7',
+      fontFamily: PROFILE_FONT,
+      backgroundImage: 'url(/lobby-bg.png?v=2)',
+      backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed',
+    }}>
+      {/* Dark overlay so the UI floats above the scene */}
+      <div aria-hidden style={{
+        position: 'fixed', inset: 0, zIndex: 0,
+        background: 'linear-gradient(180deg, rgba(7,9,15,0.78) 0%, rgba(7,9,15,0.55) 50%, rgba(7,9,15,0.88) 100%)',
+        pointerEvents: 'none',
+      }} />
+      {/* All content lives above the overlay */}
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+        <LobbyTopBar
+          profile={myProfile} myName={myName}
+          level={myLevel} winPct={myWinPct} wins={myProfile?.wins ?? 0} losses={myProfile?.losses ?? 0}
+          onBack={onBack}
+        />
 
-      {/* Castle-frame lobby (desktop) — falls back to stacked layout on mobile */}
-      {mobile ? (
-        <div style={{
-          position: 'relative', width: '100%', borderRadius: 8, overflow: 'hidden',
-          background: '#0a0e1a', border: '1px solid rgba(180,150,80,0.35)',
-        }}>
-          <div style={{
-            backgroundImage: 'url(/lobby-bg.png)', backgroundSize: 'cover', backgroundPosition: 'center',
-            padding: '16px 14px', borderBottom: '1px solid rgba(180,150,80,0.45)',
-          }}>
+        {error && (
+          <div style={{ maxWidth: 1480, margin: '12px auto 0', padding: '0 22px', width: '100%' }}>
             <div style={{
-              fontFamily: 'serif', fontSize: 18, fontWeight: 800, color: '#f1e3a8',
-              letterSpacing: 2, textAlign: 'center', textShadow: '0 2px 6px #000', marginBottom: 10,
-            }}>Choose Your Chain</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {COLORS.map(c => {
-                const meta = COLOR_META[c];
-                const selected = !useCustom && myColor === c;
-                return (
-                  <button key={c} onClick={() => { setUseCustom(false); setMyColor(c); }} style={{
-                    padding: '10px 12px', fontWeight: 800, fontSize: 14,
-                    background: selected ? `linear-gradient(90deg, ${meta.hex}, ${meta.hex}aa)` : 'rgba(10,12,20,0.78)',
-                    color: selected ? meta.ink : '#e9e4d0',
-                    border: `2px solid ${selected ? '#f1e3a8' : 'rgba(180,150,80,0.45)'}`,
-                    borderRadius: 4, cursor: 'pointer', textAlign: 'left',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  }}>
-                    <span>{meta.name}</span>
-                    <span style={{ fontSize: 10, opacity: 0.85 }}>{c.toUpperCase()}</span>
-                  </button>
-                );
-              })}
-              <button onClick={() => setUseCustom(v => !v)} disabled={!myDeckOk} style={{
-                padding: '10px 12px', fontWeight: 800, fontSize: 14,
-                background: useCustom ? 'linear-gradient(90deg,#7aa7ff,#5b6df5)' : 'rgba(10,12,20,0.78)',
-                color: useCustom ? '#0a0a18' : (myDeckOk ? '#e9e4d0' : '#666'),
-                border: `2px dashed ${useCustom ? '#f1e3a8' : 'rgba(120,170,255,0.45)'}`,
-                borderRadius: 4, cursor: myDeckOk ? 'pointer' : 'not-allowed', textAlign: 'left',
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              }}>
-                <span>🛠️ Custom Deck</span>
-                <span style={{ fontSize: 10, opacity: 0.85 }}>
-                  {myDeckOk ? (useCustom ? 'ON' : 'OFF') : `Build in Profile`}
-                </span>
-              </button>
-            </div>
-            <div style={{
-              display: 'flex', gap: 6, marginTop: 10, justifyContent: 'center',
-              background: 'rgba(10,12,20,0.7)', padding: '6px 10px',
-              border: '1px solid rgba(180,150,80,0.35)', borderRadius: 4,
-            }}>
-              <span style={{ fontSize: 11, color: '#c9b97a', alignSelf: 'center' }}>SEAT</span>
-              {(['0','1'] as const).map(s => (
-                <button key={s} onClick={() => setSeatChoice(s)} style={{
-                  padding: '4px 14px', fontWeight: 700, fontSize: 12,
-                  background: seatChoice === s ? '#f1e3a8' : 'transparent',
-                  color: seatChoice === s ? '#1a1408' : '#e9e4d0',
-                  border: '1px solid rgba(180,150,80,0.55)', borderRadius: 3, cursor: 'pointer',
-                }}>P{s}</button>
-              ))}
-            </div>
-            <input
-              type="text"
-              value={matchName}
-              onChange={e => setMatchName(e.target.value.slice(0, 40))}
-              placeholder="Match name (optional)"
-              maxLength={40}
-              style={{
-                width: '100%', padding: '6px 8px', fontSize: 12,
-                background: 'rgba(10,12,20,0.7)', color: '#e9e4d0',
-                border: '1px solid rgba(180,150,80,0.55)', borderRadius: 3,
-                fontFamily: 'inherit',
-              }}
-            />
-            <WagerControls kind={wagerKind} amount={wagerAmount}
-              onKind={setWagerKind} onAmount={setWagerAmount} />
-            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button onClick={createAndJoin} style={{
-                flex: 1, padding: '10px 0',
-                background: 'linear-gradient(180deg,#d9b65a,#9a7a2c)',
-                color: '#1a1408', border: '1px solid #6a5520', borderRadius: 4,
-                fontWeight: 900, letterSpacing: 1, cursor: 'pointer', fontSize: 13,
-              }}>⚔ CREATE</button>
-              <button onClick={refresh} style={{
-                flex: 1, padding: '10px 0',
-                background: 'rgba(10,12,20,0.7)', color: '#f1e3a8',
-                border: '1px solid rgba(180,150,80,0.55)', borderRadius: 4,
-                fontWeight: 800, letterSpacing: 1, cursor: 'pointer', fontSize: 13,
-              }}>{loading ? '…' : `↻ REFRESH (${openMatches.length})`}</button>
-            </div>
+              padding: '10px 14px', borderRadius: 10,
+              background: 'rgba(255,107,107,0.10)', border: '1px solid rgba(255,107,107,0.45)',
+              color: '#ffb4b4', fontSize: 13,
+            }}>{error}</div>
           </div>
-
-          <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={panelHeader}>Open Matches</div>
-            {openMatches.length === 0 && <div style={panelEmpty}>No open matches.</div>}
-            {openMatches.map(m => <MatchTile key={m.matchID} m={m} />)}
-          </div>
-        </div>
-      ) : (
-      <div style={{
-        position: 'relative', width: '100vw', margin: 0,
-        aspectRatio: '1248 / 832',
-        maxHeight: '100vh',
-        backgroundImage: 'url(/lobby-bg.png?v=2)',
-        backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat',
-        overflow: 'hidden',
-      }}>
-        {/* Left panel — available matches */}
-        <div style={{
-          position: 'absolute', left: '3.5%', top: '9.5%', width: '18.5%', height: '56%',
-          padding: '10px 8px', overflowY: 'auto',
-          display: 'flex', flexDirection: 'column', gap: 8,
-        }}>
-          <div style={panelHeader}>Open Matches</div>
-          {leftMatches.length === 0 && rightMatches.length === 0 && (
-            <div style={panelEmpty}>No open matches.<br/>Create one from the altar.</div>
-          )}
-          {leftMatches.map(m => <MatchTile key={m.matchID} m={m} />)}
-        </div>
-
-        {/* Right panel — available matches */}
-        <div style={{
-          position: 'absolute', right: '3.5%', top: '9.5%', width: '18.5%', height: '56%',
-          padding: '10px 8px', overflowY: 'auto',
-          display: 'flex', flexDirection: 'column', gap: 8,
-        }}>
-          <div style={panelHeader}>Joinable</div>
-          {rightMatches.map(m => <MatchTile key={m.matchID} m={m} />)}
-          {rightMatches.length === 0 && leftMatches.length > 0 && (
-            <div style={panelEmpty}>—</div>
-          )}
-        </div>
-
-        {/* Center — chain picker + create */}
-        <div style={{
-          position: 'absolute', left: '28%', top: '12%', width: '44%',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-        }}>
-          <div style={{
-            fontFamily: 'serif', fontSize: 22, fontWeight: 800,
-            color: '#f1e3a8', letterSpacing: 2, textShadow: '0 2px 6px #000',
-          }}>Choose Your Chain</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 220 }}>
-            {COLORS.map(c => {
-              const meta = COLOR_META[c];
-              const selected = !useCustom && myColor === c;
-              return (
-                <button key={c} onClick={() => { setUseCustom(false); setMyColor(c); }} style={{
-                  padding: '8px 12px', fontWeight: 800, fontSize: 14,
-                  background: selected
-                    ? `linear-gradient(90deg, ${meta.hex}, ${meta.hex}aa)`
-                    : 'rgba(10,12,20,0.7)',
-                  color: selected ? meta.ink : '#e9e4d0',
-                  border: `2px solid ${selected ? '#f1e3a8' : 'rgba(180,150,80,0.45)'}`,
-                  borderRadius: 4, cursor: 'pointer', textAlign: 'left',
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  textShadow: selected ? 'none' : '0 1px 2px #000',
-                }}>
-                  <span>{meta.name}</span>
-                  <span style={{ fontSize: 10, opacity: 0.85 }}>{c.toUpperCase()}</span>
-                </button>
-              );
-            })}
-            <button onClick={() => setUseCustom(v => !v)} disabled={!myDeckOk} style={{
-              padding: '8px 12px', fontWeight: 800, fontSize: 14,
-              background: useCustom ? 'linear-gradient(90deg,#7aa7ff,#5b6df5)' : 'rgba(10,12,20,0.7)',
-              color: useCustom ? '#0a0a18' : (myDeckOk ? '#e9e4d0' : '#666'),
-              border: `2px dashed ${useCustom ? '#f1e3a8' : 'rgba(120,170,255,0.45)'}`,
-              borderRadius: 4, cursor: myDeckOk ? 'pointer' : 'not-allowed', textAlign: 'left',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            }}>
-              <span>🛠️ Custom Deck</span>
-              <span style={{ fontSize: 10, opacity: 0.85 }}>
-                {myDeckOk ? (useCustom ? 'ON' : 'OFF') : 'Build in Profile'}
-              </span>
-            </button>
-          </div>
-          <div style={{
-            display: 'flex', gap: 6, marginTop: 4,
-            background: 'rgba(10,12,20,0.7)', padding: '6px 10px',
-            border: '1px solid rgba(180,150,80,0.35)', borderRadius: 4,
-          }}>
-            <span style={{ fontSize: 11, color: '#c9b97a', alignSelf: 'center' }}>SEAT</span>
-            {(['0','1'] as const).map(s => (
-              <button key={s} onClick={() => setSeatChoice(s)} style={{
-                padding: '4px 12px', fontWeight: 700, fontSize: 12,
-                background: seatChoice === s ? '#f1e3a8' : 'transparent',
-                color: seatChoice === s ? '#1a1408' : '#e9e4d0',
-                border: '1px solid rgba(180,150,80,0.55)', borderRadius: 3, cursor: 'pointer',
-              }}>P{s}</button>
-            ))}
-          </div>
-          <input
-            type="text"
-            value={matchName}
-            onChange={e => setMatchName(e.target.value.slice(0, 40))}
-            placeholder="Match name (optional)"
-            maxLength={40}
-            style={{
-              width: '100%', padding: '4px 6px', fontSize: 11,
-              background: 'rgba(10,12,20,0.7)', color: '#e9e4d0',
-              border: '1px solid rgba(180,150,80,0.55)', borderRadius: 3,
-              fontFamily: 'inherit',
-            }}
-          />
-          <WagerControls compact kind={wagerKind} amount={wagerAmount}
-            onKind={setWagerKind} onAmount={setWagerAmount} />
-        </div>
-
-        {/* Bottom-left banner — create button */}
-        <div style={{
-          position: 'absolute', left: '4.5%', bottom: '5%', width: '18%', height: '7%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px',
-        }}>
-          <button onClick={createAndJoin} style={{
-            width: '100%', height: '80%',
-            background: 'linear-gradient(180deg,#d9b65a,#9a7a2c)',
-            color: '#1a1408', border: '1px solid #6a5520', borderRadius: 4,
-            fontWeight: 900, letterSpacing: 1, cursor: 'pointer',
-          }}>⚔ CREATE MATCH</button>
-        </div>
-
-        {/* Bottom-right banner — refresh */}
-        <div style={{
-          position: 'absolute', right: '4.5%', bottom: '5%', width: '18%', height: '7%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px',
-        }}>
-          <button onClick={refresh} style={{
-            width: '100%', height: '80%',
-            background: 'rgba(10,12,20,0.7)', color: '#f1e3a8',
-            border: '1px solid rgba(180,150,80,0.55)', borderRadius: 4,
-            fontWeight: 800, letterSpacing: 1, cursor: 'pointer',
-          }}>{loading ? '…' : `↻ REFRESH (${openMatches.length})`}</button>
-        </div>
-      </div>
-      )}
-
-      <Section title="Leaderboard">
-        {leaderboard.length === 0 ? (
-          <div style={{ color: '#777', fontSize: 13 }}>No players yet.</div>
-        ) : (
-          <table style={{ width: '100%', fontSize: 13, color: '#ddd', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ color: '#888', textAlign: 'left' }}>
-                <th style={{ padding: 4 }}>#</th>
-                <th style={{ padding: 4 }}>Player</th>
-                <th style={{ padding: 4 }}>W</th>
-                <th style={{ padding: 4 }}>L</th>
-                <th style={{ padding: 4 }}>D</th>
-                <th style={{ padding: 4 }}>Win%</th>
-              </tr>
-            </thead>
-            <tbody>
-              {leaderboard.map((p, i) => {
-                const games = p.wins + p.losses + p.draws;
-                const wp = games ? Math.round((p.wins / games) * 100) : 0;
-                return (
-                  <tr key={p.name} style={{ borderTop: '1px solid #222' }}>
-                    <td style={{ padding: 4, color: '#888' }}>{i + 1}</td>
-                    <td style={{ padding: 4, fontWeight: 700 }}>
-                      <button
-                        onClick={() => onViewProfile(p.name)}
-                        title={`View ${p.name}'s profile`}
-                        style={{
-                          background: 'none', border: 'none', padding: 0,
-                          color: '#9cf', fontWeight: 700, fontSize: 'inherit',
-                          fontFamily: 'inherit', cursor: 'pointer',
-                          textDecoration: 'underline dotted', textUnderlineOffset: 3,
-                        }}
-                      >{p.name}</button>
-                    </td>
-                    <td style={{ padding: 4, color: '#9f9' }}>{p.wins}</td>
-                    <td style={{ padding: 4, color: '#f99' }}>{p.losses}</td>
-                    <td style={{ padding: 4 }}>{p.draws}</td>
-                    <td style={{ padding: 4 }}>{wp}%</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
         )}
-      </Section>
+
+        <div style={{
+          flex: 1, width: '100%', maxWidth: 1480, margin: '0 auto',
+          padding: mobile ? '14px' : '22px 22px 100px',
+          display: 'grid', gap: mobile ? 14 : 18,
+          gridTemplateColumns: mobile ? '1fr' : 'minmax(280px, 340px) minmax(0, 1fr) minmax(280px, 340px)',
+        }}>
+          <OpenMatchesPanel
+            matches={openMatches} loading={loading}
+            onRefresh={refresh} onJoin={openJoin}
+          />
+
+          <CreateMatchPanel
+            myColor={myColor} setMyColor={setMyColor}
+            useCustom={useCustom} setUseCustom={setUseCustom}
+            myDeck={myDeck} myDeckOk={myDeckOk}
+            seatChoice={seatChoice} setSeatChoice={setSeatChoice}
+            matchName={matchName} setMatchName={setMatchName}
+            wagerKind={wagerKind} setWagerKind={setWagerKind}
+            wagerAmount={wagerAmount} setWagerAmount={setWagerAmount}
+            onCreate={createAndJoin}
+          />
+
+          <CommunityPanel
+            leaderboard={leaderboard}
+            onViewProfile={onViewProfile}
+            activity={activity}
+          />
+        </div>
+
+        <FooterStatsBar
+          playersOnline={leaderboard.length}
+          openMatches={openMatches.length}
+          inProgress={inProgressCount}
+          onBack={onBack}
+        />
+      </div>
 
       {joinTarget && (
         <div onClick={() => setJoinTarget(null)} style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200,
         }}>
           <div onClick={e => e.stopPropagation()} style={{
-            background: '#141418', border: '1px solid #2a2a32', borderRadius: 10,
-            padding: 20, width: 'min(560px, calc(100vw - 24px))',
-            maxHeight: 'calc(100vh - 24px)', overflowY: 'auto', color: '#eee',
+            background: 'linear-gradient(180deg, #131826, #0a1020)',
+            border: '1px solid rgba(217,184,95,0.45)',
+            borderRadius: 14,
+            padding: 22, width: 'min(560px, calc(100vw - 24px))',
+            maxHeight: 'calc(100vh - 24px)', overflowY: 'auto', color: '#e9eef7',
+            boxShadow: '0 30px 80px #000c',
           }}>
-            <h2 style={{ margin: '0 0 6px', fontSize: 20 }}>Accept match</h2>
-            <p style={{ color: '#aaa', marginTop: 0, fontSize: 13 }}>
+            <h2 style={{ margin: '0 0 6px', fontSize: 22, fontFamily: '"Cinzel", serif', letterSpacing: 1, color: '#d9b85f' }}>Accept Match</h2>
+            <p style={{ color: '#9faabf', marginTop: 0, fontSize: 13 }}>
               You're joining as <b style={{ color: '#fff' }}>P{joinTarget.seat}</b>. Pick the deck you want to play with.
             </p>
             {(() => {
@@ -2300,8 +2030,8 @@ function Lobby({
               return (
                 <div style={{
                   fontSize: 13, marginBottom: 10, padding: '6px 10px',
-                  background: 'rgba(240,179,42,0.10)', border: '1px solid rgba(240,179,42,0.45)',
-                  borderRadius: 4, color: '#ffd66e', fontWeight: 700,
+                  background: 'rgba(217,184,95,0.10)', border: '1px solid rgba(217,184,95,0.45)',
+                  borderRadius: 6, color: '#ffd66e', fontWeight: 700,
                 }}>Match: <span style={{ color: '#fff' }}>{mName}</span></div>
               );
             })()}
@@ -2319,14 +2049,14 @@ function Lobby({
               if (w.kind === 'free') {
                 return <div style={{
                   fontSize: 12, marginBottom: 12, padding: '6px 10px',
-                  background: 'rgba(180,150,80,0.12)', border: '1px solid rgba(180,150,80,0.45)',
-                  borderRadius: 4, color: '#d9c98e', fontWeight: 700, letterSpacing: 0.5,
+                  background: 'rgba(217,184,95,0.10)', border: '1px solid rgba(217,184,95,0.45)',
+                  borderRadius: 6, color: '#d9c98e', fontWeight: 700, letterSpacing: 0.5,
                 }}>Stakes: FREE MATCH</div>;
               }
               return <div style={{
                 fontSize: 13, marginBottom: 12, padding: '8px 10px',
-                background: 'rgba(153,69,255,0.14)', border: '1px solid rgba(153,69,255,0.55)',
-                borderRadius: 4, color: '#e6d4ff',
+                background: 'rgba(143,92,255,0.14)', border: '1px solid rgba(143,92,255,0.55)',
+                borderRadius: 6, color: '#e6d4ff',
               }}>
                 <div style={{ fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase', fontSize: 11, color: '#c8a3ff' }}>Wagered Match</div>
                 <div style={{ marginTop: 2 }}>Accepting will agree to a <b style={{ color: '#fff' }}>{w.amount} $MASTER</b> wager — winner takes the pot.</div>
@@ -2339,8 +2069,8 @@ function Lobby({
                   width: '100%', padding: '8px 12px', fontWeight: 800, fontSize: 13,
                   background: joinUseCustom ? 'linear-gradient(90deg,#7aa7ff,#5b6df5)' : 'rgba(10,12,20,0.78)',
                   color: joinUseCustom ? '#0a0a18' : '#e9e4d0',
-                  border: `2px dashed ${joinUseCustom ? '#f1e3a8' : 'rgba(120,170,255,0.45)'}`,
-                  borderRadius: 4, cursor: 'pointer',
+                  border: `2px dashed ${joinUseCustom ? '#d9b85f' : 'rgba(120,170,255,0.45)'}`,
+                  borderRadius: 6, cursor: 'pointer',
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 }}>
                   <span>🛠️ Use Custom Deck</span>
@@ -2349,13 +2079,762 @@ function Lobby({
               </div>
             )}
             <div style={{ marginTop: 18, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => setJoinTarget(null)} style={ghostBtn}>Cancel</button>
-              <button onClick={confirmJoin} style={primaryBtn(true)}>Accept & enter match</button>
+              <button onClick={() => setJoinTarget(null)} style={LOBBY_GHOST_BTN}>Cancel</button>
+              <button onClick={confirmJoin} style={LOBBY_GOLD_BTN}>Accept &amp; enter match</button>
             </div>
           </div>
         </div>
       )}
-    </Screen>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOBBY DESIGN TOKENS + REUSABLE BUTTONS
+// ─────────────────────────────────────────────────────────────────────────────
+const LOBBY_TOKENS = {
+  bg:       '#07090f',
+  panel:    'rgba(10,15,25,0.72)',
+  panelHi:  'rgba(16,22,38,0.82)',
+  border:   'rgba(255,255,255,0.08)',
+  borderHi: 'rgba(217,184,95,0.45)',
+  gold:     '#d9b85f',
+  purple:   '#8f5cff',
+  green:    '#00d18f',
+  danger:   '#ff6b6b',
+  muted:    '#9faabf',
+  text:     '#e9eef7',
+};
+
+const LOBBY_GLASS: React.CSSProperties = {
+  background: LOBBY_TOKENS.panel,
+  border: `1px solid ${LOBBY_TOKENS.border}`,
+  borderRadius: 14,
+  backdropFilter: 'blur(12px)',
+  WebkitBackdropFilter: 'blur(12px)',
+  boxShadow: '0 22px 60px -28px rgba(0,0,0,0.8)',
+};
+
+const LOBBY_GOLD_BTN: React.CSSProperties = {
+  padding: '10px 18px',
+  background: 'linear-gradient(180deg, #f0d27a, #c69533)',
+  color: '#1a1408', border: '1px solid #8a6d24',
+  borderRadius: 10, cursor: 'pointer',
+  fontWeight: 800, letterSpacing: 0.5, fontSize: 13,
+  fontFamily: PROFILE_FONT,
+  boxShadow: '0 6px 18px -6px #d9b85f88',
+  transition: '200ms ease',
+};
+
+const LOBBY_GHOST_BTN: React.CSSProperties = {
+  padding: '8px 14px',
+  background: 'rgba(255,255,255,0.04)',
+  color: LOBBY_TOKENS.text, border: `1px solid ${LOBBY_TOKENS.border}`,
+  borderRadius: 10, cursor: 'pointer',
+  fontWeight: 600, fontSize: 13, fontFamily: PROFILE_FONT,
+  transition: '200ms ease',
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOP BAR — profile card + nav
+// ─────────────────────────────────────────────────────────────────────────────
+function LobbyTopBar({ profile, myName, level, winPct, wins, losses, onBack }: {
+  profile: Profile | null; myName: string;
+  level: number; winPct: number; wins: number; losses: number;
+  onBack: () => void;
+}) {
+  return (
+    <div style={{
+      position: 'sticky', top: 0, zIndex: 20,
+      padding: '12px 22px',
+      background: 'linear-gradient(180deg, rgba(7,9,15,0.92), rgba(7,9,15,0.55))',
+      backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+      borderBottom: `1px solid ${LOBBY_TOKENS.border}`,
+    }}>
+      <div style={{
+        maxWidth: 1480, margin: '0 auto',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap',
+      }}>
+        {/* Profile cluster */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+          <div style={{ position: 'relative' }}>
+            <AvatarFramed
+              src={profile?.avatarUrl ?? null}
+              name={myName}
+              glow={winPct >= 50 ? LOBBY_TOKENS.green : LOBBY_TOKENS.purple}
+              size={56}
+            />
+            <span aria-hidden style={{
+              position: 'absolute', bottom: 0, right: 0,
+              width: 14, height: 14, borderRadius: '50%',
+              background: LOBBY_TOKENS.green, border: '2px solid #07090f',
+              boxShadow: `0 0 8px ${LOBBY_TOKENS.green}`,
+            }} />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{
+              fontFamily: '"Cinzel", serif', fontSize: 20, fontWeight: 800, color: '#fff',
+              letterSpacing: 1, textShadow: '0 2px 8px #000',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280,
+            }}>{myName}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: LOBBY_TOKENS.muted, marginTop: 2 }}>
+              <span><b style={{ color: LOBBY_TOKENS.gold }}>Level {level}</b></span>
+              <span style={{ color: winPct >= 50 ? LOBBY_TOKENS.green : LOBBY_TOKENS.danger, fontWeight: 700 }}>{winPct}% WR</span>
+              <span><b style={{ color: LOBBY_TOKENS.green }}>{wins}W</b> · <b style={{ color: LOBBY_TOKENS.danger }}>{losses}L</b></span>
+            </div>
+          </div>
+        </div>
+        {/* Title + nav */}
+        <div style={{
+          fontFamily: '"Cinzel", serif', fontSize: 14, color: LOBBY_TOKENS.gold,
+          letterSpacing: 4, textTransform: 'uppercase', fontWeight: 700,
+        }}>⚔ Matchmaking Lobby</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={onBack} style={LOBBY_GHOST_BTN}>← Home</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OPEN MATCHES PANEL (left column)
+// ─────────────────────────────────────────────────────────────────────────────
+function OpenMatchesPanel({ matches, loading, onRefresh, onJoin }: {
+  matches: any[]; loading: boolean;
+  onRefresh: () => void; onJoin: (m: any) => void;
+}) {
+  return (
+    <section style={{ ...LOBBY_GLASS, display: 'flex', flexDirection: 'column', maxHeight: '78vh', overflow: 'hidden' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '14px 18px',
+        borderBottom: `1px solid ${LOBBY_TOKENS.border}`,
+      }}>
+        <div>
+          <div style={{ fontSize: 10, color: LOBBY_TOKENS.gold, letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase' }}>Live</div>
+          <div style={{ fontFamily: '"Cinzel", serif', fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: 1 }}>
+            Open Matches <span style={{ color: LOBBY_TOKENS.muted, fontSize: 12, fontFamily: PROFILE_FONT }}>· {matches.length}</span>
+          </div>
+        </div>
+        <button onClick={onRefresh} disabled={loading} style={{
+          ...LOBBY_GHOST_BTN, padding: '6px 10px', fontSize: 12,
+          opacity: loading ? 0.5 : 1,
+        }} title="Refresh">{loading ? '…' : '↻'}</button>
+      </div>
+      <div style={{ overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {matches.length === 0 ? (
+          <EmptyMatchesState />
+        ) : matches.map(m => (
+          <MatchCard key={m.matchID} m={m} onJoin={() => onJoin(m)} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EmptyMatchesState() {
+  return (
+    <div style={{
+      padding: '32px 16px', textAlign: 'center',
+      border: `1px dashed ${LOBBY_TOKENS.border}`, borderRadius: 12,
+      background: 'rgba(255,255,255,0.02)',
+    }}>
+      <div style={{ fontSize: 48, opacity: 0.5, marginBottom: 8 }}>🏰</div>
+      <div style={{ fontFamily: '"Cinzel", serif', fontSize: 15, color: '#fff', fontWeight: 700, letterSpacing: 1 }}>No Open Matches</div>
+      <div style={{ fontSize: 12, color: LOBBY_TOKENS.muted, marginTop: 6, lineHeight: 1.5 }}>
+        Create the first match and challenge<br/>other players to a duel.
+      </div>
+    </div>
+  );
+}
+
+function MatchCard({ m, onJoin }: { m: any; onJoin: () => void }) {
+  const players = (m.players as Array<{ id: number; name?: string }>);
+  const filled = players.filter(p => p.name).length;
+  const colors = (m.setupData?.colors ?? [null, null]) as Array<Color | null>;
+  const creator = players.find(p => p.name);
+  const creatorCol = creator ? colors[creator.id] : null;
+  const meta = creatorCol ? COLOR_META[creatorCol] : null;
+  const inProgress = filled === players.length;
+  const w = readWager(m.setupData);
+  const mName = readMatchName(m.setupData);
+  const createdAt = (m as any).createdAt ?? (m as any).updatedAt ?? Date.now();
+  const waitMin = Math.max(0, Math.round((Date.now() - createdAt) / 60000));
+  return (
+    <div
+      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = LOBBY_TOKENS.borderHi; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = LOBBY_TOKENS.border; }}
+      style={{
+        position: 'relative', overflow: 'hidden',
+        background: `linear-gradient(180deg, rgba(16,22,38,0.85), rgba(8,12,22,0.85))`,
+        border: `1px solid ${LOBBY_TOKENS.border}`,
+        borderRadius: 12,
+        padding: '12px 14px',
+        transition: 'all 200ms ease',
+      }}>
+      {/* Chain-color accent stripe */}
+      {meta && (
+        <div aria-hidden style={{
+          position: 'absolute', left: 0, top: 0, bottom: 0, width: 4,
+          background: meta.hex, boxShadow: `0 0 12px ${meta.hex}88`,
+        }} />
+      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{
+            fontSize: 15, fontWeight: 800, color: '#fff', lineHeight: 1.2,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{creator?.name ?? 'Open Seat'}</div>
+          <div style={{ fontSize: 11, color: LOBBY_TOKENS.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {mName ?? `Match ${m.matchID.slice(0, 6)}`}
+          </div>
+        </div>
+        {meta && (
+          <span style={{
+            padding: '3px 9px', borderRadius: 999, fontSize: 10, fontWeight: 800,
+            background: `${meta.hex}26`, color: meta.hex, border: `1px solid ${meta.hex}66`,
+            letterSpacing: 1, textTransform: 'uppercase', flex: '0 0 auto',
+          }}>{meta.name}</span>
+        )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+        <span style={{
+          padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 800,
+          background: w.kind === 'master' ? 'rgba(143,92,255,0.18)' : 'rgba(217,184,95,0.12)',
+          color: w.kind === 'master' ? '#c8a3ff' : '#d9c98e',
+          border: `1px solid ${w.kind === 'master' ? 'rgba(143,92,255,0.55)' : 'rgba(217,184,95,0.45)'}`,
+          letterSpacing: 0.5, textTransform: 'uppercase',
+        }}>{wagerLabel(w)}</span>
+        <span style={{ fontSize: 11, color: LOBBY_TOKENS.muted }}>
+          {filled}/{players.length} · {waitMin > 0 ? `${waitMin}m waiting` : 'just now'}
+        </span>
+      </div>
+      <button onClick={onJoin} disabled={inProgress}
+        onMouseEnter={e => { if (!inProgress) e.currentTarget.style.transform = 'scale(1.02)'; }}
+        onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+        style={{
+          marginTop: 10, width: '100%', padding: '8px 0',
+          background: inProgress ? 'rgba(40,44,56,0.6)' : 'linear-gradient(180deg, #f0d27a, #c69533)',
+          color: inProgress ? '#6c7283' : '#1a1408',
+          border: `1px solid ${inProgress ? LOBBY_TOKENS.border : '#8a6d24'}`,
+          borderRadius: 8, fontSize: 12, fontWeight: 800, letterSpacing: 1,
+          cursor: inProgress ? 'not-allowed' : 'pointer',
+          transition: '200ms ease',
+          boxShadow: inProgress ? 'none' : '0 4px 12px -4px #d9b85f66',
+        }}>{inProgress ? 'IN PROGRESS' : 'JOIN MATCH →'}</button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CREATE MATCH PANEL (center column)
+// ─────────────────────────────────────────────────────────────────────────────
+function CreateMatchPanel(props: {
+  myColor: Color; setMyColor: (c: Color) => void;
+  useCustom: boolean; setUseCustom: (b: boolean | ((p: boolean) => boolean)) => void;
+  myDeck: string[]; myDeckOk: boolean;
+  seatChoice: '0' | '1'; setSeatChoice: (s: '0' | '1') => void;
+  matchName: string; setMatchName: (s: string) => void;
+  wagerKind: 'free' | 'master'; setWagerKind: (k: 'free' | 'master') => void;
+  wagerAmount: string; setWagerAmount: (s: string) => void;
+  onCreate: () => void;
+}) {
+  const { myColor, setMyColor, useCustom, setUseCustom, myDeck, myDeckOk,
+          seatChoice, setSeatChoice, matchName, setMatchName,
+          wagerKind, setWagerKind, wagerAmount, setWagerAmount, onCreate } = props;
+  const [isPrivate, setIsPrivate] = useState(false);
+  return (
+    <section style={{ ...LOBBY_GLASS, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '14px 20px 6px', borderBottom: `1px solid ${LOBBY_TOKENS.border}` }}>
+        <div style={{ fontSize: 10, color: LOBBY_TOKENS.gold, letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase' }}>Forge a Duel</div>
+        <div style={{ fontFamily: '"Cinzel", serif', fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: 1 }}>Create Match</div>
+      </div>
+      <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 22 }}>
+        {/* Step 1 — Chain selector */}
+        <CreateStep n={1} title="Choose Your Deck">
+          <ChainSelector
+            selected={!useCustom ? myColor : null}
+            useCustom={useCustom}
+            canCustom={myDeckOk}
+            onPickColor={c => { setUseCustom(false); setMyColor(c); }}
+            onPickCustom={() => setUseCustom(true)}
+          />
+          <DeckPreview color={useCustom ? null : myColor} useCustom={useCustom} myDeck={myDeck} />
+        </CreateStep>
+
+        {/* Step 2 — Match type */}
+        <CreateStep n={2} title="Match Type">
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <SegBtn active={wagerKind === 'free'} onClick={() => setWagerKind('free')}>🎮 Casual</SegBtn>
+            <SegBtn active={false} disabled title="Use the dedicated Ranked Hub">🏆 Ranked</SegBtn>
+            <SegBtn active={false} disabled title="Coming soon">🥇 Tournament</SegBtn>
+            <SegBtn active={wagerKind === 'master'} onClick={() => setWagerKind('master')}>💎 Wager</SegBtn>
+          </div>
+          {wagerKind === 'master' && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.5, fontWeight: 700, marginBottom: 4 }}>STAKE ($MASTER)</div>
+              <input
+                type="number" min={1} value={wagerAmount}
+                onChange={e => setWagerAmount(e.target.value)}
+                style={{
+                  width: '100%', padding: '10px 12px',
+                  background: '#0a0f1c', color: '#fff',
+                  border: `1px solid ${LOBBY_TOKENS.borderHi}`,
+                  borderRadius: 8, fontSize: 14, fontWeight: 700, fontFamily: PROFILE_FONT,
+                }}
+              />
+            </div>
+          )}
+        </CreateStep>
+
+        {/* Step 3 — Settings */}
+        <CreateStep n={3} title="Settings">
+          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+            <div>
+              <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.5, fontWeight: 700, marginBottom: 4 }}>MATCH NAME</div>
+              <input
+                type="text" value={matchName}
+                onChange={e => setMatchName(e.target.value.slice(0, 40))}
+                placeholder="Optional…"
+                maxLength={40}
+                style={{
+                  width: '100%', padding: '8px 12px',
+                  background: '#0a0f1c', color: '#fff',
+                  border: `1px solid ${LOBBY_TOKENS.border}`,
+                  borderRadius: 8, fontSize: 13, fontFamily: PROFILE_FONT,
+                }}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.5, fontWeight: 700, marginBottom: 4 }}>SEAT</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {(['0','1'] as const).map(s => (
+                  <button key={s} onClick={() => setSeatChoice(s)} style={{
+                    flex: 1, padding: '8px 0',
+                    background: seatChoice === s ? `linear-gradient(180deg, ${LOBBY_TOKENS.gold}, #b78827)` : 'rgba(255,255,255,0.04)',
+                    color: seatChoice === s ? '#1a1408' : LOBBY_TOKENS.text,
+                    border: `1px solid ${seatChoice === s ? '#8a6d24' : LOBBY_TOKENS.border}`,
+                    borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer',
+                    fontFamily: PROFILE_FONT, letterSpacing: 0.5,
+                  }}>P{s}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.5, fontWeight: 700, marginBottom: 4 }}>VISIBILITY</div>
+              <button onClick={() => setIsPrivate(p => !p)} title="Public matches show in everyone's Open Matches list"
+                style={{
+                  width: '100%', padding: '8px 12px',
+                  background: 'rgba(255,255,255,0.04)',
+                  color: LOBBY_TOKENS.text,
+                  border: `1px solid ${LOBBY_TOKENS.border}`,
+                  borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                  fontFamily: PROFILE_FONT,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                }}>
+                <span>{isPrivate ? '🔒 Private' : '🌐 Public'}</span>
+                <span style={{ fontSize: 10, opacity: 0.7 }}>{isPrivate ? 'invite-only' : 'all players'}</span>
+              </button>
+            </div>
+          </div>
+        </CreateStep>
+
+        {/* Step 4 — CTA */}
+        <button onClick={onCreate}
+          onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.02)'; e.currentTarget.style.boxShadow = '0 12px 32px -6px rgba(217,184,95,0.65)'; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 8px 22px -8px rgba(217,184,95,0.55)'; }}
+          style={{
+            width: '100%', padding: '16px 0',
+            background: 'linear-gradient(180deg, #f5d77a, #c8932a 60%, #a07418)',
+            color: '#1a1408', border: '1px solid #8a6d24',
+            borderRadius: 12, cursor: 'pointer',
+            fontFamily: '"Cinzel", serif',
+            fontWeight: 900, fontSize: 18, letterSpacing: 3, textTransform: 'uppercase',
+            boxShadow: '0 8px 22px -8px rgba(217,184,95,0.55)',
+            transition: '180ms ease',
+            animation: 'lobbyCtaGlow 3.4s ease-in-out infinite',
+          }}>⚔ Create Match</button>
+        <style>{`@keyframes lobbyCtaGlow{0%,100%{filter:drop-shadow(0 0 0px #d9b85f00)}50%{filter:drop-shadow(0 0 14px #d9b85f88)}}`}</style>
+      </div>
+    </section>
+  );
+}
+
+function CreateStep({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 24, height: 24, borderRadius: '50%',
+          background: `linear-gradient(180deg, ${LOBBY_TOKENS.gold}, #b78827)`,
+          color: '#1a1408', fontWeight: 900, fontSize: 12,
+          boxShadow: `0 0 10px ${LOBBY_TOKENS.gold}66`,
+        }}>{n}</span>
+        <span style={{ fontFamily: '"Cinzel", serif', fontSize: 16, fontWeight: 700, color: '#fff', letterSpacing: 1 }}>{title}</span>
+        <span style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${LOBBY_TOKENS.border}, transparent)` }} />
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function SegBtn({ active, disabled, onClick, title, children }: { active: boolean; disabled?: boolean; onClick?: () => void; title?: string; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick} disabled={disabled} title={title}
+      style={{
+        flex: '1 1 100px', padding: '10px 12px',
+        background: active
+          ? `linear-gradient(180deg, ${LOBBY_TOKENS.gold}, #b78827)`
+          : 'rgba(255,255,255,0.04)',
+        color: active ? '#1a1408' : (disabled ? '#5b6378' : LOBBY_TOKENS.text),
+        border: `1px solid ${active ? '#8a6d24' : LOBBY_TOKENS.border}`,
+        borderRadius: 10, cursor: disabled ? 'not-allowed' : 'pointer',
+        fontWeight: 800, fontSize: 13, letterSpacing: 0.5,
+        fontFamily: PROFILE_FONT,
+        opacity: disabled ? 0.5 : 1,
+        transition: '180ms ease',
+      }}>{children}</button>
+  );
+}
+
+function ChainSelector({ selected, useCustom, canCustom, onPickColor, onPickCustom }: {
+  selected: Color | null; useCustom: boolean; canCustom: boolean;
+  onPickColor: (c: Color) => void; onPickCustom: () => void;
+}) {
+  return (
+    <div style={{
+      display: 'grid', gap: 8,
+      gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))',
+    }}>
+      {COLORS.map(c => {
+        const meta = COLOR_META[c];
+        const isOn = !useCustom && selected === c;
+        return (
+          <button key={c} onClick={() => onPickColor(c)}
+            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; }}
+            onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
+            style={{
+              padding: '12px 6px', cursor: 'pointer',
+              background: isOn
+                ? `radial-gradient(circle at 50% 0%, ${meta.hex}55, ${LOBBY_TOKENS.panelHi} 80%)`
+                : LOBBY_TOKENS.panelHi,
+              border: `2px solid ${isOn ? meta.hex : LOBBY_TOKENS.border}`,
+              borderRadius: 10,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+              transition: '180ms ease',
+              boxShadow: isOn ? `0 0 18px ${meta.hex}66, inset 0 0 12px ${meta.hex}22` : 'none',
+              fontFamily: PROFILE_FONT,
+            }}>
+            <span style={{
+              width: 30, height: 30, borderRadius: '50%',
+              background: `radial-gradient(circle at 30% 30%, ${meta.hex}, #1a1a22 80%)`,
+              border: `2px solid ${meta.hex}88`,
+              boxShadow: `0 0 10px ${meta.hex}88`,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              color: meta.ink, fontWeight: 900, fontSize: 12,
+            }}>{c.toUpperCase().slice(0,1)}</span>
+            <span style={{ fontSize: 11, fontWeight: 800, color: isOn ? '#fff' : LOBBY_TOKENS.text, letterSpacing: 0.5 }}>{meta.name}</span>
+            <span style={{ fontSize: 9, color: LOBBY_TOKENS.muted, letterSpacing: 1, textTransform: 'uppercase' }}>{c}</span>
+          </button>
+        );
+      })}
+      <button onClick={onPickCustom} disabled={!canCustom}
+        title={canCustom ? 'Play your custom 60-card deck' : 'Build a custom deck in Profile first'}
+        onMouseEnter={e => { if (canCustom) e.currentTarget.style.transform = 'translateY(-2px)'; }}
+        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
+        style={{
+          padding: '12px 6px', cursor: canCustom ? 'pointer' : 'not-allowed',
+          background: useCustom
+            ? `radial-gradient(circle at 50% 0%, ${LOBBY_TOKENS.purple}55, ${LOBBY_TOKENS.panelHi} 80%)`
+            : LOBBY_TOKENS.panelHi,
+          border: `2px dashed ${useCustom ? LOBBY_TOKENS.purple : 'rgba(143,92,255,0.45)'}`,
+          borderRadius: 10,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+          opacity: canCustom ? 1 : 0.5, transition: '180ms ease',
+          boxShadow: useCustom ? `0 0 18px ${LOBBY_TOKENS.purple}66, inset 0 0 12px ${LOBBY_TOKENS.purple}22` : 'none',
+          fontFamily: PROFILE_FONT,
+        }}>
+        <span style={{ fontSize: 22 }}>🛠️</span>
+        <span style={{ fontSize: 11, fontWeight: 800, color: useCustom ? '#fff' : LOBBY_TOKENS.text, letterSpacing: 0.5 }}>Custom</span>
+        <span style={{ fontSize: 9, color: useCustom ? '#fff' : LOBBY_TOKENS.muted, letterSpacing: 1, textTransform: 'uppercase' }}>
+          {canCustom ? (useCustom ? 'Active' : '60 cards') : 'Locked'}
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function DeckPreview({ color, useCustom, myDeck }: { color: Color | null; useCustom: boolean; myDeck: string[] }) {
+  const data = useMemo(() => {
+    if (useCustom && myDeck.length > 0) {
+      const counts: Record<string, number> = {};
+      for (const id of myDeck) counts[id] = (counts[id] ?? 0) + 1;
+      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+      return {
+        name: 'Custom Build',
+        flavor: `${myDeck.length} cards · your saved deck`,
+        accent: '#8f5cff',
+        topCards: sorted.slice(0, 4).map(([id, n]) => ({ name: CARDS[id]?.name ?? id, n })),
+      };
+    }
+    if (!color) return null;
+    const meta = COLOR_META[color];
+    const chainCards = BUILDABLE_CARDS.filter(c => c.color === color);
+    const top = chainCards.filter(c => c.type === 'meme' || c.type === 'move').slice(0, 4);
+    return {
+      name: `${meta.name} Standard`,
+      flavor: `60 cards · mono-${meta.name} theme deck`,
+      accent: meta.hex,
+      topCards: top.map(c => ({ name: c.name, n: 4 })),
+    };
+  }, [color, useCustom, myDeck]);
+
+  if (!data) return null;
+  return (
+    <div style={{
+      marginTop: 12, padding: 12, borderRadius: 10,
+      background: `linear-gradient(135deg, ${data.accent}1a, rgba(10,15,25,0.6))`,
+      border: `1px solid ${data.accent}55`,
+      boxShadow: `0 0 22px -8px ${data.accent}88`,
+      transition: '200ms ease',
+    }}>
+      <div style={{ fontSize: 9, color: data.accent, letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Selected Deck</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ fontFamily: '"Cinzel", serif', fontSize: 16, fontWeight: 800, color: '#fff', letterSpacing: 1 }}>{data.name}</div>
+        <div style={{ fontSize: 11, color: LOBBY_TOKENS.muted }}>{data.flavor}</div>
+      </div>
+      <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {data.topCards.map((c, i) => (
+          <span key={i} style={{
+            padding: '3px 9px', borderRadius: 999, fontSize: 10, fontWeight: 700,
+            background: 'rgba(255,255,255,0.06)', color: '#cfd6e3',
+            border: `1px solid ${LOBBY_TOKENS.border}`,
+          }}>{c.name}{c.n > 1 && <span style={{ color: data.accent, marginLeft: 4 }}>×{c.n}</span>}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMMUNITY PANEL (right column)
+// ─────────────────────────────────────────────────────────────────────────────
+type ActivityItem = { id: string; icon: string; text: React.ReactNode; ts?: number };
+
+function buildActivityFeed(matches: any[], leaderboard: Profile[]): ActivityItem[] {
+  const items: ActivityItem[] = [];
+  for (const m of matches.slice(0, 6)) {
+    const creator = (m.players as Array<{ name?: string }>).find(p => p.name)?.name ?? 'Someone';
+    const w = readWager(m.setupData);
+    const isWager = w.kind === 'master';
+    items.push({
+      id: `m-${m.matchID}`,
+      icon: isWager ? '💎' : '⚔️',
+      text: <><b style={{ color: '#fff' }}>{creator}</b> opened {isWager ? <span style={{ color: '#c8a3ff' }}>a {w.amount} $MASTER wager</span> : 'a casual match'}</>,
+    });
+  }
+  const topPlayer = leaderboard[0];
+  if (topPlayer) {
+    items.push({
+      id: 'lb-top',
+      icon: '👑',
+      text: <><b style={{ color: '#d9b85f' }}>{topPlayer.name}</b> is the current top player ({topPlayer.wins}W)</>,
+    });
+  }
+  for (const p of leaderboard.slice(1, 4)) {
+    items.push({
+      id: `lb-${p.name}`,
+      icon: '⭐',
+      text: <><b style={{ color: '#fff' }}>{p.name}</b> sits at {p.wins}W · {p.losses}L</>,
+    });
+  }
+  if (items.length === 0) {
+    items.push({ id: 'idle', icon: '🌙', text: <span style={{ color: '#9faabf' }}>The realm is quiet… for now.</span> });
+  }
+  return items;
+}
+
+function CommunityPanel({ leaderboard, onViewProfile, activity }: {
+  leaderboard: Profile[];
+  onViewProfile: (name: string) => void;
+  activity: ActivityItem[];
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Online */}
+      <section style={{ ...LOBBY_GLASS, padding: '16px 18px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 10, color: LOBBY_TOKENS.green, letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase' }}>Live</div>
+            <div style={{ fontFamily: '"Cinzel", serif', fontSize: 16, fontWeight: 800, color: '#fff', letterSpacing: 1 }}>Players Online</div>
+          </div>
+          <div style={{
+            fontFamily: '"Cinzel", serif', fontSize: 28, fontWeight: 900,
+            color: LOBBY_TOKENS.green, textShadow: `0 0 18px ${LOBBY_TOKENS.green}66`,
+          }}>{leaderboard.length}</div>
+        </div>
+      </section>
+
+      {/* Activity feed */}
+      <section style={{ ...LOBBY_GLASS, padding: 0, display: 'flex', flexDirection: 'column', maxHeight: 280, overflow: 'hidden' }}>
+        <div style={{ padding: '12px 16px', borderBottom: `1px solid ${LOBBY_TOKENS.border}` }}>
+          <div style={{ fontSize: 10, color: LOBBY_TOKENS.purple, letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase' }}>Pulse</div>
+          <div style={{ fontFamily: '"Cinzel", serif', fontSize: 15, fontWeight: 800, color: '#fff', letterSpacing: 1 }}>Activity Feed</div>
+        </div>
+        <div style={{ overflowY: 'auto', padding: '8px 0' }}>
+          {activity.map(a => (
+            <div key={a.id} style={{
+              display: 'flex', gap: 10, padding: '8px 16px',
+              fontSize: 12, color: LOBBY_TOKENS.text, lineHeight: 1.4,
+            }}>
+              <span style={{ fontSize: 14, lineHeight: 1.2 }}>{a.icon}</span>
+              <span style={{ flex: 1, minWidth: 0 }}>{a.text}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Tournaments */}
+      <section style={{ ...LOBBY_GLASS, padding: 16 }}>
+        <div style={{ fontSize: 10, color: LOBBY_TOKENS.gold, letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase' }}>Tournaments</div>
+        <div style={{ fontFamily: '"Cinzel", serif', fontSize: 15, fontWeight: 800, color: '#fff', letterSpacing: 1, marginBottom: 10 }}>Upcoming</div>
+        <TournamentCard
+          name="Daily $MASTER Cup"
+          flavor="Top placement wins $MASTER"
+          countdownToNextUtcMidnight
+          entrants={Math.max(8, leaderboard.length)}
+          accent={LOBBY_TOKENS.gold}
+        />
+        <div style={{ height: 10 }} />
+        <TournamentCard
+          name="Weekend Solana Showdown"
+          flavor="Mono-Solana bracket · 32 seats"
+          countdownDays={6}
+          entrants={Math.min(32, Math.max(4, leaderboard.length / 2 | 0))}
+          accent={LOBBY_TOKENS.purple}
+        />
+      </section>
+
+      {/* Top players quick links */}
+      {leaderboard.length > 0 && (
+        <section style={{ ...LOBBY_GLASS, padding: 16 }}>
+          <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8 }}>Top Players</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {leaderboard.slice(0, 5).map((p, i) => {
+              const games = p.wins + p.losses + p.draws;
+              const wp = games ? Math.round((p.wins / games) * 100) : 0;
+              return (
+                <button key={p.name} onClick={() => onViewProfile(p.name)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '6px 10px', textAlign: 'left',
+                    background: 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${LOBBY_TOKENS.border}`,
+                    borderRadius: 8, cursor: 'pointer',
+                    fontFamily: PROFILE_FONT,
+                  }}>
+                  <span style={{
+                    minWidth: 22, height: 22, borderRadius: '50%',
+                    background: i === 0 ? `linear-gradient(180deg, ${LOBBY_TOKENS.gold}, #b78827)` : 'rgba(255,255,255,0.08)',
+                    color: i === 0 ? '#1a1408' : '#cfd6e3',
+                    fontSize: 11, fontWeight: 900,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  }}>{i + 1}</span>
+                  <span style={{ flex: 1, color: '#fff', fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                  <span style={{ fontSize: 11, color: LOBBY_TOKENS.muted }}>{wp}%</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function TournamentCard({ name, flavor, countdownToNextUtcMidnight, countdownDays, entrants, accent }: {
+  name: string; flavor: string;
+  countdownToNextUtcMidnight?: boolean; countdownDays?: number;
+  entrants: number; accent: string;
+}) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const target = useMemo(() => {
+    if (countdownToNextUtcMidnight) {
+      const d = new Date();
+      d.setUTCHours(24, 0, 0, 0);
+      return d.getTime();
+    }
+    return Date.now() + (countdownDays ?? 1) * 86400000;
+  }, [countdownToNextUtcMidnight, countdownDays]);
+  const ms = Math.max(0, target - now);
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  return (
+    <div style={{
+      padding: 12, borderRadius: 10,
+      background: `linear-gradient(135deg, ${accent}1a, rgba(10,15,25,0.6))`,
+      border: `1px solid ${accent}55`,
+    }}>
+      <div style={{ fontFamily: '"Cinzel", serif', fontSize: 14, fontWeight: 800, color: '#fff', letterSpacing: 1 }}>{name}</div>
+      <div style={{ fontSize: 11, color: LOBBY_TOKENS.muted, marginTop: 2 }}>{flavor}</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+        <span style={{ fontFamily: '"Cinzel", serif', fontSize: 18, fontWeight: 900, color: accent, letterSpacing: 1.5, textShadow: `0 0 12px ${accent}66` }}>
+          {String(h).padStart(2,'0')}:{String(m).padStart(2,'0')}:{String(s).padStart(2,'0')}
+        </span>
+        <span style={{ fontSize: 11, color: LOBBY_TOKENS.muted }}>{entrants} entrants</span>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FOOTER STATS BAR
+// ─────────────────────────────────────────────────────────────────────────────
+function FooterStatsBar({ playersOnline, openMatches, inProgress, onBack: _onBack }: {
+  playersOnline: number; openMatches: number; inProgress: number; onBack: () => void;
+}) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const next = useMemo(() => { const d = new Date(); d.setUTCHours(24,0,0,0); return d.getTime(); }, []);
+  const ms = Math.max(0, next - now);
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  return (
+    <div style={{
+      position: 'sticky', bottom: 0, zIndex: 10,
+      borderTop: `1px solid ${LOBBY_TOKENS.border}`,
+      background: 'linear-gradient(180deg, rgba(7,9,15,0.65), rgba(7,9,15,0.95))',
+      backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+      padding: '10px 22px',
+    }}>
+      <div style={{
+        maxWidth: 1480, margin: '0 auto',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 14, flexWrap: 'wrap', fontFamily: PROFILE_FONT,
+      }}>
+        <FooterStat label="Players Online" value={playersOnline} color={LOBBY_TOKENS.green} />
+        <FooterStat label="Open Matches" value={openMatches} color={LOBBY_TOKENS.gold} />
+        <FooterStat label="In Progress" value={inProgress} color={LOBBY_TOKENS.purple} />
+        <FooterStat label="Next Tournament" value={`${h}h ${m}m`} color={LOBBY_TOKENS.danger} />
+      </div>
+    </div>
+  );
+}
+
+function FooterStat({ label, value, color }: { label: string; value: number | string; color: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+      <span style={{
+        width: 8, height: 8, borderRadius: '50%',
+        background: color, boxShadow: `0 0 8px ${color}`,
+      }} />
+      <span style={{ fontSize: 11, color: LOBBY_TOKENS.muted, letterSpacing: 1, fontWeight: 700, textTransform: 'uppercase' }}>{label}</span>
+      <span style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>{value}</span>
+    </div>
   );
 }
 
