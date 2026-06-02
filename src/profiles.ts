@@ -91,6 +91,53 @@ export async function saveDeckApi(name: string, cards: string[]): Promise<void> 
   });
 }
 
+// ── Challenges ────────────────────────────────────────────────────────────────
+
+export type Challenge = {
+  id: string;
+  fromName: string;
+  toName: string;
+  matchId: string;
+  wagerKind: 'free' | 'master';
+  wagerAmount: number | null;
+  message: string | null;
+  status: 'pending' | 'accepted' | 'declined' | 'cancelled' | 'expired';
+  createdAt: number;
+  expiresAt: number;
+};
+
+export async function createChallengeApi(args: {
+  fromName: string;
+  toName: string;
+  matchId: string;
+  wagerKind: 'free' | 'master';
+  wagerAmount?: number | null;
+  message?: string | null;
+}): Promise<Challenge> {
+  const { challenge } = await http<{ challenge: Challenge }>('/api/challenges', {
+    method: 'POST', body: JSON.stringify(args),
+  });
+  return challenge;
+}
+
+export async function listIncomingChallengesApi(name: string): Promise<Challenge[]> {
+  const { challenges } = await http<{ challenges: Challenge[] }>(`/api/challenges/in/${encodeURIComponent(name)}`);
+  return challenges;
+}
+export async function listOutgoingChallengesApi(name: string): Promise<Challenge[]> {
+  const { challenges } = await http<{ challenges: Challenge[] }>(`/api/challenges/out/${encodeURIComponent(name)}`);
+  return challenges;
+}
+export async function respondChallengeApi(
+  id: string, action: 'accept' | 'decline' | 'cancel', actorName: string,
+): Promise<Challenge> {
+  const { challenge } = await http<{ challenge: Challenge }>(
+    `/api/challenges/${encodeURIComponent(id)}/${action}`,
+    { method: 'POST', body: JSON.stringify({ actorName }) },
+  );
+  return challenge;
+}
+
 export function formatRecord(p: Profile | null | undefined): string {
   if (!p) return '0-0';
   return p.draws > 0 ? `${p.wins}-${p.losses}-${p.draws}` : `${p.wins}-${p.losses}`;

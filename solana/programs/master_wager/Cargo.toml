@@ -21,8 +21,14 @@ custom-panic = []
 
 
 [dependencies]
-anchor-lang = "0.32.1"
-anchor-spl = "0.32.1"
+anchor-lang = "0.30.1"
+anchor-spl = "0.30.1"
+# Pin transitive deps below the edition2024 cliff (platform-tools rust 1.84.1 cannot parse edition2024 manifests).
+indexmap = "=2.7.0"
+hashbrown = "=0.15.2"
+blake3 = "=1.7.0"
+toml_edit = "=0.22.22"
+toml = "=0.8.19"
 
 
 [lints.rust]

@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import { Server, Origins } from 'boardgame.io/server';
 import serveStatic from 'koa-static';
 import { ChainsTCG } from './Game';
-import { initDb, upsertProfile, updateProfile, getProfile, getProfileByWallet, listProfiles, recordMatch, getDeck, saveDeck } from './db';
+import { initDb, upsertProfile, updateProfile, getProfile, getProfileByWallet, listProfiles, recordMatch, getDeck, saveDeck,
+  createChallenge, listIncomingChallenges, listOutgoingChallenges, getChallenge, updateChallengeStatus,
+} from './db';
 import { validateDeck } from './cards';
 import { bootRanked, routeRanked } from './ranked';
 
@@ -168,6 +170,60 @@ app.use(async (ctx, next) => {
     if (method === 'GET' && url.startsWith('/api/library/')) {
       const addr = decodeURIComponent(url.slice('/api/library/'.length));
       ctx.body = { cards: await fetchMemeticMastersLibrary(addr) };
+      return;
+    }
+    // ── Challenges ────────────────────────────────────────────────────────────
+    if (method === 'POST' && url === '/api/challenges') {
+      const body = await readJson(ctx);
+      const fromName = String(body?.fromName ?? '').trim();
+      const toName   = String(body?.toName ?? '').trim();
+      const matchId  = String(body?.matchId ?? '').trim();
+      if (!fromName || !toName || !matchId) {
+        ctx.status = 400; ctx.body = { error: 'fromName, toName, matchId required' }; return;
+      }
+      if (fromName.toLowerCase() === toName.toLowerCase()) {
+        ctx.status = 400; ctx.body = { error: 'cannot challenge yourself' }; return;
+      }
+      // Recipient must exist so we don't spam strangers with auto-created profiles.
+      const target = await getProfile(toName);
+      if (!target) { ctx.status = 404; ctx.body = { error: 'player not found' }; return; }
+      const wagerKind: 'free' | 'master' = body?.wagerKind === 'master' ? 'master' : 'free';
+      const wagerAmount = wagerKind === 'master' && Number(body?.wagerAmount) > 0
+        ? Math.round(Number(body.wagerAmount)) : null;
+      const message = typeof body?.message === 'string' ? body.message.slice(0, 200) : null;
+      const challenge = await createChallenge({
+        fromName, toName: target.name, matchId, wagerKind, wagerAmount, message,
+      });
+      ctx.body = { challenge };
+      return;
+    }
+    if (method === 'GET' && url.startsWith('/api/challenges/in/')) {
+      const name = decodeURIComponent(url.slice('/api/challenges/in/'.length));
+      ctx.body = { challenges: await listIncomingChallenges(name) };
+      return;
+    }
+    if (method === 'GET' && url.startsWith('/api/challenges/out/')) {
+      const name = decodeURIComponent(url.slice('/api/challenges/out/'.length));
+      ctx.body = { challenges: await listOutgoingChallenges(name) };
+      return;
+    }
+    if (method === 'POST' && url.startsWith('/api/challenges/') &&
+        (url.endsWith('/accept') || url.endsWith('/decline') || url.endsWith('/cancel'))) {
+      const parts = url.split('/');
+      const id = parts[3];
+      const action = parts[4];
+      const body = await readJson(ctx);
+      const actorName = String(body?.actorName ?? '').trim();
+      if (!actorName) { ctx.status = 400; ctx.body = { error: 'actorName required' }; return; }
+      const existing = await getChallenge(id);
+      if (!existing) { ctx.status = 404; ctx.body = { error: 'challenge not found' }; return; }
+      let role: 'from' | 'to';
+      let newStatus: 'accepted' | 'declined' | 'cancelled';
+      if (action === 'cancel') { role = 'from'; newStatus = 'cancelled'; }
+      else { role = 'to'; newStatus = action === 'accept' ? 'accepted' : 'declined'; }
+      const updated = await updateChallengeStatus(id, newStatus, { name: actorName, role });
+      if (!updated) { ctx.status = 403; ctx.body = { error: 'not allowed' }; return; }
+      ctx.body = { challenge: updated };
       return;
     }
     if (method === 'POST' && url === '/api/result') {

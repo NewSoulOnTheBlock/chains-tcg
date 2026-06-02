@@ -67,6 +67,24 @@ export async function initDb() {
       recorded_at BIGINT NOT NULL
     );
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS challenges (
+      id            TEXT PRIMARY KEY,
+      from_key      TEXT NOT NULL,
+      from_name     TEXT NOT NULL,
+      to_key        TEXT NOT NULL,
+      to_name       TEXT NOT NULL,
+      match_id      TEXT NOT NULL,
+      wager_kind    TEXT NOT NULL DEFAULT 'free',
+      wager_amount  INTEGER,
+      message       TEXT,
+      status        TEXT NOT NULL DEFAULT 'pending',
+      created_at    BIGINT NOT NULL,
+      expires_at    BIGINT NOT NULL
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS challenges_to_idx   ON challenges (to_key, status, expires_at);`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS challenges_from_idx ON challenges (from_key, status, expires_at);`);
   console.log('[db] Postgres ready.');
 }
 
@@ -241,3 +259,141 @@ export async function recordMatch(
   }
   return 'recorded';
 }
+
+
+// ── Challenges (direct player-to-player invites) ────────────────────────────
+
+export type Challenge = {
+  id: string;
+  fromName: string;
+  toName: string;
+  matchId: string;
+  wagerKind: 'free' | 'master';
+  wagerAmount: number | null;
+  message: string | null;
+  status: 'pending' | 'accepted' | 'declined' | 'cancelled' | 'expired';
+  createdAt: number;
+  expiresAt: number;
+};
+
+const memChallenges: Map<string, Challenge> = new Map();
+const CHALLENGE_TTL_MS = 10 * 60 * 1000; // 10 min
+
+function rowToChallenge(r: any): Challenge {
+  return {
+    id: r.id,
+    fromName: r.from_name,
+    toName: r.to_name,
+    matchId: r.match_id,
+    wagerKind: (r.wager_kind === 'master' ? 'master' : 'free') as 'free' | 'master',
+    wagerAmount: r.wager_amount == null ? null : Number(r.wager_amount),
+    message: r.message ?? null,
+    status: r.status,
+    createdAt: Number(r.created_at),
+    expiresAt: Number(r.expires_at),
+  };
+}
+
+function genId(): string {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+/** Create a new challenge from romName to 	oName. Recipient must exist as a profile. */
+export async function createChallenge(args: {
+  fromName: string;
+  toName: string;
+  matchId: string;
+  wagerKind: 'free' | 'master';
+  wagerAmount: number | null;
+  message: string | null;
+}): Promise<Challenge> {
+  const now = Date.now();
+  const id = genId();
+  const ch: Challenge = {
+    id,
+    fromName: args.fromName,
+    toName: args.toName,
+    matchId: args.matchId,
+    wagerKind: args.wagerKind,
+    wagerAmount: args.wagerAmount,
+    message: args.message,
+    status: 'pending',
+    createdAt: now,
+    expiresAt: now + CHALLENGE_TTL_MS,
+  };
+  if (!pool) { memChallenges.set(id, ch); return ch; }
+  await pool.query(
+    `INSERT INTO challenges
+       (id, from_key, from_name, to_key, to_name, match_id, wager_kind, wager_amount, message, status, created_at, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11)`,
+    [id, key(args.fromName), args.fromName, key(args.toName), args.toName,
+     args.matchId, args.wagerKind, args.wagerAmount, args.message, now, now + CHALLENGE_TTL_MS],
+  );
+  return ch;
+}
+
+async function reapExpired(): Promise<void> {
+  const now = Date.now();
+  if (!pool) {
+    for (const [id, c] of memChallenges) {
+      if (c.status === 'pending' && c.expiresAt < now) { c.status = 'expired'; memChallenges.set(id, c); }
+    }
+    return;
+  }
+  await pool.query(`UPDATE challenges SET status = 'expired' WHERE status = 'pending' AND expires_at < $1`, [now]);
+}
+
+export async function listIncomingChallenges(toName: string): Promise<Challenge[]> {
+  await reapExpired();
+  if (!pool) {
+    return [...memChallenges.values()].filter(c => key(c.toName) === key(toName) && c.status === 'pending')
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+  const r = await pool.query(
+    `SELECT * FROM challenges WHERE to_key = $1 AND status = 'pending' ORDER BY created_at DESC LIMIT 50`,
+    [key(toName)],
+  );
+  return r.rows.map(rowToChallenge);
+}
+
+export async function listOutgoingChallenges(fromName: string): Promise<Challenge[]> {
+  await reapExpired();
+  if (!pool) {
+    return [...memChallenges.values()].filter(c => key(c.fromName) === key(fromName) && c.status === 'pending')
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+  const r = await pool.query(
+    `SELECT * FROM challenges WHERE from_key = $1 AND status = 'pending' ORDER BY created_at DESC LIMIT 50`,
+    [key(fromName)],
+  );
+  return r.rows.map(rowToChallenge);
+}
+
+export async function getChallenge(id: string): Promise<Challenge | null> {
+  if (!pool) return memChallenges.get(id) ?? null;
+  const r = await pool.query(`SELECT * FROM challenges WHERE id = $1`, [id]);
+  if (!r.rowCount) return null;
+  return rowToChallenge(r.rows[0]);
+}
+
+export async function updateChallengeStatus(
+  id: string,
+  newStatus: Challenge['status'],
+  actor: { name: string; role: 'from' | 'to' },
+): Promise<Challenge | null> {
+  if (!pool) {
+    const c = memChallenges.get(id);
+    if (!c || c.status !== 'pending') return c ?? null;
+    const expectedName = actor.role === 'from' ? c.fromName : c.toName;
+    if (key(expectedName) !== key(actor.name)) return null;
+    c.status = newStatus; memChallenges.set(id, c); return c;
+  }
+  const col = actor.role === 'from' ? 'from_key' : 'to_key';
+  const r = await pool.query(
+    `UPDATE challenges SET status = $1 WHERE id = $2 AND status = 'pending' AND ${col} = $3 RETURNING *`,
+    [newStatus, id, key(actor.name)],
+  );
+  if (!r.rowCount) return null;
+  return rowToChallenge(r.rows[0]);
+}
+

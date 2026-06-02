@@ -11,6 +11,7 @@ import { CARDS, COLOR_META, COLORS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MA
 import {
   listProfilesApi, getProfileApi, getProfileByWalletApi, upsertProfileApi, updateProfileApi, getLibraryApi,
   getDeckApi, saveDeckApi, formatRecord, type Profile, type LibraryCard,
+  createChallengeApi, listIncomingChallengesApi, listOutgoingChallengesApi, respondChallengeApi, type Challenge,
 } from './profiles';
 import { connectEvm, connectSolana, getPhantom, shortAddr, type ConnectedWallet } from './wallet';
 import { CardHover } from './CardPreview';
@@ -2695,6 +2696,31 @@ function Lobby({
     return () => { alive = false; };
   }, [myName]);
 
+  // ── Challenges: poll both incoming and outgoing every 5s ────────────────────
+  const [incomingChallenges, setIncomingChallenges] = useState<Challenge[]>([]);
+  const [outgoingChallenges, setOutgoingChallenges] = useState<Challenge[]>([]);
+  const [challengeTarget, setChallengeTarget] = useState<string>('');
+  const [challengeMsg, setChallengeMsg] = useState<string>('');
+  const [challengeBusy, setChallengeBusy] = useState<boolean>(false);
+  useEffect(() => {
+    if (!myName) return;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const [inc, out] = await Promise.all([
+          listIncomingChallengesApi(myName),
+          listOutgoingChallengesApi(myName),
+        ]);
+        if (!alive) return;
+        setIncomingChallenges(inc);
+        setOutgoingChallenges(out);
+      } catch {}
+    };
+    poll();
+    const t = setInterval(poll, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, [myName]);
+
   // Load this player's saved custom deck on mount (if any).
   useEffect(() => {
     (async () => {
@@ -2774,6 +2800,115 @@ function Lobby({
       try { sessionStorage.removeItem('pendingPickColor'); } catch {}
       try { sessionStorage.removeItem('pendingCustomDeck'); } catch {}
       onJoined({ matchID: created.matchID, playerID: seatChoice, credentials: joined.playerCredentials, playerName: myName });
+    } catch (e: any) { setError(String(e?.message ?? e)); }
+  }
+
+  /** Create a private match seeded for a direct opponent and notify them via the challenge inbox. */
+  async function sendChallenge() {
+    setError('');
+    const target = challengeTarget.trim();
+    if (!target) { setError('Enter the opponent\'s exact username.'); return; }
+    if (target.toLowerCase() === myName.trim().toLowerCase()) {
+      setError('You can\'t challenge yourself.'); return;
+    }
+    if (useCustom && !myDeckOk) {
+      setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile → Custom Deck.`);
+      return;
+    }
+    setChallengeBusy(true);
+    try {
+      // Verify the recipient exists before doing anything expensive.
+      const target_p = await getProfileApi(target);
+      if (!target_p) {
+        setError(`No player named "${target}" was found. Usernames are case-insensitive.`);
+        return;
+      }
+
+      let wager = parseWager(wagerKind, wagerAmount);
+      if (wagerKind === 'master' && !wager) {
+        setError('Enter a valid $MASTER wager amount greater than 0.');
+        return;
+      }
+      if (wager && wager.kind === 'master') {
+        const phantom = await getPhantom();
+        const matchIdBuf = newMatchId();
+        const conn = solConn();
+        const ixs = await ixCreateMatch({
+          connection: conn, creator: phantom.publicKey,
+          matchId: matchIdBuf, wagerAmount: masterUi(wager.amount),
+        });
+        await sendIxs(conn, phantom, ixs);
+        wager = { kind: 'master', amount: wager.amount, onchainId: matchIdToHex(matchIdBuf) };
+      }
+      await upsertProfileApi(myName);
+      const colors: Array<Color | null> = ['0', '1'].map(s =>
+        s === seatChoice ? (useCustom ? null : myColor) : null
+      ) as Array<Color | null>;
+      const decks: Array<string[] | null> = ['0', '1'].map(s =>
+        s === seatChoice && useCustom ? myDeck : null
+      ) as Array<string[] | null>;
+      const trimmedName = matchName.trim().slice(0, 40) || `${myName} vs ${target_p.name}`;
+      const created = await lobby.createMatch(GAME_NAME, {
+        numPlayers: 2,
+        setupData: {
+          colors, names: ['Player 0', 'Player 1'], decks, wager,
+          matchName: trimmedName,
+          // Mark the match private so only host + invitee see it in the lobby.
+          privateTo: target_p.name,
+          hostName: myName,
+        },
+      });
+      const joined = await lobby.joinMatch(GAME_NAME, created.matchID, {
+        playerID: seatChoice, playerName: myName,
+      });
+      try { sessionStorage.removeItem('pendingPickColor'); } catch {}
+      try { sessionStorage.removeItem('pendingCustomDeck'); } catch {}
+      // Post the challenge AFTER the match exists so the recipient can act on it immediately.
+      await createChallengeApi({
+        fromName: myName, toName: target_p.name, matchId: created.matchID,
+        wagerKind: wager?.kind ?? 'free',
+        wagerAmount: wager?.kind === 'master' ? wager.amount : null,
+        message: challengeMsg.trim() ? challengeMsg.trim().slice(0, 200) : null,
+      });
+      // Refresh outgoing list immediately so the UI updates without waiting for the next poll.
+      try { setOutgoingChallenges(await listOutgoingChallengesApi(myName)); } catch {}
+      setChallengeTarget(''); setChallengeMsg('');
+      // Drop the challenger straight into the waiting room.
+      onJoined({ matchID: created.matchID, playerID: seatChoice, credentials: joined.playerCredentials, playerName: myName });
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    } finally {
+      setChallengeBusy(false);
+    }
+  }
+
+  /** Recipient accepts an incoming challenge — find the match in the lobby and route into the join flow. */
+  async function acceptChallenge(ch: Challenge) {
+    setError('');
+    try {
+      await respondChallengeApi(ch.id, 'accept', myName);
+      // Optimistically remove from incoming list.
+      setIncomingChallenges(prev => prev.filter(x => x.id !== ch.id));
+      // Pull a fresh match list so we can find the private match we were invited to.
+      const list = await lobby.listMatches(GAME_NAME);
+      const match = (list.matches as any[]).find(m => m.matchID === ch.matchId);
+      if (!match) {
+        setError('The challenger\'s match is no longer open. They may have cancelled.');
+        return;
+      }
+      openJoin(match);
+    } catch (e: any) { setError(String(e?.message ?? e)); }
+  }
+  async function declineChallenge(ch: Challenge) {
+    try {
+      await respondChallengeApi(ch.id, 'decline', myName);
+      setIncomingChallenges(prev => prev.filter(x => x.id !== ch.id));
+    } catch (e: any) { setError(String(e?.message ?? e)); }
+  }
+  async function cancelOutgoing(ch: Challenge) {
+    try {
+      await respondChallengeApi(ch.id, 'cancel', myName);
+      setOutgoingChallenges(prev => prev.filter(x => x.id !== ch.id));
     } catch (e: any) { setError(String(e?.message ?? e)); }
   }
 
@@ -2860,7 +2995,18 @@ function Lobby({
   }
 
   // Split available matches between the two side panels of the art frame.
-  const openMatches = matches.filter(m => (m.players as Array<{ name?: string }>).some(p => !p.name));
+  // Hide private (challenge) matches from anyone who isn't the host or the invited player.
+  const openMatches = matches.filter(m => {
+    if (!(m.players as Array<{ name?: string }>).some(p => !p.name)) return false;
+    const sd: any = m.setupData ?? {};
+    if (sd.privateTo) {
+      const myKey = myName.trim().toLowerCase();
+      const allowed = String(sd.privateTo).trim().toLowerCase();
+      const host    = String(sd.hostName ?? '').trim().toLowerCase();
+      if (myKey !== allowed && myKey !== host) return false;
+    }
+    return true;
+  });
 
   // Stats for footer bar
   const inProgressCount = matches.filter(m => (m.players as Array<{ name?: string }>).every(p => p.name)).length;
@@ -2902,6 +3048,16 @@ function Lobby({
           </div>
         )}
 
+        {incomingChallenges.length > 0 && (
+          <div style={{ maxWidth: 1480, margin: '12px auto 0', padding: '0 22px', width: '100%' }}>
+            <IncomingChallengesBanner
+              challenges={incomingChallenges}
+              onAccept={acceptChallenge}
+              onDecline={declineChallenge}
+            />
+          </div>
+        )}
+
         <div style={{
           flex: 1, width: '100%', maxWidth: 1480, margin: '0 auto',
           padding: mobile ? '14px' : '22px 22px 100px',
@@ -2913,16 +3069,25 @@ function Lobby({
             onRefresh={refresh} onJoin={openJoin}
           />
 
-          <CreateMatchPanel
-            myColor={myColor} setMyColor={setMyColor}
-            useCustom={useCustom} setUseCustom={setUseCustom}
-            myDeck={myDeck} myDeckOk={myDeckOk}
-            seatChoice={seatChoice} setSeatChoice={setSeatChoice}
-            matchName={matchName} setMatchName={setMatchName}
-            wagerKind={wagerKind} setWagerKind={setWagerKind}
-            wagerAmount={wagerAmount} setWagerAmount={setWagerAmount}
-            onCreate={createAndJoin}
-          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+            <CreateMatchPanel
+              myColor={myColor} setMyColor={setMyColor}
+              useCustom={useCustom} setUseCustom={setUseCustom}
+              myDeck={myDeck} myDeckOk={myDeckOk}
+              seatChoice={seatChoice} setSeatChoice={setSeatChoice}
+              matchName={matchName} setMatchName={setMatchName}
+              wagerKind={wagerKind} setWagerKind={setWagerKind}
+              wagerAmount={wagerAmount} setWagerAmount={setWagerAmount}
+              onCreate={createAndJoin}
+            />
+            <ChallengePanel
+              target={challengeTarget} setTarget={setChallengeTarget}
+              message={challengeMsg} setMessage={setChallengeMsg}
+              busy={challengeBusy} onSend={sendChallenge}
+              outgoing={outgoingChallenges} onCancel={cancelOutgoing}
+              wagerKind={wagerKind} wagerAmount={wagerAmount}
+            />
+          </div>
 
           <CommunityPanel
             leaderboard={leaderboard}
@@ -3548,6 +3713,219 @@ function DeckPreview({ color, useCustom, myDeck }: { color: Color | null; useCus
       </div>
     </div>
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHALLENGE PANEL (middle column, under Create Match)
+// ─────────────────────────────────────────────────────────────────────────────
+function ChallengePanel(props: {
+  target: string; setTarget: (s: string) => void;
+  message: string; setMessage: (s: string) => void;
+  busy: boolean; onSend: () => void;
+  outgoing: Challenge[]; onCancel: (c: Challenge) => void;
+  wagerKind: 'free' | 'master'; wagerAmount: string;
+}) {
+  const { target, setTarget, message, setMessage, busy, onSend, outgoing, onCancel, wagerKind, wagerAmount } = props;
+  const stakeLabel = wagerKind === 'master'
+    ? `Wager · ${Number(wagerAmount) || 0} $MASTER`
+    : 'Free Match';
+  return (
+    <div style={{
+      ...glassPanelStyle(),
+      padding: 20, display: 'flex', flexDirection: 'column', gap: 12,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ fontFamily: '"Cinzel", serif', fontSize: 16, fontWeight: 800, color: '#fff', letterSpacing: 1.2 }}>
+          ⚔ Challenge a Player
+        </div>
+        <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 2, textTransform: 'uppercase' }}>
+          Direct Invite
+        </div>
+      </div>
+      <div style={{ fontSize: 12, color: LOBBY_TOKENS.muted, lineHeight: 1.5 }}>
+        Invite a specific player by username. They'll see your challenge in their lobby and the match stays
+        private until accepted. Uses the deck, seat, and stakes you picked above.
+      </div>
+      <div>
+        <label style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.4, textTransform: 'uppercase' }}>
+          Opponent username
+        </label>
+        <input
+          type="text"
+          value={target}
+          onChange={e => setTarget(e.target.value.slice(0, 40))}
+          placeholder="ShmeegleTheMage"
+          spellCheck={false} autoCapitalize="none" autoCorrect="off"
+          style={challengeInputStyle()}
+        />
+      </div>
+      <div>
+        <label style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.4, textTransform: 'uppercase' }}>
+          Message (optional)
+        </label>
+        <input
+          type="text"
+          value={message}
+          onChange={e => setMessage(e.target.value.slice(0, 200))}
+          placeholder="gg let's go"
+          style={challengeInputStyle()}
+        />
+      </div>
+      <div style={{
+        fontSize: 11, color: LOBBY_TOKENS.muted,
+        background: 'rgba(255,255,255,0.04)', border: `1px solid ${LOBBY_TOKENS.border}`,
+        borderRadius: 8, padding: '8px 12px',
+      }}>
+        Stakes: <b style={{ color: wagerKind === 'master' ? '#c8a3ff' : '#fff' }}>{stakeLabel}</b>
+      </div>
+      <button
+        type="button" disabled={busy || !target.trim()} onClick={onSend}
+        style={{
+          padding: '12px 16px', borderRadius: 12, border: 'none', cursor: busy || !target.trim() ? 'not-allowed' : 'pointer',
+          background: busy || !target.trim()
+            ? 'rgba(255,255,255,0.08)'
+            : 'linear-gradient(135deg, #8f5cff 0%, #b285ff 100%)',
+          color: '#0a0414', fontFamily: '"Cinzel", serif', fontWeight: 800, fontSize: 13,
+          letterSpacing: 1.4, textTransform: 'uppercase',
+          boxShadow: busy ? 'none' : '0 0 20px rgba(143,92,255,0.35)',
+          transition: 'transform .15s ease, filter .15s ease',
+        }}
+        onMouseOver={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.01)'; }}
+        onMouseOut={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)'; }}
+      >
+        {busy ? 'Sending…' : 'Send Challenge'}
+      </button>
+
+      {outgoing.length > 0 && (
+        <div style={{ marginTop: 4 }}>
+          <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 6 }}>
+            Pending invites
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {outgoing.slice(0, 5).map(c => (
+              <div key={c.id} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                gap: 8, padding: '8px 10px', borderRadius: 8,
+                background: 'rgba(255,255,255,0.04)', border: `1px solid ${LOBBY_TOKENS.border}`,
+              }}>
+                <div style={{ fontSize: 12 }}>
+                  <span style={{ color: LOBBY_TOKENS.muted }}>→ </span>
+                  <b style={{ color: '#fff' }}>{c.toName}</b>
+                  {c.wagerKind === 'master' && (
+                    <span style={{ color: '#c8a3ff', marginLeft: 6 }}>· {c.wagerAmount} $MASTER</span>
+                  )}
+                </div>
+                <button
+                  type="button" onClick={() => onCancel(c)}
+                  style={{
+                    padding: '4px 10px', borderRadius: 6, fontSize: 10, fontWeight: 700,
+                    background: 'transparent', color: '#ff8a8a',
+                    border: '1px solid rgba(255,107,107,0.45)', cursor: 'pointer',
+                  }}
+                >Cancel</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INCOMING CHALLENGES BANNER
+// ─────────────────────────────────────────────────────────────────────────────
+function IncomingChallengesBanner({ challenges, onAccept, onDecline }: {
+  challenges: Challenge[];
+  onAccept: (c: Challenge) => void;
+  onDecline: (c: Challenge) => void;
+}) {
+  return (
+    <div style={{
+      ...glassPanelStyle(),
+      padding: 14,
+      borderColor: 'rgba(217,184,95,0.45)',
+      boxShadow: '0 0 24px rgba(217,184,95,0.18)',
+      display: 'flex', flexDirection: 'column', gap: 10,
+    }}>
+      <div style={{
+        fontFamily: '"Cinzel", serif', fontSize: 14, color: LOBBY_TOKENS.gold,
+        letterSpacing: 1.6, fontWeight: 800, textTransform: 'uppercase',
+      }}>
+        ⚔ {challenges.length} Incoming Challenge{challenges.length === 1 ? '' : 's'}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {challenges.slice(0, 5).map(c => {
+          const ageMin = Math.max(0, Math.floor((Date.now() - c.createdAt) / 60000));
+          const expiresMin = Math.max(0, Math.ceil((c.expiresAt - Date.now()) / 60000));
+          return (
+            <div key={c.id} style={{
+              display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+              padding: '10px 12px', borderRadius: 10,
+              background: 'rgba(217,184,95,0.06)', border: '1px solid rgba(217,184,95,0.25)',
+            }}>
+              <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+                <div style={{ fontSize: 13 }}>
+                  <b style={{ color: '#fff' }}>{c.fromName}</b>
+                  <span style={{ color: LOBBY_TOKENS.muted }}> challenges you</span>
+                  {c.wagerKind === 'master' && (
+                    <span style={{ color: '#c8a3ff', marginLeft: 6, fontWeight: 700 }}>
+                      · {c.wagerAmount} $MASTER
+                    </span>
+                  )}
+                </div>
+                {c.message && (
+                  <div style={{ fontSize: 12, color: '#cfd6e3', marginTop: 3, fontStyle: 'italic' }}>"{c.message}"</div>
+                )}
+                <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, marginTop: 3, letterSpacing: 0.4 }}>
+                  Sent {ageMin}m ago · Expires in {expiresMin}m
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  type="button" onClick={() => onAccept(c)}
+                  style={{
+                    padding: '8px 14px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                    background: 'linear-gradient(135deg, #d9b85f 0%, #f1d27a 100%)',
+                    color: '#1a0f00', fontFamily: '"Cinzel", serif', fontWeight: 800,
+                    fontSize: 11, letterSpacing: 1.2, textTransform: 'uppercase',
+                    boxShadow: '0 0 12px rgba(217,184,95,0.4)',
+                  }}
+                >Accept</button>
+                <button
+                  type="button" onClick={() => onDecline(c)}
+                  style={{
+                    padding: '8px 14px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+                    background: 'transparent', color: '#ff8a8a',
+                    border: '1px solid rgba(255,107,107,0.45)', cursor: 'pointer',
+                    letterSpacing: 1, textTransform: 'uppercase',
+                  }}
+                >Decline</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function glassPanelStyle(): React.CSSProperties {
+  return {
+    background: LOBBY_TOKENS.panel,
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)',
+    borderRadius: 12,
+    border: `1px solid ${LOBBY_TOKENS.border}`,
+  };
+}
+function challengeInputStyle(): React.CSSProperties {
+  return {
+    width: '100%', marginTop: 4, padding: '10px 12px', borderRadius: 8,
+    background: 'rgba(0,0,0,0.35)', border: `1px solid ${LOBBY_TOKENS.border}`,
+    color: '#fff', fontSize: 13, fontFamily: PROFILE_FONT, outline: 'none',
+    boxSizing: 'border-box',
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

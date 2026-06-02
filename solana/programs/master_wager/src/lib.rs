@@ -159,8 +159,17 @@ pub mod master_wager {
 
     /// Oracle settles: burns burn_bps of pot, sends rest to winner.
     pub fn settle_match(ctx: Context<SettleMatch>, winner: Pubkey) -> Result<()> {
-        let m = &mut ctx.accounts.match_account;
+        // Snapshot every AccountInfo we'll hand to CPI BEFORE taking a &mut borrow
+        // on match_account (Anchor's Account<T> derefs through the same AccountInfo
+        // we'd be borrowing, so we have to copy the AccountInfo handles first).
+        let token_program_ai = ctx.accounts.token_program.to_account_info();
+        let master_mint_ai   = ctx.accounts.master_mint.to_account_info();
+        let vault_ai         = ctx.accounts.vault.to_account_info();
+        let winner_ata_ai    = ctx.accounts.winner_ata.to_account_info();
+        let match_account_ai = ctx.accounts.match_account.to_account_info();
+
         let cfg = &ctx.accounts.config;
+        let m = &mut ctx.accounts.match_account;
         require!(m.state == MatchState::Active as u8, WagerError::WrongState);
         require_keys_eq!(ctx.accounts.oracle.key(), cfg.oracle, WagerError::NotOracle);
         require!(winner == m.creator || winner == m.opponent, WagerError::InvalidWinner);
@@ -178,11 +187,11 @@ pub mod master_wager {
 
         if burn_amt > 0 {
             let cpi_burn = CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
+                token_program_ai.clone(),
                 Burn {
-                    mint:      ctx.accounts.master_mint.to_account_info(),
-                    from:      ctx.accounts.vault.to_account_info(),
-                    authority: ctx.accounts.match_account.to_account_info(),
+                    mint:      master_mint_ai.clone(),
+                    from:      vault_ai.clone(),
+                    authority: match_account_ai.clone(),
                 },
                 signers,
             );
@@ -191,11 +200,11 @@ pub mod master_wager {
 
         if payout > 0 {
             let cpi_xfer = CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
+                token_program_ai,
                 Transfer {
-                    from:      ctx.accounts.vault.to_account_info(),
-                    to:        ctx.accounts.winner_ata.to_account_info(),
-                    authority: ctx.accounts.match_account.to_account_info(),
+                    from:      vault_ai,
+                    to:        winner_ata_ai,
+                    authority: match_account_ai,
                 },
                 signers,
             );
@@ -210,8 +219,13 @@ pub mod master_wager {
 
     /// Creator reclaims their deposit if no opponent joined within cancel_timeout_secs.
     pub fn cancel_match(ctx: Context<CancelMatch>) -> Result<()> {
-        let m = &mut ctx.accounts.match_account;
+        let token_program_ai = ctx.accounts.token_program.to_account_info();
+        let vault_ai         = ctx.accounts.vault.to_account_info();
+        let creator_ata_ai   = ctx.accounts.creator_ata.to_account_info();
+        let match_account_ai = ctx.accounts.match_account.to_account_info();
+
         let cfg = &ctx.accounts.config;
+        let m = &mut ctx.accounts.match_account;
         require!(m.state == MatchState::Open as u8, WagerError::WrongState);
         require_keys_eq!(ctx.accounts.creator.key(), m.creator, WagerError::NotCreator);
         let now = Clock::get()?.unix_timestamp;
@@ -225,11 +239,11 @@ pub mod master_wager {
         let signers = &[signer_seeds];
 
         let cpi = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
+            token_program_ai,
             Transfer {
-                from:      ctx.accounts.vault.to_account_info(),
-                to:        ctx.accounts.creator_ata.to_account_info(),
-                authority: ctx.accounts.match_account.to_account_info(),
+                from:      vault_ai,
+                to:        creator_ata_ai,
+                authority: match_account_ai,
             },
             signers,
         );
