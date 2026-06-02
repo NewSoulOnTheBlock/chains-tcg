@@ -262,6 +262,56 @@ export function ChainsBoard(props: Props) {
     }
   }, [iMustPick, moves]);
 
+  // Auto-pass: after combat resolves on my turn, if I have no playable cards
+  // in hand AND no untapped, non-sick memes that could still attack, end the
+  // turn automatically. Honors target-selection mode so we never interrupt it.
+  const wasBlockersRef = useRef(false);
+  const autoPassedTurnRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (pickPhase || !myTurn || ctx.gameover) return;
+    const oppInBlockers = ctx.activePlayers?.[oppId] === 'blockers';
+    if (oppInBlockers) { wasBlockersRef.current = true; return; }
+    if (!wasBlockersRef.current) return;
+    // Combat just resolved on my main phase.
+    wasBlockersRef.current = false;
+    if (autoPassedTurnRef.current === ctx.turn) return;
+    if (selectedHand != null || targetMode != null) return;
+
+    // Untapped, non-sick meme that could attack again?
+    const hasReadyAttacker = me.memes.some(m => !m.tapped && !m.summoningSick);
+
+    // Potential gas this turn = current pool + 1 of each untapped node's color.
+    const avail: Record<Color, number> = { ...me.gas } as Record<Color, number>;
+    for (const n of me.nodes) {
+      if (!n.tapped) {
+        const ndef = CARDS[n.defId];
+        if (ndef) avail[ndef.color] = (avail[ndef.color] ?? 0) + 1;
+      }
+    }
+    const extraNodes = me.machines.filter(mm => CARDS[mm.defId]?.effect === 'extra_node_per_turn').length;
+    const nodesLeft = (1 + extraNodes) - me.nodesPlayedThisTurn;
+
+    const canPlayAnything = me.hand.some(defId => {
+      const def = CARDS[defId];
+      if (!def) return false;
+      if (def.type === 'node') return nodesLeft > 0;
+      const cost = def.cost ?? {};
+      for (const c of COLORS) {
+        if ((cost[c] ?? 0) > (avail[c] ?? 0)) return false;
+      }
+      return true;
+    });
+
+    if (!canPlayAnything && !hasReadyAttacker) {
+      autoPassedTurnRef.current = ctx.turn;
+      const t = window.setTimeout(() => {
+        // Re-check the latest state-derived predicates via closure-fresh values.
+        moves.passTurn();
+      }, 500);
+      return () => window.clearTimeout(t);
+    }
+  }, [ctx.activePlayers, ctx.turn, ctx.gameover, myTurn, oppId, pickPhase, selectedHand, targetMode, me, moves]);
+
   function tryPlay(idx: number) {
     const defId = me.hand[idx];
     const def = CARDS[defId];
