@@ -432,6 +432,15 @@ export function ChainsBoard(props: Props) {
         </div>
       )}
 
+      <WagerPayoutModal
+        gameover={ctx.gameover}
+        wager={G.wager}
+        myId={myId}
+        oppId={oppId}
+        myName={myName} oppName={oppName}
+        myProfile={myProfile} oppProfile={oppProfile}
+      />
+
       {/* Combat zone display */}
       <CombatStrip G={G} ctx={ctx} myId={myId} />
 
@@ -633,6 +642,121 @@ function ChatPanel({
             border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 700, fontSize: 12,
           }}
         >Send</button>
+      </div>
+    </div>
+  );
+}
+
+function WagerPayoutModal({
+  gameover, wager, myId, oppId, myName, oppName, myProfile, oppProfile,
+}: {
+  gameover: any;
+  wager: GState['wager'];
+  myId: string; oppId: string;
+  myName: string; oppName: string;
+  myProfile: Profile | null; oppProfile: Profile | null;
+}) {
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => { setDismissed(false); }, [gameover?.winner, gameover?.draw]);
+  if (!gameover || !wager || wager.kind !== 'sol' || !wager.amount) return null;
+  if (gameover.draw) return null;
+  if (dismissed) return null;
+
+  const iWon = gameover.winner === myId;
+  const winnerName = iWon ? myName : oppName;
+  const winnerProfile = iWon ? myProfile : oppProfile;
+  const winnerWallet = winnerProfile?.walletAddress || null;
+  const winnerChain = (winnerProfile?.walletChain || '').toUpperCase() || 'WALLET';
+  const amount = wager.amount;
+  const loserId = iWon ? oppId : myId;
+  void loserId;
+
+  async function copy(text: string) {
+    try { await navigator.clipboard.writeText(text); } catch {}
+  }
+
+  return (
+    <div onClick={() => setDismissed(true)} style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200,
+      fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: 'linear-gradient(180deg, #1a1240 0%, #0a0a1e 100%)',
+        border: '2px solid #4c1d95', borderRadius: 10,
+        padding: 24, width: 'min(520px, calc(100vw - 24px))',
+        boxShadow: '0 0 40px rgba(139,92,246,0.45)',
+        color: '#ece1c7',
+      }}>
+        <div style={{
+          fontFamily: '"Cinzel", "Times New Roman", serif',
+          fontSize: 20, fontWeight: 800, letterSpacing: 2,
+          color: '#f0b32a', textTransform: 'uppercase',
+          textShadow: '0 0 14px rgba(240,179,42,0.45)',
+          textAlign: 'center', marginBottom: 4,
+        }}>
+          {iWon ? 'Victory' : 'Defeat'}
+        </div>
+        <div style={{ textAlign: 'center', color: '#b896ff', fontSize: 13, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 16 }}>
+          Wagered Match · {amount} SOL
+        </div>
+
+        <div style={{
+          padding: 14, background: 'rgba(0,0,0,0.45)',
+          border: '1px solid rgba(240,179,42,0.4)', borderRadius: 6, marginBottom: 14,
+        }}>
+          <div style={{ fontSize: 12, color: '#a99878', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+            Winner
+          </div>
+          <div style={{
+            fontFamily: '"Cinzel", "Times New Roman", serif',
+            fontSize: 18, fontWeight: 700, color: '#ffd66e', marginBottom: 10,
+          }}>{winnerName}</div>
+
+          <div style={{ fontSize: 12, color: '#a99878', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+            {winnerChain} Wallet
+          </div>
+          {winnerWallet ? (
+            <div style={{
+              display: 'flex', gap: 8, alignItems: 'center',
+              padding: '8px 10px', background: '#000',
+              border: '1px solid #4c1d95', borderRadius: 4,
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+              fontSize: 12, color: '#ece1c7', wordBreak: 'break-all',
+            }}>
+              <span style={{ flex: 1 }}>{winnerWallet}</span>
+              <button onClick={() => copy(winnerWallet)} style={{
+                padding: '4px 10px', fontSize: 11, fontWeight: 800,
+                background: '#4c1d95', color: '#fff', border: '1px solid #6b2fc9',
+                borderRadius: 3, cursor: 'pointer', letterSpacing: 0.5, textTransform: 'uppercase',
+              }}>Copy</button>
+            </div>
+          ) : (
+            <div style={{
+              padding: '8px 10px', background: 'rgba(120,80,20,0.25)',
+              border: '1px solid #a8740f', borderRadius: 4,
+              fontSize: 12, color: '#f0b32a',
+            }}>Winner has no wallet linked to their profile.</div>
+          )}
+        </div>
+
+        <div style={{
+          fontSize: 15, textAlign: 'center', color: '#ece1c7',
+          padding: '10px 6px', lineHeight: 1.45,
+        }}>
+          {iWon
+            ? <>You won the wager. Ask <b style={{ color: '#ffd66e' }}>{oppName}</b> to send you <b style={{ color: '#ffd66e' }}>{amount} SOL</b>.</>
+            : <>Please pay the winner <b style={{ color: '#ffd66e' }}>{amount} SOL</b>.</>}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
+          <button onClick={() => setDismissed(true)} style={{
+            padding: '8px 16px', fontWeight: 800, fontSize: 13, letterSpacing: 1, textTransform: 'uppercase',
+            background: 'linear-gradient(180deg, #f0b32a, #a8740f)', color: '#1a1408',
+            border: '1px solid #6a5520', borderRadius: 4, cursor: 'pointer',
+            fontFamily: '"Cinzel", "Times New Roman", serif',
+          }}>Close</button>
+        </div>
       </div>
     </div>
   );

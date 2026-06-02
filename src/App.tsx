@@ -1199,6 +1199,16 @@ function Lobby({
       setError('You are already in this match in another tab. Close that tab or use it to play.');
       return;
     }
+    // Confirm wagered matches BEFORE opening the deck-pick modal so the joiner
+    // is never surprised by stakes mid-flow.
+    const w = readWager(m.setupData);
+    if (w.kind === 'sol') {
+      const ok = window.confirm(
+        `This is a WAGERED match.\n\nStakes: ${w.amount} SOL — winner takes the pot.\n\n` +
+        `By continuing you agree to pay ${w.amount} SOL if you lose. Continue?`
+      );
+      if (!ok) return;
+    }
     const openSeat = (m.players as Array<{ id: number; name?: string }>).find(p => !p.name);
     if (!openSeat) { setError('No open seat'); return; }
     // Default the join-color to something different from the creator's color if known.

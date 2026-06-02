@@ -53,6 +53,8 @@ export interface GState {
   secret: SecretState;
   combat: Combat;
   log: string[];
+  /** Optional match stakes carried over from setupData so the Board can render a payout prompt. */
+  wager?: { kind: 'free' | 'sol'; amount?: number };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -525,7 +527,7 @@ export const ChainsTCG: Game<GState> = {
   minPlayers: 2,
   maxPlayers: 2,
 
-  setup: ({ ctx, random }, setupData?: { colors?: Array<Color | null | undefined>; names?: [string, string]; decks?: Array<string[] | null | undefined> }) => {
+  setup: ({ ctx, random }, setupData?: { colors?: Array<Color | null | undefined>; names?: [string, string]; decks?: Array<string[] | null | undefined>; wager?: { kind: 'free' | 'sol'; amount?: number } }) => {
     const colors = setupData?.colors ?? DEFAULT_MATCHUP;
     const names = setupData?.names ?? ['Player 0', 'Player 1'];
     const decksIn = setupData?.decks ?? [];
@@ -575,6 +577,9 @@ export const ChainsTCG: Game<GState> = {
       secret: { decks },
       combat: { attackers: [], blocks: {} },
       log: ['Game start.'],
+      wager: setupData?.wager && (setupData.wager.kind === 'sol' || setupData.wager.kind === 'free')
+        ? { kind: setupData.wager.kind, amount: setupData.wager.amount }
+        : undefined,
     };
   },
 
