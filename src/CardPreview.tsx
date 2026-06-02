@@ -120,21 +120,26 @@ export function TemplatedPreview({ def, tpl }: { def: CardDef; tpl: { url: strin
         )}
       </div>
 
-      {/* Art area — solid color block over the black frame, with the chain glyph */}
+      {/* Art area — image sits inside the template's black window (no overlay backdrop) */}
       <div style={{
         position: 'absolute', top: '13%', left: '8.5%', right: '8.5%', height: '44%',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: `radial-gradient(circle at 50% 40%, ${meta.hex}, #061a0c 75%)`,
-        color: meta.ink,
+        overflow: 'hidden',
       }}>
-        <div style={{
-          fontWeight: 900,
-          fontSize: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 32 : 56,
-          letterSpacing: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 2 : 4,
-          textShadow: '0 3px 10px #000',
-        }}>
-          {tpl.glyph ?? meta.glyph ?? meta.name}
-        </div>
+        {def.image ? (
+          <img src={def.image} alt={def.name} loading="lazy"
+            onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <div style={{
+            fontWeight: 900, color: meta.ink,
+            fontSize: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 32 : 56,
+            letterSpacing: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 2 : 4,
+            textShadow: '0 3px 10px #000',
+          }}>
+            {tpl.glyph ?? meta.glyph ?? meta.name}
+          </div>
+        )}
       </div>
 
       {/* Type bar */}

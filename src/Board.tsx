@@ -148,19 +148,27 @@ function TemplatedCardFaceContent({ def, instance, footer, tpl }: { def: CardDef
           </span>
         )}
       </div>
-      {/* Art zone — chain glyph */}
+      {/* Art zone — image sits inside the template's black window */}
       <div style={{
         position: 'absolute', top: '13%', left: '8.5%', right: '8.5%', height: '44%',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: `radial-gradient(circle at 50% 40%, ${meta.hex}, #061a0c 75%)`,
-        color: meta.ink, fontWeight: 900,
-        fontSize: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 11 : 18,
-        letterSpacing: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 1 : 2,
-        textShadow: '0 2px 6px #000',
+        overflow: 'hidden',
       }}>
-        {tpl.glyph ?? meta.glyph ?? meta.name}
-        {instance?.summoningSick && <span style={{ marginLeft: 3, color: '#000', background: '#ffeb3b', padding: '0 3px', borderRadius: 2, fontSize: 6 }}>SICK</span>}
-        {instance?.tapped && !instance?.summoningSick && <span style={{ marginLeft: 3, color: '#000', background: '#aaa', padding: '0 3px', borderRadius: 2, fontSize: 6 }}>TAP</span>}
+        {def.image ? (
+          <img src={def.image} alt="" loading="lazy"
+            onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <span style={{
+            color: meta.ink, fontWeight: 900,
+            fontSize: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 11 : 18,
+            letterSpacing: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 1 : 2,
+            textShadow: '0 2px 6px #000',
+          }}>{tpl.glyph ?? meta.glyph ?? meta.name}</span>
+        )}
+        {/* Status badges overlay on top-right of art */}
+        {instance?.summoningSick && <span style={{ position: 'absolute', top: 2, right: 2, color: '#000', background: '#ffeb3b', padding: '0 3px', borderRadius: 2, fontSize: 6, fontWeight: 800 }}>SICK</span>}
+        {instance?.tapped && !instance?.summoningSick && <span style={{ position: 'absolute', top: 2, right: 2, color: '#000', background: '#aaa', padding: '0 3px', borderRadius: 2, fontSize: 6, fontWeight: 800 }}>TAP</span>}
       </div>
       {/* Type bar */}
       <div style={{

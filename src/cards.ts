@@ -51,7 +51,72 @@ export interface CardDef {
   toughness?: number;      // memes
   text: string;
   effect?: EffectId;       // for moves + machines
+  /** Optional art URL (e.g. CMC logo for meme coins). Falls back to chain glyph on error. */
+  image?: string;
 }
+
+/** CoinMarketCap static logo CDN; the trailing id is the CMC coin id. */
+const cmc = (id: number) => `https://s2.coinmarketcap.com/static/img/coins/128x128/${id}.png`;
+
+/** Image overrides keyed by card id. Cards without an entry render the chain glyph. */
+const IMAGES: Record<string, string> = {
+  // Chain nodes
+  node_bnb: cmc(1839),
+  node_sol: cmc(5426),
+  node_hl:  cmc(32196), // HYPE
+  node_eth: cmc(1027),
+  node_xrp: cmc(52),
+
+  // BnB memes
+  bnb_babydoge: cmc(10407),
+  bnb_broccoli: cmc(34123),
+  bnb_tut:      cmc(33687),
+  bnb_tst:      cmc(34111),
+  bnb_banana:   cmc(28066),
+  bnb_mubarak:  cmc(34147),
+  bnb_cheems:   cmc(24316),
+  bnb_floki:    cmc(10804),
+
+  // Solana memes
+  sol_pnut:     cmc(33558),
+  sol_bonk:     cmc(23095),
+  sol_popcat:   cmc(28782),
+  sol_mew:      cmc(30126),
+  sol_bome:     cmc(29870),
+  sol_wif:      cmc(28752),
+  sol_fartcoin: cmc(33597),
+  sol_goat:     cmc(33440),
+
+  // Hyperliquid memes
+  hl_buddy:     cmc(33718),
+  hl_pip:       cmc(32196),
+  hl_farm:      cmc(32196),
+  hl_jeff:      cmc(32196),
+  hl_hpos:      cmc(26873),
+  hl_hfun:      cmc(34103),
+  hl_rage:      cmc(33952),
+  hl_purr:      cmc(30668),
+
+  // Ethereum memes
+  eth_andy:     cmc(29879),
+  eth_apu:      cmc(30074),
+  eth_wojak:    cmc(23601),
+  eth_turbo:    cmc(24911),
+  eth_mog:      cmc(27659),
+  eth_shib:     cmc(5994),
+  eth_brett:    cmc(29743),
+  eth_pepe:     cmc(24478),
+
+  // XRP memes
+  xrp_bird:     cmc(33950),
+  xrp_schwa:    cmc(33850),
+  xrp_bert:     cmc(34121),
+  xrp_xpm:      cmc(34030),
+  xrp_xpunks:   cmc(34113),
+  xrp_oze:      cmc(34221),
+  xrp_army:     cmc(33966),
+  xrp_coreum:   cmc(24411),
+};
 
 /**
  * Resolves the framed-template (MTG-style) to use for a card.
@@ -103,7 +168,12 @@ const X = (
 // ── Catalogue ────────────────────────────────────────────────────────────────
 
 export const CARDS: Record<string, CardDef> = {};
-function reg(...cs: CardDef[]) { for (const c of cs) CARDS[c.id] = c; }
+function reg(...cs: CardDef[]) {
+  for (const c of cs) {
+    const img = IMAGES[c.id];
+    CARDS[c.id] = img ? { ...c, image: img } : c;
+  }
+}
 
 // Nodes
 reg(N('bnb'), N('sol'), N('hl'), N('eth'), N('xrp'));
