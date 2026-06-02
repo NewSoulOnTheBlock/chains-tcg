@@ -1,4 +1,4 @@
-# Chains TCG
+# Memetic Masters TCG
 
 A Magic-the-Gathering-inspired turn-based card game built on **boardgame.io**, themed around 5 blockchains.
 

@@ -79,7 +79,7 @@ function Login({ onLogin, onFirstTime }: {
   }
 
   return (
-    <Screen title="Chains TCG — Sign In">
+    <Screen title="Memetic Masters TCG — Sign In">
       <p style={{ color: '#aaa', marginTop: 0 }}>Connect your wallet to play. Your W/L is tracked globally.</p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 380 }}>
@@ -291,7 +291,7 @@ function RulesPage({ onBack }: { onBack: () => void }) {
       </div>
 
       <div style={{ maxWidth: 820, margin: '0 auto', padding: '28px 22px 60px', lineHeight: 1.6, fontSize: 16 }}>
-        <H1>Chains TCG — Quick Rules</H1>
+        <H1>Memetic Masters TCG — Quick Rules</H1>
 
         <H2>Goal</H2>
         <P>Reduce your opponent's life from <B>20 → 0</B>. Last player standing wins.</P>
@@ -458,7 +458,7 @@ function Landing({
         padding: mobile ? '10px 12px' : '14px 22px',
         gap: 8, flexWrap: 'wrap',
       }}>
-        <div style={{ fontWeight: 800, fontSize: mobile ? 15 : 18, letterSpacing: 1.5, textShadow: '0 2px 8px #000' }}>CHAINS TCG</div>
+        <div style={{ fontWeight: 800, fontSize: mobile ? 13 : 16, letterSpacing: 1.5, textShadow: '0 2px 8px #000' }}>MEMETIC MASTERS TCG</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, color: '#ddd', textShadow: '0 1px 4px #000' }}>Signed in as <b>{myName}</b></span>
           <button onClick={onLogout} style={ghostBtn}>Sign out</button>

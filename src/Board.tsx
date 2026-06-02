@@ -333,7 +333,7 @@ export function ChainsBoard(props: Props) {
   return (
     <div style={{ fontFamily: 'system-ui, sans-serif', padding: mobile ? 6 : 8, color: '#eee', background: '#111', minHeight: '100vh' }}>
       <h2 style={{ margin: '4px 0', fontSize: mobile ? 14 : 18 }}>
-        Chains TCG — {myTurn ? <span style={{color:'#9f9'}}>your turn</span> : <span style={{color:'#f99'}}>opponent's turn</span>}
+        Memetic Masters TCG — {myTurn ? <span style={{color:'#9f9'}}>your turn</span> : <span style={{color:'#f99'}}>opponent's turn</span>}
         {' '}· turn {ctx.turn} · {inBlockers ? 'block' : myTurn ? 'main' : 'wait'}
       </h2>
 
