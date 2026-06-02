@@ -7,7 +7,7 @@ export const COLORS: Color[] = ['bnb', 'sol', 'hl', 'eth', 'xrp'];
 
 export const COLOR_META: Record<Color, { name: string; hex: string; ink: string; template?: string; glyph?: string }> = {
   bnb: { name: 'BnB',         hex: '#f3ba2f', ink: '#000', template: '/template-bnb.jpg', glyph: 'BNB' },
-  sol: { name: 'Solana',      hex: '#9945ff', ink: '#fff' },
+  sol: { name: 'Solana',      hex: '#9945ff', ink: '#fff', template: '/template-sol.png', glyph: 'SOL' },
   hl:  { name: 'Hyperliquid', hex: '#50d2c1', ink: '#022', template: '/template-hl.jpg',  glyph: 'HL' },
   eth: { name: 'Ethereum',    hex: '#f5f5f5', ink: '#222', template: '/template-eth.png', glyph: 'ETH' },
   xrp: { name: 'XRP',         hex: '#1a1a1a', ink: '#fff', template: '/template-xrp.png', glyph: 'XRP' },
