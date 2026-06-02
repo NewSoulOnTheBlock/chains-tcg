@@ -116,7 +116,7 @@ const IMAGES: Record<string, string> = {
   eth_pepe:     cmc(24478),
 
   // XRP memes
-  xrp_bird:     cmc(33950),
+  xrp_phnix:    '/cards/phnix.png?v=1',
   xrp_fuzzy:    '/cards/fuzzy.png?v=1',
   xrp_bert:     cmc(34121),
   xrp_xpm:      cmc(34030),
@@ -317,7 +317,7 @@ reg(
 
 // XRP — discard, sneak, finishers
 reg(
-  M('xrp_bird',    'xrp', 'BIRD',              1, 1, 2, 'A little bird told me.'),
+  M('xrp_phnix',   'xrp', 'PHNIX',             1, 1, 2, 'Rises from the ledger ashes.'),
   M('xrp_fuzzy',   'xrp', 'FUZZY',             1, 2, 1, 'Looks cuddly. Bites hard.'),
   M('xrp_bert',    'xrp', 'BERT',              2, 3, 2, 'Bert never blinks.'),
   M('xrp_xpm',     'xrp', 'XPM',               2, 2, 2, 'XRP Punks Mafia.'),
