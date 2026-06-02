@@ -16,6 +16,11 @@ export function defaultSeason(now = Date.now(), durationDays = DEFAULT_DURATION_
     active: true,
     softResetFactor: DEFAULT_SOFT_RESET,
     rewardDefinitions: {
+      champion: {
+        prize: '$1,000 of $MASTER',
+        title: 'Season Champion',
+        description: 'Awarded to the #1 player on the Season Leaderboard at season end.',
+      },
       tiers: Object.fromEntries(TIERS.map(t => [t, { cardback: `cardback_${t.toLowerCase()}`, title: `${t} Memer` }])),
     },
     balancePatch: null,

@@ -2175,6 +2175,37 @@ function RankedHub({
             <div style={{ marginTop: 4 }}><b style={{ color: '#fff' }}>Soft Reset:</b> Each season your MMR collapses halfway toward 1500.</div>
             <div style={{ marginTop: 4 }}><b style={{ color: '#fff' }}>Rewards:</b> Cosmetics only — no gameplay advantages.</div>
           </div>
+
+          {/* Season prize callout */}
+          <div style={{
+            marginTop: 14, padding: 12, borderRadius: 8,
+            background: 'linear-gradient(135deg, rgba(255,179,71,0.16) 0%, rgba(192,132,252,0.18) 100%)',
+            border: '1px solid rgba(255,179,71,0.55)',
+            boxShadow: '0 0 18px rgba(255,179,71,0.18)',
+          }}>
+            <div style={{
+              fontSize: 11, color: '#ffd86a', textTransform: 'uppercase', letterSpacing: 2,
+              fontFamily: 'serif', fontWeight: 800, marginBottom: 6,
+            }}>
+              👑  Season Champion Prize
+            </div>
+            <div style={{
+              fontFamily: '"Cinzel", "Times New Roman", serif',
+              fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: 0.5,
+              textShadow: '0 0 12px rgba(255,179,71,0.45)',
+            }}>
+              $1,000 of $MASTER
+            </div>
+            <div style={{
+              fontFamily: '"Cinzel", "Times New Roman", serif',
+              fontSize: 14, fontWeight: 700, color: '#ffd86a', marginTop: 2,
+            }}>
+              + Season Champion Title
+            </div>
+            <div style={{ fontSize: 11, color: '#bbb', marginTop: 6, fontStyle: 'italic' }}>
+              Awarded to the #1 player on the Season Leaderboard at season end.
+            </div>
+          </div>
         </div>
       </div>
 
