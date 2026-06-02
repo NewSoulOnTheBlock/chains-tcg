@@ -2,6 +2,7 @@
 // Large card preview + hover/long-press wrapper. Used both in-game and in the
 // deckbuilder so any card can be reviewed at full size.
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { CARDS, COLOR_META, COLORS, templateFor, type Color, type CardDef } from './cards';
 
 const PREVIEW_W = 280;
@@ -237,7 +238,7 @@ export function CardHover({
       onMouseLeave={onMouseLeave}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
-      style={{ display: 'contents' }}
+      style={{ display: 'inline-block', verticalAlign: 'top' }}
     >
       {children}
       {pos && def && (
@@ -260,12 +261,17 @@ function FloatingPreview({ x, y, children }: { x: number; y: number; children: R
   if (left < margin) left = margin;
   if (top + PREVIEW_H + margin > vh) top = vh - PREVIEW_H - margin;
   if (top < margin) top = margin;
-  return (
+  if (typeof document === 'undefined') return null;
+  // Portal to <body> so we escape any ancestor `transform` (e.g. the opponent's
+  // 180°-rotated zone), which would otherwise reparent `position: fixed` and
+  // display the preview upside-down.
+  return createPortal(
     <div
       data-cardpreview="1"
       style={{ position: 'fixed', left, top, zIndex: 9999, pointerEvents: 'none' }}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   );
 }
