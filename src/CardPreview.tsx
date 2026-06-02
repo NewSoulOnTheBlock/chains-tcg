@@ -2,14 +2,15 @@
 // Large card preview + hover/long-press wrapper. Used both in-game and in the
 // deckbuilder so any card can be reviewed at full size.
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { CARDS, COLOR_META, COLORS, type Color, type CardDef } from './cards';
+import { CARDS, COLOR_META, COLORS, templateFor, type Color, type CardDef } from './cards';
 
 const PREVIEW_W = 280;
 const PREVIEW_H = 400;
 
 export function CardPreview({ def }: { def: CardDef }) {
   const meta = COLOR_META[def.color];
-  if (meta.template) return <TemplatedPreview def={def} />;
+  const tpl = templateFor(def);
+  if (tpl) return <TemplatedPreview def={def} tpl={tpl} />;
   return (
     <div style={{
       width: PREVIEW_W, height: PREVIEW_H,
@@ -81,12 +82,12 @@ export function CardPreview({ def }: { def: CardDef }) {
  * frame image (currently used by Hyperliquid and BnB). Selected via
  * COLOR_META[color].template.
  */
-export function TemplatedPreview({ def }: { def: CardDef }) {
+export function TemplatedPreview({ def, tpl }: { def: CardDef; tpl: { url: string; glyph?: string } }) {
   const meta = COLOR_META[def.color];
   return (
     <div style={{
       position: 'relative', width: PREVIEW_W, height: PREVIEW_H,
-      backgroundImage: `url(${meta.template})`,
+      backgroundImage: `url(${tpl.url})`,
       backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat',
       borderRadius: 10, boxShadow: '0 12px 40px rgba(0,0,0,0.75)',
       fontFamily: 'system-ui, sans-serif', color: '#1a1a1a',
@@ -126,8 +127,13 @@ export function TemplatedPreview({ def }: { def: CardDef }) {
         background: `radial-gradient(circle at 50% 40%, ${meta.hex}, #061a0c 75%)`,
         color: meta.ink,
       }}>
-        <div style={{ fontWeight: 900, fontSize: 56, letterSpacing: 4, textShadow: '0 3px 10px #000' }}>
-          {meta.glyph ?? meta.name}
+        <div style={{
+          fontWeight: 900,
+          fontSize: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 32 : 56,
+          letterSpacing: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 2 : 4,
+          textShadow: '0 3px 10px #000',
+        }}>
+          {tpl.glyph ?? meta.glyph ?? meta.name}
         </div>
       </div>
 

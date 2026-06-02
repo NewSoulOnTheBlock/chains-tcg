@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { BoardProps } from 'boardgame.io/react';
 import {
-  CARDS, COLOR_META, COLORS,
+  CARDS, COLOR_META, COLORS, templateFor,
   type Color, type CardDef,
 } from './cards';
 import type { GState, Instance } from './Game';
@@ -77,14 +77,14 @@ function CardFace({
   if (!def) return null;
   const meta = COLOR_META[def.color];
   const dimmed = instance?.summoningSick || instance?.tapped;
-  const tpl = meta.template;
+  const tpl = templateFor(def);
   return (
     <CardHover defId={defId}>
     <div onClick={onClick}
       style={{
         width: W, height: H, margin: 2, padding: tpl ? 0 : 5, borderRadius: 8,
         background: tpl ? undefined : meta.hex,
-        backgroundImage: tpl ? `url(${tpl})` : undefined,
+        backgroundImage: tpl ? `url(${tpl.url})` : undefined,
         backgroundSize: tpl ? '100% 100%' : undefined,
         backgroundRepeat: 'no-repeat',
         color: meta.ink,
@@ -97,7 +97,7 @@ function CardFace({
         display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
         position: 'relative', flex: '0 0 auto',
       }}>
-      {tpl ? <TemplatedCardFaceContent def={def} instance={instance} footer={footer} /> : <>
+      {tpl ? <TemplatedCardFaceContent def={def} instance={instance} footer={footer} tpl={tpl} /> : <>
       <div style={{ fontWeight: 700, fontSize: 10, lineHeight: 1.05 }}>{def.name}</div>
       <div style={{ fontSize: 8, opacity: 0.85, marginTop: 1, lineHeight: 1.1 }}>
         {def.type.toUpperCase()}
@@ -119,7 +119,7 @@ function CardFace({
 }
 
 /** Content placed inside a templated MTG-style frame (per-color via COLOR_META.template). */
-function TemplatedCardFaceContent({ def, instance, footer }: { def: CardDef; instance?: Instance; footer?: React.ReactNode }) {
+function TemplatedCardFaceContent({ def, instance, footer, tpl }: { def: CardDef; instance?: Instance; footer?: React.ReactNode; tpl: { url: string; glyph?: string } }) {
   const meta = COLOR_META[def.color];
   return (
     <>
@@ -153,10 +153,12 @@ function TemplatedCardFaceContent({ def, instance, footer }: { def: CardDef; ins
         position: 'absolute', top: '13%', left: '8.5%', right: '8.5%', height: '44%',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: `radial-gradient(circle at 50% 40%, ${meta.hex}, #061a0c 75%)`,
-        color: meta.ink, fontWeight: 900, fontSize: 18, letterSpacing: 2,
+        color: meta.ink, fontWeight: 900,
+        fontSize: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 11 : 18,
+        letterSpacing: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 1 : 2,
         textShadow: '0 2px 6px #000',
       }}>
-        {meta.glyph ?? meta.name}
+        {tpl.glyph ?? meta.glyph ?? meta.name}
         {instance?.summoningSick && <span style={{ marginLeft: 3, color: '#000', background: '#ffeb3b', padding: '0 3px', borderRadius: 2, fontSize: 6 }}>SICK</span>}
         {instance?.tapped && !instance?.summoningSick && <span style={{ marginLeft: 3, color: '#000', background: '#aaa', padding: '0 3px', borderRadius: 2, fontSize: 6 }}>TAP</span>}
       </div>

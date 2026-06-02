@@ -53,6 +53,20 @@ export interface CardDef {
   effect?: EffectId;       // for moves + machines
 }
 
+/**
+ * Resolves the framed-template (MTG-style) to use for a card.
+ * Per-type overrides take precedence over per-color templates so e.g.
+ * all `machine` cards share one steel/silver frame regardless of color.
+ */
+export function templateFor(def: CardDef): { url: string; glyph?: string } | undefined {
+  if (def.type === 'machine') {
+    return { url: '/template-machine.jpg', glyph: 'MACHINE' };
+  }
+  const meta = COLOR_META[def.color];
+  if (meta.template) return { url: meta.template, glyph: meta.glyph };
+  return undefined;
+}
+
 const N = (color: Color): CardDef => ({
   id: `node_${color}`,
   name: `${COLOR_META[color].name} Node`,
