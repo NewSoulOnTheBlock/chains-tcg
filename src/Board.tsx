@@ -426,7 +426,15 @@ export function ChainsBoard(props: Props) {
           }
         }}
         onOppMemeClick={uid => {
-          if (targetMode?.kind === 'meme' || targetMode?.kind === 'any') pickTarget(uid);
+          if (targetMode?.kind === 'meme' || targetMode?.kind === 'any') { pickTarget(uid); return; }
+          if (inBlockers) {
+            // Assigning a block: must have a blocker selected and the clicked
+            // opponent meme must actually be an attacker.
+            if (!blockSel.blockerUid) { flash('Click one of your untapped memes first to select a blocker.'); return; }
+            if (!G.combat.attackers.some(a => a.memeUid === uid)) { flash('That opponent meme is not attacking — pick one with ⚔️.'); return; }
+            moves.declareBlocker(blockSel.blockerUid, uid);
+            setBlockSel({});
+          }
         }}
         onMachineClick={uid => { if (targetMode?.kind === 'machine') pickTarget(uid); }}
       />
@@ -674,10 +682,13 @@ function Playmat(props: {
         {opp.memes.map(inst => {
           const attacking = attackerSide === 'opp' && attackers.includes(inst.uid);
           const blockedBy = blocks[inst.uid] ?? [];
+          const blockerSelected = !!selectedBlocker;
+          const isAttacker = attackerSide === 'opp' && attackers.includes(inst.uid);
+          const blockable = blockerSelected && isAttacker;
           return (
             <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp
-              onClick={memeTargetable ? () => onOppMemeClick(inst.uid) : undefined}
-              targetable={memeTargetable}
+              onClick={(memeTargetable || blockable) ? () => onOppMemeClick(inst.uid) : undefined}
+              targetable={memeTargetable || blockable}
               selected={attacking}
               footer={
                 <>{attacking && '⚔️'}{blockedBy.length > 0 && ` 🛡${blockedBy.length}`}</>
