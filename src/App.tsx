@@ -401,17 +401,6 @@ function Login({ onLogin, onFirstTime }: {
               ))}
             </div>
 
-            {/* Live stats */}
-            <div className="login-fadein" style={{
-              display: 'grid', gap: 8,
-              gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-            }}>
-              <LoginStat label="Players Online" value="1,284" color={CYAN} />
-              <LoginStat label="Games Today"   value="6,492" color={GOLD} />
-              <LoginStat label="Cards"         value="427"   color={PURPLE} />
-              <LoginStat label="Season"        value="Genesis" color={'#ff6b6b'} />
-            </div>
-
             <div style={{ textAlign: 'center', fontSize: 11, color: '#6a6253', letterSpacing: 1, marginTop: 6 }}>
               $MASTER · DpPowzjETiU6421ReuwBB8XmDB7sMyB2JGzFLssYpump
             </div>
@@ -422,22 +411,8 @@ function Login({ onLogin, onFirstTime }: {
   );
 }
 
-function LoginStat({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div style={{
-      background: 'rgba(20,20,40,0.55)', backdropFilter: 'blur(6px)',
-      border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10,
-      padding: '10px 12px', textAlign: 'center',
-      animation: 'loginCount 700ms ease both',
-    }}>
-      <div style={{
-        fontFamily: '"Cinzel", serif', fontWeight: 800, fontSize: 18, color,
-        textShadow: `0 0 12px ${color}55`,
-      }}>{value}</div>
-      <div style={{ fontSize: 10, color: '#9c9282', letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', marginTop: 2 }}>{label}</div>
-    </div>
-  );
-}
+function LoginStat(_: { label: string; value: string; color: string }) { return null; }
+void LoginStat;
 
 // ── First-time profile creation (after wallet connect with no existing profile) ─
 function FirstTimeProfile({ wallet, onCreated, onCancel }: {
