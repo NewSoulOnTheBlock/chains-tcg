@@ -450,7 +450,7 @@ function Landing({
         <MenuBtn primary onClick={onPlay}>▶  PLAY</MenuBtn>
         <MenuBtn onClick={onProfile}>👤  PROFILE</MenuBtn>
         <MenuBtn onClick={onRules}>📖  RULES</MenuBtn>
-        <MenuBtn onClick={() => window.open('https://x.com/memecoindevvv', '_blank', 'noopener')}>📰  NEWS</MenuBtn>
+        <MenuBtn onClick={() => window.open('https://x.com/MemeticMasters', '_blank', 'noopener')}>📰  NEWS</MenuBtn>
       </div>
     </div>
   );
