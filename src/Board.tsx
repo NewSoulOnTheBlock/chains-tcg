@@ -420,6 +420,8 @@ export function ChainsBoard(props: Props) {
         myName={myName} oppName={oppName}
         myProfile={myProfile} oppProfile={oppProfile}
         onOpenRules={() => setShowRules(true)}
+        onEndTurn={() => moves.passTurn()}
+        canEndTurn={myTurn && !inBlockers && !ctx.gameover}
       />
 
       {/* Floating Rules drawer */}
@@ -1378,14 +1380,43 @@ function LifeBadge({
 /** Top-of-screen turn banner with chain-color glow + pulse. */
 function TurnBanner({
   myTurn, turn, phase, myName, oppName, myProfile, oppProfile, onOpenRules,
+  onEndTurn, canEndTurn,
 }: {
   myTurn: boolean; turn: number; phase: string;
   myName: string; oppName: string;
   myProfile?: any; oppProfile?: any;
   onOpenRules: () => void;
+  onEndTurn: () => void;
+  canEndTurn: boolean;
 }) {
   const dotColor = myTurn ? '#48d97a' : '#e85c5c';
   const headline = myTurn ? 'YOUR TURN' : "OPPONENT'S TURN";
+
+  // 60-second auto-end-turn timer. Resets whenever turn/phase ownership changes.
+  const TURN_LIMIT = 60;
+  const [secondsLeft, setSecondsLeft] = useState(TURN_LIMIT);
+  const firedRef = useRef(false);
+  useEffect(() => {
+    setSecondsLeft(TURN_LIMIT);
+    firedRef.current = false;
+  }, [turn, myTurn, canEndTurn]);
+  useEffect(() => {
+    if (!canEndTurn) return;
+    const id = setInterval(() => {
+      setSecondsLeft(s => {
+        if (s <= 1) {
+          if (!firedRef.current) { firedRef.current = true; onEndTurn(); }
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [canEndTurn, onEndTurn]);
+
+  const lowTime = canEndTurn && secondsLeft <= 10;
+  const timerColor = lowTime ? '#ff5d73' : '#ffd76a';
+
   return (
     <div style={{
       position: 'relative',
@@ -1413,11 +1444,29 @@ function TurnBanner({
         <span style={{ fontFamily: 'system-ui', fontWeight: 600, fontSize: 11, color: '#aab', letterSpacing: 1 }}>
           · TURN {turn} · {phase.toUpperCase()}
         </span>
+        {canEndTurn && (
+          <span style={{
+            fontFamily: 'system-ui', fontWeight: 800, fontSize: 13, letterSpacing: 1,
+            color: timerColor, padding: '2px 8px', borderRadius: 6,
+            background: `${timerColor}22`, border: `1px solid ${timerColor}66`,
+            animation: lowTime ? 'pulse-dot 0.8s ease-in-out infinite' : 'none',
+          }} title="Auto-end-turn in">⏱ {secondsLeft}s</span>
+        )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 160, justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 160, justifyContent: 'flex-end' }}>
         <span style={{ fontSize: 11, color: '#9aa', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           <b style={{ color: '#fff' }}>{myName}</b> <span style={{ opacity: 0.6 }}>({formatRecord(myProfile)})</span>
         </span>
+        {canEndTurn && (
+          <button onClick={onEndTurn} title="End your turn (auto-ends at 0s)"
+            style={{
+              background: 'linear-gradient(180deg, #f0d27a, #c69533)',
+              color: '#1a1408', border: '1px solid #8a6d24',
+              borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
+              fontWeight: 800, fontSize: 12, letterSpacing: 1,
+              boxShadow: '0 0 8px #d9b85f55',
+            }}>END TURN</button>
+        )}
         <button onClick={onOpenRules} title="How to play"
           style={{
             background: 'linear-gradient(180deg,#3a2a55,#22163a)',
