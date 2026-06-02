@@ -485,6 +485,50 @@ function Landing({
         <MenuBtn onClick={onRules}>📖  RULES</MenuBtn>
         <MenuBtn onClick={() => window.open('https://x.com/MemeticMasters', '_blank', 'noopener')}>📰  NEWS</MenuBtn>
       </div>
+
+      {/* $MASTER contract address footer */}
+      <ContractAddressFooter />
+    </div>
+  );
+}
+
+function ContractAddressFooter() {
+  const mobile = useIsMobile();
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(MASTER_TOKEN_ADDRESS);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {}
+  }
+  return (
+    <div style={{
+      position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 3,
+      padding: mobile ? '6px 10px' : '8px 18px',
+      background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.85) 60%)',
+      display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10,
+      flexWrap: 'wrap',
+    }}>
+      <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, color: '#ffb347', textShadow: '0 1px 4px #000' }}>
+        $MASTER CA:
+      </span>
+      <button
+        onClick={copy}
+        title="Click to copy"
+        style={{
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+          fontSize: mobile ? 10 : 12, color: '#fff', fontWeight: 600,
+          background: 'rgba(20,20,20,0.7)',
+          border: '1px solid rgba(255,179,71,0.45)', borderRadius: 4,
+          padding: mobile ? '3px 6px' : '4px 8px',
+          cursor: 'pointer', letterSpacing: 0.4,
+          maxWidth: '92vw', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}
+      >{MASTER_TOKEN_ADDRESS}</button>
+      <span style={{ fontSize: 11, color: copied ? '#7fffa0' : '#888', minWidth: 50 }}>
+        {copied ? '✓ copied' : '(click to copy)'}
+      </span>
     </div>
   );
 }
@@ -1122,9 +1166,9 @@ function Lobby({
   // Join modal state — second player picks their color when accepting.
   const [joinTarget, setJoinTarget] = useState<{ match: any; seat: string } | null>(null);
   const [joinColor, setJoinColor] = useState<Color>('eth');
-  // Match stakes — 'free' or a SOL wager. Currently UI-only metadata stored in setupData.
-  const [wagerKind, setWagerKind] = useState<'free' | 'sol'>('free');
-  const [wagerAmount, setWagerAmount] = useState<string>('0.1');
+  // Match stakes — 'free' or a $MASTER token wager. Currently UI-only metadata stored in setupData.
+  const [wagerKind, setWagerKind] = useState<'free' | 'master'>('free');
+  const [wagerAmount, setWagerAmount] = useState<string>('1000');
   // Optional human-readable match name so opponents can find each other in the lobby.
   const [matchName, setMatchName] = useState<string>('');
 
@@ -1165,8 +1209,8 @@ function Lobby({
         return;
       }
       const wager = parseWager(wagerKind, wagerAmount);
-      if (wagerKind === 'sol' && !wager) {
-        setError('Enter a valid SOL wager amount greater than 0.');
+      if (wagerKind === 'master' && !wager) {
+        setError('Enter a valid $MASTER wager amount greater than 0.');
         return;
       }
       await upsertProfileApi(myName);
@@ -1213,10 +1257,10 @@ function Lobby({
     // Confirm wagered matches BEFORE opening the deck-pick modal so the joiner
     // is never surprised by stakes mid-flow.
     const w = readWager(m.setupData);
-    if (w.kind === 'sol') {
+    if (w.kind === 'master') {
       const ok = window.confirm(
-        `This is a WAGERED match.\n\nStakes: ${w.amount} SOL — winner takes the pot.\n\n` +
-        `By continuing you agree to pay ${w.amount} SOL if you lose. Continue?`
+        `This is a WAGERED match.\n\nStakes: ${w.amount} $MASTER — winner takes the pot.\n\n` +
+        `By continuing you agree to pay ${w.amount} $MASTER if you lose. Continue?`
       );
       if (!ok) return;
     }
@@ -1315,9 +1359,9 @@ function Lobby({
           return (
             <div style={{
               fontSize: 10, marginTop: 4, padding: '2px 6px', display: 'inline-block',
-              background: w.kind === 'sol' ? 'rgba(153,69,255,0.18)' : 'rgba(180,150,80,0.18)',
-              color: w.kind === 'sol' ? '#c8a3ff' : '#d9c98e',
-              border: `1px solid ${w.kind === 'sol' ? 'rgba(153,69,255,0.55)' : 'rgba(180,150,80,0.55)'}`,
+              background: w.kind === 'master' ? 'rgba(153,69,255,0.18)' : 'rgba(180,150,80,0.18)',
+              color: w.kind === 'master' ? '#c8a3ff' : '#d9c98e',
+              border: `1px solid ${w.kind === 'master' ? 'rgba(153,69,255,0.55)' : 'rgba(180,150,80,0.55)'}`,
               borderRadius: 3, fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase',
             }}>{wagerLabel(w)}</div>
           );
@@ -1674,7 +1718,7 @@ function Lobby({
                 borderRadius: 4, color: '#e6d4ff',
               }}>
                 <div style={{ fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase', fontSize: 11, color: '#c8a3ff' }}>Wagered Match</div>
-                <div style={{ marginTop: 2 }}>Accepting will agree to a <b style={{ color: '#fff' }}>{w.amount} SOL</b> wager — winner takes the pot.</div>
+                <div style={{ marginTop: 2 }}>Accepting will agree to a <b style={{ color: '#fff' }}>{w.amount} $MASTER</b> wager — winner takes the pot.</div>
               </div>;
             })()}
             <ColorChooser label="Your chain" value={joinColor} onChange={(c) => { setJoinUseCustom(false); setJoinColor(c); }} />
@@ -2213,19 +2257,27 @@ function Banner({ kind, children }: { kind: 'error' | 'info'; children: React.Re
   return <div style={{ padding: 10, background: bg, border: `1px solid ${bd}`, color: '#eee', borderRadius: 4, fontSize: 13, marginTop: 8 }}>{children}</div>;
 }
 // ── Wager helpers ───────────────────────────────────────────────────────────
-type Wager = { kind: 'free' } | { kind: 'sol'; amount: number };
+// Wagers are denominated in $MASTER (Solana SPL token).
+export const MASTER_TOKEN_ADDRESS = 'DpPowzjETiU6421ReuwBB8XmDB7sMyB2JGzFLssYpump';
 
-function parseWager(kind: 'free' | 'sol', raw: string): Wager | null {
+type Wager = { kind: 'free' } | { kind: 'master'; amount: number };
+
+function parseWager(kind: 'free' | 'master', raw: string): Wager | null {
   if (kind === 'free') return { kind: 'free' };
   const n = Number(raw);
   if (!isFinite(n) || n <= 0) return null;
-  // Round to 6 decimals (1 lamport ≈ 1e-9 SOL; this is a UI metadata for now).
-  return { kind: 'sol', amount: Math.round(n * 1e6) / 1e6 };
+  // $MASTER amounts are whole tokens (no fractional UI for now).
+  return { kind: 'master', amount: Math.round(n) };
 }
 
 function readWager(setupData: any): Wager {
   const w = setupData?.wager;
-  if (w && (w.kind === 'free' || w.kind === 'sol')) return w as Wager;
+  if (w && (w.kind === 'free' || w.kind === 'master')) return w as Wager;
+  // Back-compat: legacy 'sol' wagers map to the new 'master' kind so that
+  // matches created before the rebrand still display correctly.
+  if (w && w.kind === 'sol' && typeof w.amount === 'number') {
+    return { kind: 'master', amount: w.amount };
+  }
   return { kind: 'free' };
 }
 
@@ -2235,17 +2287,17 @@ function readMatchName(setupData: any): string {
 }
 
 function wagerLabel(w: Wager): string {
-  return w.kind === 'free' ? 'Free Match' : `Wager · ${w.amount} SOL`;
+  return w.kind === 'free' ? 'Free Match' : `Wager · ${w.amount} $MASTER`;
 }
 
 function WagerControls({
   kind, amount, onKind, onAmount, compact,
 }: {
-  kind: 'free' | 'sol'; amount: string;
-  onKind: (k: 'free' | 'sol') => void; onAmount: (s: string) => void;
+  kind: 'free' | 'master'; amount: string;
+  onKind: (k: 'free' | 'master') => void; onAmount: (s: string) => void;
   compact?: boolean;
 }) {
-  const Btn = ({ k, label }: { k: 'free' | 'sol'; label: string }) => {
+  const Btn = ({ k, label }: { k: 'free' | 'master'; label: string }) => {
     const sel = kind === k;
     return (
       <button type="button" onClick={() => onKind(k)} style={{
@@ -2265,24 +2317,24 @@ function WagerControls({
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ fontSize: 11, color: '#c9b97a', minWidth: 50 }}>STAKES</span>
-        <Btn k="free" label="Free" />
-        <Btn k="sol"  label="Wager · SOL" />
+        <Btn k="free"   label="Free" />
+        <Btn k="master" label="Wager · $MASTER" />
       </div>
-      {kind === 'sol' && (
+      {kind === 'master' && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 11, color: '#c9b97a', minWidth: 50 }}>AMOUNT</span>
           <input
-            type="number" inputMode="decimal" min={0} step={0.01}
+            type="number" inputMode="numeric" min={0} step={1}
             value={amount}
             onChange={e => onAmount(e.target.value)}
-            placeholder="0.10"
+            placeholder="1000"
             style={{
               flex: 1, padding: '4px 8px', fontSize: 12, fontWeight: 700,
               background: '#000', color: '#f1e3a8',
               border: '1px solid rgba(180,150,80,0.55)', borderRadius: 3,
             }}
           />
-          <span style={{ fontSize: 11, color: '#c9b97a', fontWeight: 700 }}>SOL</span>
+          <span style={{ fontSize: 11, color: '#c9b97a', fontWeight: 700 }}>$MASTER</span>
         </div>
       )}
     </div>

@@ -740,7 +740,7 @@ function WagerPayoutModal({
 }) {
   const [dismissed, setDismissed] = useState(false);
   useEffect(() => { setDismissed(false); }, [gameover?.winner, gameover?.draw]);
-  if (!gameover || !wager || wager.kind !== 'sol' || !wager.amount) return null;
+  if (!gameover || !wager || wager.kind !== 'master' || !wager.amount) return null;
   if (gameover.draw) return null;
   if (dismissed) return null;
 
@@ -780,7 +780,7 @@ function WagerPayoutModal({
           {iWon ? 'Victory' : 'Defeat'}
         </div>
         <div style={{ textAlign: 'center', color: '#b896ff', fontSize: 13, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 16 }}>
-          Wagered Match · {amount} SOL
+          Wagered Match · {amount} $MASTER
         </div>
 
         <div style={{
@@ -827,8 +827,8 @@ function WagerPayoutModal({
           padding: '10px 6px', lineHeight: 1.45,
         }}>
           {iWon
-            ? <>You won the wager. Ask <b style={{ color: '#ffd66e' }}>{oppName}</b> to send you <b style={{ color: '#ffd66e' }}>{amount} SOL</b>.</>
-            : <>Please pay the winner <b style={{ color: '#ffd66e' }}>{amount} SOL</b>.</>}
+            ? <>You won the wager. Ask <b style={{ color: '#ffd66e' }}>{oppName}</b> to send you <b style={{ color: '#ffd66e' }}>{amount} $MASTER</b>.</>
+            : <>Please pay the winner <b style={{ color: '#ffd66e' }}>{amount} $MASTER</b>.</>}
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
