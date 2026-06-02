@@ -77,12 +77,12 @@ const IMAGES: Record<string, string> = {
 
   // BnB memes
   bnb_babydoge: cmc(10407),
-  bnb_broccoli: cmc(34123),
+  bnb_broccoli: '/cards/broccoli.png?v=1',
   bnb_tut:      cmc(33687),
-  bnb_tst:      cmc(34111),
+  bnb_tst:      '/cards/tst.png?v=1',
   bnb_banana:   cmc(28066),
   bnb_mubarak:  cmc(34147),
-  bnb_cheems:   cmc(24316),
+  bnb_cheems:   '/cards/cheems.png?v=1',
   bnb_floki:    cmc(10804),
 
   // Solana memes
@@ -108,7 +108,7 @@ const IMAGES: Record<string, string> = {
   // Ethereum memes
   eth_andy:     cmc(29879),
   eth_apu:      cmc(30074),
-  eth_wojak:    cmc(23601),
+  eth_wojak:    '/cards/wojak.jpg?v=1',
   eth_turbo:    cmc(24911),
   eth_mog:      cmc(27659),
   eth_shib:     cmc(5994),
@@ -120,7 +120,7 @@ const IMAGES: Record<string, string> = {
   xrp_schwa:    cmc(33850),
   xrp_bert:     cmc(34121),
   xrp_xpm:      cmc(34030),
-  xrp_xpunks:   cmc(34113),
+  xrp_xpunks:   '/cards/xpunks.png?v=1',
   xrp_oze:      cmc(34221),
   xrp_army:     cmc(33966),
   xrp_coreum:   cmc(24411),
