@@ -832,12 +832,19 @@ function ChatPanel({
   messages: Array<{ id: string; sender: string; payload: any }>;
   sendChatMessage?: (msg: any) => void;
 }) {
+  const mobile = useIsMobile();
   const [draft, setDraft] = useState('');
+  const [open, setOpen] = useState(!mobile);
+  const [lastSeen, setLastSeen] = useState(0);
   const listRef = React.useRef<HTMLDivElement>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
-    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [messages.length]);
+    if (open && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+    if (open) setLastSeen(messages.length);
+  }, [messages.length, open]);
+
+  const unread = Math.max(0, messages.length - lastSeen);
 
   function send() {
     const text = draft.trim();
@@ -846,12 +853,68 @@ function ChatPanel({
     setDraft('');
   }
 
+  // Collapsed bubble — small floating button bottom-right.
+  if (!open) {
+    return (
+      <button
+        onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 50); }}
+        style={{
+          position: 'fixed',
+          right: mobile ? 10 : 16,
+          bottom: mobile ? 84 : 16, // sit above the mobile action bar
+          zIndex: 90,
+          width: 48, height: 48, borderRadius: 24,
+          background: '#1a1a1a', color: '#eee',
+          border: '1px solid #444',
+          boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
+          cursor: 'pointer', fontSize: 20,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+        title="Open chat"
+      >
+        💬
+        {unread > 0 && (
+          <span style={{
+            position: 'absolute', top: -4, right: -4,
+            background: '#e33', color: '#fff', fontSize: 10, fontWeight: 800,
+            borderRadius: 10, minWidth: 18, height: 18, padding: '0 5px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: '1px solid #000',
+          }}>{unread > 9 ? '9+' : unread}</span>
+        )}
+      </button>
+    );
+  }
+
   return (
-    <div style={{ marginTop: 12, border: '1px solid #444', borderRadius: 6, background: '#161616' }}>
-      <div style={{ padding: '6px 10px', background: '#222', fontSize: 12, fontWeight: 700, color: '#ccc', borderBottom: '1px solid #333' }}>
-        Chat
+    <div style={{
+      position: 'fixed',
+      right: mobile ? 8 : 16,
+      bottom: mobile ? 76 : 16,
+      zIndex: 90,
+      width: mobile ? 'calc(100vw - 16px)' : 320,
+      maxWidth: 'calc(100vw - 16px)',
+      border: '1px solid #444', borderRadius: 8, background: '#161616',
+      boxShadow: '0 6px 22px rgba(0,0,0,0.55)',
+      display: 'flex', flexDirection: 'column',
+    }}>
+      <div style={{
+        padding: '6px 10px', background: '#222', fontSize: 12, fontWeight: 700,
+        color: '#ccc', borderBottom: '1px solid #333',
+        borderTopLeftRadius: 8, borderTopRightRadius: 8,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <span>💬 Chat</span>
+        <button
+          onClick={() => setOpen(false)}
+          style={{
+            background: 'transparent', border: 'none', color: '#aaa',
+            cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 4px',
+          }}
+          title="Hide chat"
+        >×</button>
       </div>
-      <div ref={listRef} style={{ maxHeight: 160, overflowY: 'auto', padding: 8, fontSize: 12, fontFamily: 'system-ui' }}>
+      <div ref={listRef} style={{ height: mobile ? 180 : 220, overflowY: 'auto', padding: 8, fontSize: 12, fontFamily: 'system-ui' }}>
         {messages.length === 0 && (
           <div style={{ color: '#666', fontStyle: 'italic' }}>No messages yet. Talk smack.</div>
         )}
@@ -868,8 +931,9 @@ function ChatPanel({
           );
         })}
       </div>
-      <div style={{ display: 'flex', gap: 6, padding: 6, borderTop: '1px solid #333', background: '#1a1a1a' }}>
+      <div style={{ display: 'flex', gap: 6, padding: 6, borderTop: '1px solid #333', background: '#1a1a1a', borderBottomLeftRadius: 8, borderBottomRightRadius: 8 }}>
         <input
+          ref={inputRef}
           value={draft}
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') send(); }}
