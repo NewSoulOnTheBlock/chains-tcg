@@ -108,7 +108,7 @@ const IMAGES: Record<string, string> = {
   // Ethereum memes
   eth_andy:     '/cards/andy.png?v=1',
   eth_apu:      '/cards/apu.webp?v=1',
-  eth_wojak:    '/cards/wojak.jpg?v=1',
+  eth_wojak:    '/cards/wojak.png?v=2',
   eth_turbo:    cmc(24911),
   eth_mog:      '/cards/mog.png?v=1',
   eth_shib:     cmc(5994),
