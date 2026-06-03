@@ -158,7 +158,7 @@ const IMAGES: Record<string, string> = {
   eth_l2:       emo('26d3'),  // ⛓ chains (Layer 2 Rollup)
   eth_yield:    emo('1fa99'), // 🪙 coin (Yield Aggregator)
   eth_smite:    emo('1f426'), // 🐦 bird (FUD Tweet)
-  eth_heal:     emo('1f4b5'), // 💵 dollar banknote (DCA In)
+  eth_heal:     '/cards/dca_in.png?v=1',
   eth_exploit:  '/cards/exploit_disclosure.png?v=1',
 
   // ── XRP machines/moves ──
