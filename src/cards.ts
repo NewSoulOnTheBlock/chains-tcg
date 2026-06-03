@@ -130,7 +130,7 @@ const IMAGES: Record<string, string> = {
   bnb_bridge:   '/cards/token_launchpad.png?v=1',
   bnb_sniper:   emo('1f3af'), // 🎯 dart (Sniper Bot)
   bnb_mmalgo:   '/cards/market_maker_algo.png?v=1',
-  bnb_rugpull:  emo('1f4b8'), // 💸 money-with-wings (Rug Pull)
+  bnb_rugpull:  '/cards/rug_pull.png?v=1',
   bnb_airdrop:  '/cards/airdrop_farm.png?v=1',
   bnb_honeypot: '/cards/honeypot.png?v=1',
 
