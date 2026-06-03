@@ -159,7 +159,7 @@ const IMAGES: Record<string, string> = {
   eth_yield:    emo('1fa99'), // 🪙 coin (Yield Aggregator)
   eth_smite:    emo('1f426'), // 🐦 bird (FUD Tweet)
   eth_heal:     emo('1f4b5'), // 💵 dollar banknote (DCA In)
-  eth_exploit:  emo('1f41b'), // 🐛 bug (Exploit Disclosure)
+  eth_exploit:  '/cards/exploit_disclosure.png?v=1',
 
   // ── XRP machines/moves ──
   xrp_ledger:   emo('1f4d2'), // 📒 ledger (Indexer Daemon)
