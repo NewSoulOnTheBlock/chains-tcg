@@ -155,7 +155,7 @@ const IMAGES: Record<string, string> = {
   // ── Ethereum machines/moves ──
   eth_eip1559:  '/cards/smart_contract_suite.png?v=1',
   eth_temple:   emo('1f310'), // 🌐 globe with meridians (Dapp Ecosystem)
-  eth_l2:       emo('26d3'),  // ⛓ chains (Layer 2 Rollup)
+  eth_l2:       '/cards/layer2_rollup.png?v=1',
   eth_yield:    emo('1fa99'), // 🪙 coin (Yield Aggregator)
   eth_smite:    emo('1f426'), // 🐦 bird (FUD Tweet)
   eth_heal:     '/cards/dca_in.png?v=1',
