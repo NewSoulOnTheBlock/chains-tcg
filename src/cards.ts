@@ -131,7 +131,7 @@ const IMAGES: Record<string, string> = {
   bnb_sniper:   emo('1f3af'), // 🎯 dart (Sniper Bot)
   bnb_mmalgo:   emo('1f4ca'), // 📊 bar chart (Market Maker Algo)
   bnb_rugpull:  emo('1f4b8'), // 💸 money-with-wings (Rug Pull)
-  bnb_airdrop:  emo('1fa82'), // 🪂 parachute (Airdrop Farm)
+  bnb_airdrop:  '/cards/airdrop_farm.png?v=1',
   bnb_honeypot: emo('1f36f'), // 🍯 honey pot (Honeypot)
 
   // ── Solana machines/moves ──
