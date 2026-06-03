@@ -128,7 +128,7 @@ const IMAGES: Record<string, string> = {
   // ── BnB machines/moves ──
   bnb_farm:     '/cards/volume_bot.png?v=1',
   bnb_bridge:   '/cards/token_launchpad.png?v=1',
-  bnb_sniper:   emo('1f3af'), // 🎯 dart (Sniper Bot)
+  bnb_sniper:   '/cards/sniper_bot.png?v=1',
   bnb_mmalgo:   '/cards/market_maker_algo.png?v=1',
   bnb_rugpull:  '/cards/rug_pull.png?v=1',
   bnb_airdrop:  '/cards/airdrop_farm.png?v=1',
