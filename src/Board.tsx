@@ -513,6 +513,9 @@ export function ChainsBoard(props: Props) {
         canAttack={myTurn && !inBlockers && !ctx.gameover && !mulliganPhase}
         inBlockers={inBlockers}
         onConfirmBlocks={() => moves.confirmBlocks()}
+        turnDeadline={G.turnDeadline ?? 0}
+        canForceEnd={!myTurn && !ctx.gameover && ctx.phase === 'play'}
+        onForceEnd={() => moves.forceEndTurn()}
       />
 
       {/* Floating Rules drawer */}
@@ -1932,6 +1935,7 @@ function TurnBanner({
   onEndTurn, canEndTurn,
   attackerCount, onConfirmAttackers, canAttack,
   inBlockers, onConfirmBlocks,
+  turnDeadline, canForceEnd, onForceEnd,
 }: {
   myTurn: boolean; turn: number; phase: string;
   myName: string; oppName: string;
@@ -1944,6 +1948,9 @@ function TurnBanner({
   canAttack: boolean;
   inBlockers: boolean;
   onConfirmBlocks: () => void;
+  turnDeadline: number;
+  canForceEnd: boolean;
+  onForceEnd: () => void;
 }) {
   const dotColor = myTurn ? '#48d97a' : '#e85c5c';
   const headline = myTurn ? 'YOUR TURN' : "OPPONENT'S TURN";
@@ -1972,6 +1979,20 @@ function TurnBanner({
 
   const lowTime = canEndTurn && secondsLeft <= 10;
   const timerColor = lowTime ? '#ff5d73' : '#ffd76a';
+
+  // AFK escape hatch — if it's the opponent's turn and the server deadline has
+  // passed (plus a small grace window), any client may force-end their turn.
+  // This prevents the game from soft-locking when the opponent disconnects.
+  const [nowMs, setNowMs] = useState(Date.now());
+  useEffect(() => {
+    if (!canForceEnd || !turnDeadline) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [canForceEnd, turnDeadline]);
+  const forceGraceMs = 5000;
+  const oppMsLeft = canForceEnd && turnDeadline ? (turnDeadline + forceGraceMs) - nowMs : Infinity;
+  const showForceBtn = canForceEnd && turnDeadline > 0 && oppMsLeft <= 0;
+  const showForceCountdown = canForceEnd && turnDeadline > 0 && oppMsLeft > 0 && oppMsLeft <= 30_000;
 
   return (
     <div style={{
@@ -2008,6 +2029,15 @@ function TurnBanner({
             animation: lowTime ? 'pulse-dot 0.8s ease-in-out infinite' : 'none',
           }} title="Auto-end-turn in">⏱ {secondsLeft}s</span>
         )}
+        {showForceCountdown && (
+          <span style={{
+            fontFamily: 'system-ui', fontWeight: 700, fontSize: 11, letterSpacing: 1,
+            color: '#ffb84a', padding: '2px 8px', borderRadius: 6,
+            background: '#ffb84a22', border: '1px solid #ffb84a55',
+          }} title="Opponent has been thinking a long time — you'll be able to force-end their turn soon.">
+            ⏳ {Math.ceil(oppMsLeft / 1000)}s
+          </span>
+        )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 160, justifyContent: 'flex-end' }}>
         <span style={{ fontSize: 11, color: '#9aa', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -2043,6 +2073,17 @@ function TurnBanner({
               fontWeight: 800, fontSize: 12, letterSpacing: 1,
               boxShadow: '0 0 8px #d9b85f55',
             }}>END TURN</button>
+        )}
+        {showForceBtn && (
+          <button onClick={onForceEnd} title="Opponent appears stuck or disconnected — force-end their turn."
+            style={{
+              background: 'linear-gradient(180deg, #ff5d73, #b1273f)',
+              color: '#fff', border: '1px solid #6e1224',
+              borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
+              fontWeight: 800, fontSize: 12, letterSpacing: 1,
+              boxShadow: '0 0 10px #ff5d7388',
+              animation: 'pulse-dot 1.6s ease-in-out infinite',
+            }}>⚡ FORCE END</button>
         )}
         <button onClick={onOpenRules} title="How to play"
           style={{

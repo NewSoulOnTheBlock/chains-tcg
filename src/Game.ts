@@ -64,6 +64,9 @@ export interface GState {
     /** Unix ms after which either player may force-keep the other. 0 = no deadline yet. */
     deadline: number;
   };
+  /** Per-turn deadline. Once Date.now() >= this, ANY connected player may
+   *  force-end the current player's turn (covers AFK / disconnected opponent). */
+  turnDeadline?: number;
 }
 
 /** Mulligan tuning. First mull is free (redraw to 7); subsequent draw 1 fewer, floor at 4. */
@@ -71,6 +74,9 @@ export const MULLIGAN_INITIAL_HAND = 7;
 export const MULLIGAN_FLOOR = 4;
 /** How long a player has to choose keep/mull before either side may force-end. */
 export const MULLIGAN_TIMEOUT_MS = 60_000;
+/** Hard per-turn deadline after which the OPPONENT may force-end. Wider than the
+ *  client-side 60s auto-pass so an actively thinking player isn't punished. */
+export const TURN_TIMEOUT_MS = 90_000;
 export function mulliganDrawCount(counts: number): number {
   // counts = times the player has mulliganed (including the one they just took)
   // 1st mull → draw 7, 2nd → 6, 3rd → 5, 4th+ → 4
@@ -607,6 +613,24 @@ const passTurn: Move<GState> = ({ G, ctx, playerID, events }) => {
   events!.endTurn();
 };
 
+/**
+ * Escape hatch: if it's the opponent's turn and the deadline has passed (e.g.
+ * they disconnected / AFK'd), any player may force-end their turn so the game
+ * isn't stuck forever. Also force-skips any active blockers stage so a
+ * disconnect during combat doesn't soft-lock either.
+ */
+const forceEndTurn: Move<GState> = ({ G, ctx, events }) => {
+  if (!G.turnDeadline || Date.now() < G.turnDeadline) return INVALID_MOVE;
+  // Clean up combat state and end the current player's turn.
+  const p = G.players[ctx.currentPlayer];
+  while (p.hand.length > 7) p.graveyard.push(p.hand.pop()!);
+  p.gas = emptyGas();
+  G.combat.attackers = [];
+  G.combat.blocks = {};
+  G.log.push(`Turn auto-ended for Player ${ctx.currentPlayer} (AFK / timeout).`);
+  events!.endTurn();
+};
+
 /** Enter combat (defender will set blockers via setActivePlayers). */
 const goToCombat: Move<GState> = ({ G, ctx, playerID, events }) => {
   if (playerID == null || ctx.currentPlayer !== playerID) return INVALID_MOVE;
@@ -704,6 +728,8 @@ export const ChainsTCG: Game<GState> = {
       p.nodesPlayedThisTurn = 0;
       // Draw (skip on the very first turn of the game for the starting player)
       if (ctx.turn !== 1) drawCard(G, ctx.currentPlayer, 1);
+      // Reset the per-turn AFK deadline so an inactive opponent can be force-ended.
+      G.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
       G.log.push(`— Turn ${ctx.turn}: Player ${ctx.currentPlayer} (${p.color}) —`);
     },
     onEnd: ({ G, ctx }) => {
@@ -728,6 +754,7 @@ export const ChainsTCG: Game<GState> = {
     keepHand,
     mulligan,
     forceKeepOpponent,
+    forceEndTurn,
   },
 
   phases: {
@@ -759,7 +786,7 @@ export const ChainsTCG: Game<GState> = {
         playCard, tapNode,
         declareAttacker, confirmAttackers,
         declareBlocker, confirmBlocks,
-        passTurn, goToCombat,
+        passTurn, goToCombat, forceEndTurn,
       },
     },
   },
