@@ -4629,6 +4629,8 @@ function RankedHub({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [deckOk, setDeckOk] = useState(false);
+  const [decks, setDecks] = useState<DeckEntry[]>([]);
+  const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -4646,11 +4648,22 @@ function RankedHub({
   useEffect(() => { refresh(); }, [refresh]);
 
   // Validate deck up front so we don't let a player queue with an invalid one.
+  // Also load the full deck library so the player can pick which deck to queue
+  // with BEFORE entering the queue (rather than always using the active deck).
   useEffect(() => {
     (async () => {
       try {
-        const d = await getDeckApi(myName);
-        setDeckOk(validateDeck(d).ok);
+        const list = await listDecksApi(myName);
+        setDecks(list);
+        const active = list.find(d => d.isActive) ?? list[0];
+        if (active) {
+          setSelectedDeckId(active.id);
+          setDeckOk(validateDeck(active.cards).ok);
+        } else {
+          // Legacy fallback — no library rows yet, ask the old endpoint.
+          const d = await getDeckApi(myName);
+          setDeckOk(validateDeck(d).ok);
+        }
       } catch { setDeckOk(false); }
     })();
   }, [myName]);
@@ -4697,12 +4710,11 @@ function RankedHub({
     if (!deckOk) { setError('Save a valid 60-card deck on your profile before queueing.'); return; }
     setBusy(true); setError('');
     try {
-      // Forward the player's saved deck as the queue payload. Until the Deck
-      // Library lands this is the single stored custom deck. The server
-      // validates again before enqueueing.
+      // Use the user's pre-queue deck selection. Falls back to active/getDeck.
       let deckPayload: string | undefined;
       try {
-        const cards = await getDeckApi(myName);
+        const chosen = decks.find(d => d.id === selectedDeckId);
+        const cards = chosen ? chosen.cards : await getDeckApi(myName);
         if (Array.isArray(cards) && cards.length > 0) {
           deckPayload = JSON.stringify(cards);
         }
@@ -4776,6 +4788,30 @@ function RankedHub({
           <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #2a2240' }}>
             {!queued ? (
               <>
+                {decks.length > 0 && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+                    <label style={{ fontSize: 12, color: '#aaa' }}>Deck:</label>
+                    <select
+                      value={selectedDeckId ?? ''}
+                      onChange={e => {
+                        const id = Number(e.target.value);
+                        setSelectedDeckId(id);
+                        const chosen = decks.find(d => d.id === id);
+                        setDeckOk(chosen ? validateDeck(chosen.cards).ok : false);
+                      }}
+                      style={{ flex: 1, padding: '6px 10px', background: '#1a1a1a', color: '#eee', border: '1px solid #444', borderRadius: 4, fontSize: 13 }}
+                    >
+                      {decks.map(d => {
+                        const valid = validateDeck(d.cards).ok;
+                        return (
+                          <option key={d.id} value={d.id}>
+                            {d.name} ({d.cards.length}) {d.isActive ? '★' : ''} {valid ? '' : '⚠'}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
                   <label style={{ fontSize: 12, color: '#aaa' }}>Region:</label>
                   <select value={region} onChange={e => setRegion(e.target.value)} style={{ padding: '6px 10px', background: '#1a1a1a', color: '#eee', border: '1px solid #444', borderRadius: 4, fontSize: 13 }}>
