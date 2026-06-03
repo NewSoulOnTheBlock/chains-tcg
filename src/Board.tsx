@@ -10,6 +10,7 @@ import type { GState, Instance } from './Game';
 import { mulliganDrawCount, MULLIGAN_FLOOR, MULLIGAN_INITIAL_HAND } from './Game';
 import { recordResultApi, getProfileApi, formatRecord, type Profile } from './profiles';
 import { CardHover } from './CardPreview';
+import { JitsiVoice } from './Jitsi';
 
 type Props = BoardProps<GState>;
 
@@ -821,6 +822,11 @@ export function ChainsBoard(props: Props) {
         messages={chatMessages ?? []}
         sendChatMessage={sendChatMessage}
       />
+
+      {/* Proximity voice with your opponent (WorkAdventure-style Jitsi embed). */}
+      {matchID && (
+        <JitsiVoice matchID={matchID} displayName={myName} />
+      )}
     </div>
   );
 }

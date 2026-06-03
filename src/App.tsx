@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Client } from 'boardgame.io/react';
 import { SocketIO } from 'boardgame.io/multiplayer';
 import { LobbyClient } from 'boardgame.io/client';
+import { Plaza } from './Plaza';
 import { ChainsTCG } from './Game';
 import { ChainsBoard } from './Board';
 import { CARDS, COLOR_META, COLORS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MAX_COPIES_NONBASIC, isBasicNode, type Color } from './cards';
@@ -15,7 +16,7 @@ import {
   createChallengeApi, listIncomingChallengesApi, listOutgoingChallengesApi, respondChallengeApi, type Challenge,
 } from './profiles';
 import { connectEvm, connectSolana, getSolanaWallet, detectSolanaWallets, shortAddr, type ConnectedWallet, type SolanaWalletKind } from './wallet';
-import { CardHover } from './CardPreview';
+import { CardHover, CardPreview } from './CardPreview';
 import { RankedAPI, tierColors, rankLabel, type PublicRankedProfile, type LeaderboardEntry } from './ranked-client';
 import { Connection } from '@solana/web3.js';
 import {
@@ -2841,6 +2842,7 @@ function Lobby({
   const [joinUseCustom, setJoinUseCustom] = useState(false);
   // Join modal state — second player picks their color when accepting.
   const [joinTarget, setJoinTarget] = useState<{ match: any; seat: string } | null>(null);
+  const [plazaOpen, setPlazaOpen] = useState(false);
   const [joinColor, setJoinColor] = useState<Color>('eth');
   // Match stakes — 'free' or a $MASTER token wager. Currently UI-only metadata stored in setupData.
   const [wagerKind, setWagerKind] = useState<'free' | 'master'>('free');
@@ -3214,6 +3216,28 @@ function Lobby({
           level={myLevel} winPct={myWinPct} wins={myProfile?.wins ?? 0} losses={myProfile?.losses ?? 0}
           onBack={onBack}
         />
+
+        {/* Floating button to open the WorkAdventure-style Memetic Plaza overlay. */}
+        <button
+          onClick={() => setPlazaOpen(true)}
+          title="Enter the Memetic Plaza (walk around, meet NPCs, sit at open tables)"
+          style={{
+            position: 'fixed', right: 16, top: 16, zIndex: 50,
+            background: 'linear-gradient(135deg,#3a1f5a,#1b1230)',
+            color: '#fff', border: '1px solid #6c4bd8', borderRadius: 8,
+            padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+            boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
+          }}
+        >🏛️ Enter Plaza</button>
+
+        {plazaOpen && (
+          <Plaza
+            matches={matches}
+            myName={myName}
+            onClose={() => setPlazaOpen(false)}
+            onJoinMatch={(m) => { setPlazaOpen(false); openJoin(m); }}
+          />
+        )}
 
         {error && (
           <div style={{ maxWidth: 1480, margin: '12px auto 0', padding: '0 22px', width: '100%' }}>
@@ -4477,7 +4501,41 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
 // ── Root ────────────────────────────────────────────────────────────────────
 type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile' | 'ranked';
 
+/**
+ * Print-mode renderer used by scripts/render-cards.mjs. Lays out every card in
+ * the catalogue as a 280×400 CardPreview wrapped in a div with
+ * data-card-id="<id>" so a Playwright script can grab each one individually.
+ */
+function PrintAllCards() {
+  const all = Object.values(CARDS);
+  return (
+    <div style={{
+      background: '#fff', padding: 16,
+      display: 'flex', flexWrap: 'wrap', gap: 16,
+      fontFamily: 'system-ui, sans-serif',
+    }}>
+      {all.map(def => (
+        <div
+          key={def.id}
+          data-card-id={def.id}
+          style={{ width: 280, height: 400, position: 'relative' }}
+        >
+          <CardPreview def={def} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
+  // Print mode: render every card as a 280×400 CardPreview in a grid for offline
+  // capture by scripts/render-cards.mjs. Triggered by `#print` or `?print`.
+  const printMode = (typeof window !== 'undefined') && (
+    window.location.hash.includes('print') ||
+    window.location.search.includes('print')
+  );
+  if (printMode) return <PrintAllCards />;
+
   const [name, setName] = useState<string>(() => local.get<string>('myName', ''));
   const [seat, setSeat] = useState<Seat | null>(() => local.get<Seat | null>('seat', null));
   const [view, setView] = useState<View>(() => sess.get<View>('view', 'landing'));
