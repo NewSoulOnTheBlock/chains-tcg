@@ -111,7 +111,7 @@ const IMAGES: Record<string, string> = {
   eth_wojak:    '/cards/wojak.png?v=2',
   eth_turbo:    '/cards/turbo.png?v=1',
   eth_mog:      '/cards/mog.png?v=1',
-  eth_shib:     cmc(5994),
+  eth_shib:     '/cards/shib.png?v=1',
   eth_brett:    '/cards/brett.png?v=1',
   eth_pepe:     cmc(24478),
 
