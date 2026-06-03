@@ -112,7 +112,7 @@ const IMAGES: Record<string, string> = {
   eth_turbo:    '/cards/turbo.png?v=1',
   eth_mog:      '/cards/mog.png?v=1',
   eth_shib:     cmc(5994),
-  eth_brett:    cmc(29743),
+  eth_brett:    '/cards/brett.png?v=1',
   eth_pepe:     cmc(24478),
 
   // XRP memes
