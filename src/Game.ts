@@ -430,9 +430,13 @@ const confirmAttackers: Move<GState> = ({ G, ctx, playerID, events }) => {
     if (m) m.tapped = true;
   }
   G.log.push(`Player ${playerID} attacks with ${G.combat.attackers.length} meme(s).`);
-  // Hand priority to defender for blocks
+  // Hand priority to defender for blocks; park attacker in 'afk' so they can
+  // still force-end the turn if the defender stalls.
   const def = otherPlayer({ currentPlayer: ctx.currentPlayer, playOrder: ctx.playOrder });
-  events!.setActivePlayers({ value: { [def]: 'blockers' }, revert: false });
+  events!.setActivePlayers({
+    value: { [ctx.currentPlayer]: 'afk', [def]: 'blockers' },
+    revert: false,
+  });
 };
 
 /** Defender assigns one of their memes to block a specific attacker (toggles). */
@@ -460,8 +464,12 @@ const confirmBlocks: Move<GState> = ({ G, ctx, playerID, events }) => {
   resolveCombat(G, ctx);
   G.combat.attackers = [];
   G.combat.blocks = {};
-  // Return priority to attacker; they go back to main.
-  events!.setActivePlayers({ currentPlayer: Stage.NULL, revert: false });
+  // Return priority to attacker; they go back to main, defender parks in 'afk'.
+  events!.setActivePlayers({
+    currentPlayer: Stage.NULL,
+    others: 'afk',
+    revert: false,
+  });
 };
 
 function resolveCombat(G: GState, ctx: { currentPlayer: string; playOrder: string[] }) {
@@ -715,6 +723,11 @@ export const ChainsTCG: Game<GState> = {
   },
 
   turn: {
+    stages: {
+      // Non-active player sits here during normal play with one available move:
+      // force-end the active player's turn after their AFK deadline lapses.
+      afk: { moves: { forceEndTurn } },
+    },
     onBegin: ({ G, ctx, events }) => {
       const p = G.players[ctx.currentPlayer];
       // Untap permanents
@@ -730,6 +743,16 @@ export const ChainsTCG: Game<GState> = {
       if (ctx.turn !== 1) drawCard(G, ctx.currentPlayer, 1);
       // Reset the per-turn AFK deadline so an inactive opponent can be force-ended.
       G.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
+      // During the play phase, park the non-active player in the 'afk' stage so
+      // they have permission to call forceEndTurn. Pick/mulligan phases override
+      // active players themselves and shouldn't be touched here.
+      if (ctx.phase === 'play') {
+        events!.setActivePlayers({
+          currentPlayer: Stage.NULL,
+          others: 'afk',
+          revert: false,
+        });
+      }
       G.log.push(`— Turn ${ctx.turn}: Player ${ctx.currentPlayer} (${p.color}) —`);
     },
     onEnd: ({ G, ctx }) => {
