@@ -153,7 +153,7 @@ const IMAGES: Record<string, string> = {
   hl_margin:    emo('1f4de'), // 📞 telephone (Margin Call)
 
   // ── Ethereum machines/moves ──
-  eth_eip1559:  emo('1f4dc'), // 📜 scroll (Smart Contract Suite)
+  eth_eip1559:  '/cards/smart_contract_suite.png?v=1',
   eth_temple:   emo('1f310'), // 🌐 globe with meridians (Dapp Ecosystem)
   eth_l2:       emo('26d3'),  // ⛓ chains (Layer 2 Rollup)
   eth_yield:    emo('1fa99'), // 🪙 coin (Yield Aggregator)
