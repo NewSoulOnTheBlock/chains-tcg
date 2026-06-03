@@ -3219,8 +3219,8 @@ function Lobby({
 
         {/* Floating button to open the WorkAdventure-style Memetic Plaza overlay. */}
         <button
-          onClick={() => setPlazaOpen(true)}
-          title="Enter the Memetic Plaza (walk around, meet NPCs, sit at open tables)"
+          onClick={() => window.open('https://play.workadventu.re/@/bereket-bank-1762291590/world-of-trenchcraft/world-of-trenchcraft', '_blank', 'noopener,noreferrer')}
+          title="Enter the World of Trenchcraft on WorkAdventure"
           style={{
             position: 'fixed', right: 16, top: 16, zIndex: 50,
             background: 'linear-gradient(135deg,#3a1f5a,#1b1230)',
