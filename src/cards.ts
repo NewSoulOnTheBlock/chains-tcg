@@ -76,7 +76,7 @@ const IMAGES: Record<string, string> = {
   node_xrp: '/nodes/xrp.png',
 
   // BnB memes
-  bnb_babydoge: cmc(10407),
+  bnb_babydoge: '/cards/babydoge.png?v=1',
   bnb_broccoli: '/cards/broccoli.png?v=1',
   bnb_tut:      cmc(33687),
   bnb_tst:      '/cards/tst.png?v=1',
