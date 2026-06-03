@@ -860,7 +860,7 @@ function ChatPanel({
         onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 50); }}
         style={{
           position: 'fixed',
-          right: mobile ? 10 : 16,
+          left: mobile ? 10 : 16,
           bottom: mobile ? 84 : 16, // sit above the mobile action bar
           zIndex: 90,
           width: 48, height: 48, borderRadius: 24,
@@ -889,7 +889,7 @@ function ChatPanel({
   return (
     <div style={{
       position: 'fixed',
-      right: mobile ? 8 : 16,
+      left: mobile ? 8 : 16,
       bottom: mobile ? 76 : 16,
       zIndex: 90,
       width: mobile ? 'calc(100vw - 16px)' : 320,
