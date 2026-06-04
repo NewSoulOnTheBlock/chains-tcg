@@ -26,8 +26,9 @@ const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfc
 
 const SERVER_BASE = (import.meta as any).env?.VITE_SERVER_URL || '';
 
-export const CUSTODIAL_WAGER_MODE: 'custodial' | 'anchor' =
-  ((import.meta as any).env?.VITE_WAGER_MODE === 'custodial') ? 'custodial' : 'anchor';
+// Kept for back-compat with any imports; always 'custodial' now that the
+// on-chain (Anchor) wager path has been removed.
+export const CUSTODIAL_WAGER_MODE: 'custodial' = 'custodial';
 
 export type WagerIntent = {
   escrowPubkey: string;

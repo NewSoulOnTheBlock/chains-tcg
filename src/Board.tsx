@@ -619,7 +619,7 @@ export function ChainsBoard(props: Props) {
       ? { wager: {
             onchainId: G.wager.onchainId,
             winnerSeat: winnerId === '0' ? '0' : '1',
-            mode: G.wager.mode ?? 'anchor',
+            mode: 'custodial',
         } }
       : {};
     recordResultApi(matchID, {

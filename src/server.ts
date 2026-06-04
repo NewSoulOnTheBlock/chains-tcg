@@ -354,28 +354,18 @@ app.use(async (ctx, next) => {
       const { matchID, winner, loser, draw } = body ?? {};
       if (!matchID) { ctx.status = 400; ctx.body = { error: 'matchID required' }; return; }
       const status = await recordMatch(String(matchID), winner ?? null, loser ?? null, !!draw);
-      // Wagered-match settle: clients post `wager: { onchainId, winnerSeat, mode? }`.
-      // mode='custodial' routes through the server-held escrow; default 'anchor'
-      // continues to use the on-chain master_wager program.
+      // Wagered-match settle: clients post `wager: { onchainId, winnerSeat }`.
+      // All wagers route through the server-held custodial escrow; the legacy
+      // on-chain (Anchor) program path has been removed.
       if (body?.wager?.onchainId || body?.wager?.mode === 'custodial') {
         try {
-          if (body?.wager?.mode === 'custodial') {
-            const { settleCustodialMatch } = await import('./server-custodial');
-            await settleCustodialMatch({
-              matchID: String(body.wager.onchainId ?? matchID),
-              winnerSeat: body.wager.winnerSeat === '0' || body.wager.winnerSeat === '1'
-                ? body.wager.winnerSeat : undefined,
-              draw: !!draw,
-            });
-          } else {
-            const { settleWagerMatch } = await import('./server-wager');
-            await settleWagerMatch({
-              onchainId: String(body.wager.onchainId),
-              winnerSeat: body.wager.winnerSeat === '0' || body.wager.winnerSeat === '1'
-                ? body.wager.winnerSeat : undefined,
-              draw: !!draw,
-            });
-          }
+          const { settleCustodialMatch } = await import('./server-custodial');
+          await settleCustodialMatch({
+            matchID: String(body.wager.onchainId ?? matchID),
+            winnerSeat: body.wager.winnerSeat === '0' || body.wager.winnerSeat === '1'
+              ? body.wager.winnerSeat : undefined,
+            draw: !!draw,
+          });
         } catch (e) {
           console.warn('[server] wager settle failed', e);
         }
