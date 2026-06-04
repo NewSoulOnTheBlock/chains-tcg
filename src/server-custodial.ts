@@ -26,15 +26,67 @@ import { getPool } from './db';
 const RPC_URL =
   process.env.VITE_SOLANA_RPC ||
   process.env.SOLANA_RPC ||
-  'https://api.mainnet-beta.solana.com';
+  (process.env.HELIUS_API_KEY ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}` : '') ||
+  'https://solana-rpc.publicnode.com';
+
+// Fallback pool — used when the primary RPC starts 401/403/429/5xx-ing.
+// Order: primary, then CORS-free / no-key public RPCs.
+const RPC_POOL: string[] = Array.from(new Set([
+  RPC_URL,
+  'https://solana-rpc.publicnode.com',
+  'https://solana-mainnet.public.blastapi.io',
+  'https://solana.drpc.org',
+  'https://api.mainnet-beta.solana.com',
+].filter(Boolean)));
 
 const BURN_BPS = Number(process.env.CUSTODIAL_BURN_BPS ?? 1000); // 10%
 const MIN_UI = Number(process.env.CUSTODIAL_MIN_WAGER_UI ?? 1);
 const MAX_UI = Number(process.env.CUSTODIAL_MAX_WAGER_UI ?? 1_000_000);
 
+let _connIdx = 0;
 let _conn: Connection | null = null;
+function buildConn(idx: number): Connection {
+  const c = new Connection(RPC_POOL[idx], 'confirmed');
+  // Wrap _rpcRequest so a bad RPC rotates to the next pool entry.
+  const orig = (c as any)._rpcRequest.bind(c);
+  (c as any)._rpcRequest = async (method: string, args: any[]) => {
+    const tryOne = async (i: number): Promise<any> => {
+      const url = RPC_POOL[i];
+      const conn2 = i === idx ? c : new Connection(url, 'confirmed');
+      const fn = i === idx ? orig : (conn2 as any)._rpcRequest.bind(conn2);
+      try {
+        const res = await Promise.race([
+          fn(method, args),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('rpc timeout')), 12000)),
+        ]);
+        // Rotate on JSON-RPC-level errors that indicate auth/rate problems.
+        const errMsg = String((res as any)?.error?.message ?? '');
+        const errCode = Number((res as any)?.error?.code ?? 0);
+        if ((res as any)?.error && /401|403|forbidden|429|rate|invalid api key|unauthor/i.test(errMsg + ' ' + errCode)) {
+          if (i + 1 < RPC_POOL.length) {
+            console.warn('[rpc] rotating from', url, 'err:', errMsg);
+            _connIdx = i + 1; _conn = null;
+            return tryOne(i + 1);
+          }
+        }
+        if (i !== idx) { _connIdx = i; }
+        return res;
+      } catch (e: any) {
+        const msg = String(e?.message ?? e);
+        if (/401|403|forbidden|429|rate|invalid api key|unauthor|fetch|network|timeout|ECONN|ETIMEDOUT|getaddrinfo/i.test(msg) && i + 1 < RPC_POOL.length) {
+          console.warn('[rpc] rotating from', url, 'err:', msg);
+          _connIdx = i + 1; _conn = null;
+          return tryOne(i + 1);
+        }
+        throw e;
+      }
+    };
+    return tryOne(idx);
+  };
+  return c;
+}
 function conn(): Connection {
-  if (!_conn) _conn = new Connection(RPC_URL, 'confirmed');
+  if (!_conn) _conn = buildConn(_connIdx);
   return _conn;
 }
 
@@ -153,8 +205,24 @@ export async function markFunded(args: {
   const already = args.playerID === '0' ? row.p0_sig : row.p1_sig;
   if (already === args.signature) return { ok: true, both: !!(row.p0_sig && row.p1_sig) };
 
-  const tx = await conn().getParsedTransaction(args.signature, { maxSupportedTransactionVersion: 0 });
-  if (!tx) throw new Error('signature not found on-chain (try again in a few seconds)');
+  // Retry getParsedTransaction — a fresh RPC may not yet have the sig in its
+  // history, and the failover wrapper may have rotated mid-call.
+  let tx: Awaited<ReturnType<Connection['getParsedTransaction']>> | null = null;
+  let lastErr: any = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      tx = await conn().getParsedTransaction(args.signature, {
+        maxSupportedTransactionVersion: 0,
+        commitment: 'confirmed',
+      });
+      if (tx) break;
+    } catch (e) {
+      lastErr = e;
+      console.warn('[custodial] getParsedTransaction attempt', attempt, 'failed:', String((e as any)?.message ?? e));
+    }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  if (!tx) throw new Error('signature not found on-chain (try again in a few seconds)' + (lastErr ? ` [${String((lastErr as any)?.message ?? lastErr).slice(0, 80)}]` : ''));
   if (tx.meta?.err) throw new Error('deposit tx failed on-chain');
 
   const player = new PublicKey(args.pubkey);
