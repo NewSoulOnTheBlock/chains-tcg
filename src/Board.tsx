@@ -976,6 +976,11 @@ export function ChainsBoard(props: Props) {
         </pre>
       </details>
 
+      {/* Desktop-only floating action log on the right rail. Mirrors G.log
+          but always visible and auto-scrolls so the player can follow what
+          the bot/opponent just did. */}
+      {!mobile && <ActionLogRail entries={G.log} />}
+
       {/* Chat */}
       <ChatPanel
         myId={myId}
@@ -987,6 +992,61 @@ export function ChainsBoard(props: Props) {
       {matchID && playerID && !isSolo && (
         <VoiceChat matchID={matchID} playerID={playerID} displayName={myName} />
       )}
+    </div>
+  );
+}
+
+function ActionLogRail({ entries }: { entries: string[] }) {
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  // Auto-scroll to bottom whenever new entries arrive.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [entries.length]);
+
+  // Tint key events so the user can scan turn boundaries / combat / damage.
+  function colorFor(line: string): string {
+    if (line.startsWith('— Turn')) return '#a78bfa';
+    if (/attack|damage|destroyed|kills/i.test(line)) return '#fb7185';
+    if (/draws|gains|heals/i.test(line)) return '#6ee7b7';
+    if (/mulligan|keeps/i.test(line)) return '#fcd34d';
+    return '#cbd5e1';
+  }
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 80, right: 16, bottom: 100,
+      width: 280, zIndex: 60,
+      background: 'rgba(10, 10, 30, 0.78)',
+      border: '1px solid #4c1d95',
+      borderRadius: 8,
+      boxShadow: '0 0 14px rgba(76, 29, 149, 0.4)',
+      backdropFilter: 'blur(4px)',
+      display: 'flex', flexDirection: 'column',
+      fontFamily: '"EB Garamond", Garamond, serif',
+    }}>
+      <div style={{
+        padding: '8px 12px',
+        borderBottom: '1px solid #4c1d95',
+        fontFamily: '"Cinzel", "Times New Roman", serif',
+        fontSize: 12, letterSpacing: 2, textTransform: 'uppercase',
+        color: '#c4b5fd', fontWeight: 700,
+      }}>
+        Action Log
+      </div>
+      <div ref={scrollRef} style={{
+        flex: 1, overflow: 'auto', padding: '8px 12px',
+        fontSize: 12, lineHeight: 1.45,
+      }}>
+        {entries.length === 0 ? (
+          <div style={{ opacity: 0.4 }}>(No actions yet)</div>
+        ) : entries.slice(-200).map((line, i) => (
+          <div key={i} style={{ color: colorFor(line), marginBottom: 2, wordBreak: 'break-word' }}>
+            {line}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

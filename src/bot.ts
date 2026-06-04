@@ -211,6 +211,24 @@ export class MMTCGBot extends Bot {
   async play(state: AnyState, playerID: string): Promise<{ action: BotAction }> {
     const { G, ctx } = state;
 
+    // Compute the action first, then add a small delay so the human can see
+    // what's happening in the action log + battlefield. Total wall-clock per
+    // bot action = ~700-1100ms (boardgame.io's LocalMaster already adds 100ms
+    // before calling us). Skip the delay during pick/mulligan so the game
+    // doesn't feel sluggish before it even starts.
+    const compute = (): { action: BotAction } | null => this._compute(state, playerID);
+    const result = compute();
+    if (!result) return { action: noop(playerID) };
+    if (ctx.phase === 'play') {
+      const jitter = 600 + Math.floor(Math.random() * 400);
+      await new Promise(r => setTimeout(r, jitter));
+    }
+    return result;
+  }
+
+  private _compute(state: AnyState, playerID: string): { action: BotAction } | null {
+    const { G, ctx } = state;
+
     // ── Pick phase: random color (matches user request: "random choice from 5 starters")
     if (ctx.phase === 'pick' && G.players?.[playerID]?.needsColorPick) {
       const colors: Color[] = ['bnb', 'sol', 'hl', 'eth', 'xrp'];
