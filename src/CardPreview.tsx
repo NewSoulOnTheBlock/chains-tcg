@@ -128,9 +128,10 @@ export function TemplatedPreview({ def, tpl }: { def: CardDef; tpl: { url: strin
         overflow: 'hidden',
       }}>
         {def.image ? (
-          <img src={def.image} alt={def.name} loading="lazy"
+          <img src={def.image} alt={def.name} loading="lazy" draggable={false}
+            onDragStart={e => e.preventDefault()}
             onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            style={{ width: '100%', height: '100%', objectFit: 'cover', WebkitUserDrag: 'none', userSelect: 'none', pointerEvents: 'none' } as React.CSSProperties} />
         ) : (
           <div style={{
             fontWeight: 900, color: meta.ink,

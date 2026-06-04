@@ -205,11 +205,16 @@ function DraggableCard({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
+      onDragStart={(e) => e.preventDefault()}
+      draggable={false}
       style={{
         touchAction: 'none',
         display: 'inline-block',
         opacity: drag ? 0.35 : 1,
         transition: drag ? 'none' : 'opacity 0.12s',
+        WebkitTouchCallout: 'none',
+        userSelect: 'none',
+        ...({ WebkitUserDrag: 'none' } as React.CSSProperties),
       }}
     >
       {children}

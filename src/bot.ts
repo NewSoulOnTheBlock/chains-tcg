@@ -30,6 +30,20 @@ function makeMove(type: string, args: any[], playerID: string): BotAction {
   return { type: 'MAKE_MOVE', payload: { type, args, playerID } } as any;
 }
 
+// "Skip" action: the bot is called by boardgame.io on every state change, but
+// our game pins BOTH players into stages every turn (currentPlayer: NULL,
+// others: 'afk'), so GetBotPlayer always returns the bot's playerID — even on
+// the human's turn. Returning a real move like `passTurn` here would return
+// INVALID_MOVE (state unchanged) and the reducer would still dispatch + notify,
+// re-triggering the bot on the same state → infinite 100ms retry loop that
+// blocks the human's input from being applied. By returning a move name that
+// is NOT registered in any phase, the master short-circuits at the
+// `canPlayerMakeMove=false` check WITHOUT dispatching, so subscribeCallback is
+// not re-fired and the loop ends.
+function noop(playerID: string): BotAction {
+  return { type: 'MAKE_MOVE', payload: { type: '__bot_skip__', args: [], playerID } } as any;
+}
+
 // ── Enumerator: every legal move for `playerID` in the current state ───────
 // Exposed both as the bot's internal helper and (later) for plugging into
 // boardgame.io's MCTSBot via Game.ai.enumerate.
@@ -269,8 +283,9 @@ export class MMTCGBot extends Bot {
     }
 
     if (ctx.currentPlayer !== playerID) {
-      // Other player's turn, not in a stage that needs us — should not happen.
-      return { action: makeMove('passTurn', [], playerID) };
+      // It's the human's turn — return a no-op that the master will reject
+      // without dispatching, so we don't loop on every state change.
+      return { action: noop(playerID) };
     }
 
     // ── Easy bot: random legal move.
