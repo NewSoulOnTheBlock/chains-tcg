@@ -33,3 +33,14 @@ services:
         sync: false           # optional: Metaplex collection mint to filter on (recommended); leave unset to filter by name
       - key: MEMETIC_MASTERS_NAME_MATCH
         value: memetic master # fallback substring match when no collection mint is set
+      # ---- Custodial $MASTER wager escrow (REQUIRED for wager matches) ----
+      - key: CUSTODIAL_ESCROW_KEYPAIR
+        sync: false           # JSON byte array of a Solana Keypair secret key, e.g. "[12,34,...]" (64 numbers). Generate with `solana-keygen new -o escrow.json --no-bip39-passphrase` then paste contents of escrow.json. Fund the resulting pubkey with SOL (fees) + a $MASTER ATA.
+      - key: SOLANA_RPC
+        sync: false           # mainnet RPC URL, e.g. https://api.mainnet-beta.solana.com or a Helius/Quicknode endpoint
+      - key: CUSTODIAL_BURN_BPS
+        value: "1000"         # 10% rake (burn). Adjust if desired.
+      - key: CUSTODIAL_MIN_WAGER_UI
+        value: "1"
+      - key: CUSTODIAL_MAX_WAGER_UI
+        value: "1000000"
