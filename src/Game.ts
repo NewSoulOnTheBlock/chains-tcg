@@ -73,7 +73,7 @@ export interface GState {
 export const MULLIGAN_INITIAL_HAND = 7;
 export const MULLIGAN_FLOOR = 4;
 /** How long a player has to choose keep/mull before either side may force-end. */
-export const MULLIGAN_TIMEOUT_MS = 60_000;
+export const MULLIGAN_TIMEOUT_MS = 10_000;
 /** Hard per-turn deadline after which the OPPONENT may force-end. Wider than the
  *  client-side 60s auto-pass so an actively thinking player isn't punished. */
 export const TURN_TIMEOUT_MS = 90_000;
