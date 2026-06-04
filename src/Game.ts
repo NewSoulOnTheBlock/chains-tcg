@@ -54,7 +54,7 @@ export interface GState {
   combat: Combat;
   log: string[];
   /** Optional match stakes carried over from setupData so the Board can render a payout prompt. */
-  wager?: { kind: 'free' | 'master'; amount?: number; onchainId?: string };
+  wager?: { kind: 'free' | 'master'; amount?: number; onchainId?: string; mode?: 'anchor' | 'custodial' };
   /** Ranked-mode metadata. When present, the board should report results to /api/ranked. */
   ranked?: { seasonId: string; startedAt: number };
   /** Pre-game mulligan state. London mulligan, simplified: first mull free, then -1 each, floor 4. */
@@ -706,7 +706,7 @@ export const ChainsTCG: Game<GState> = {
       log: ['Game start.'],
       wager: setupData?.wager
         ? (setupData.wager.kind === 'master' || setupData.wager.kind === 'sol')
-          ? { kind: 'master', amount: setupData.wager.amount, onchainId: setupData.wager.onchainId }
+          ? { kind: 'master', amount: setupData.wager.amount, onchainId: setupData.wager.onchainId, mode: (setupData.wager as any).mode === 'custodial' ? 'custodial' : 'anchor' }
           : setupData.wager.kind === 'free'
             ? { kind: 'free' }
             : undefined

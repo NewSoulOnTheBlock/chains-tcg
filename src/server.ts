@@ -292,21 +292,62 @@ app.use(async (ctx, next) => {
       ctx.body = { challenge: updated };
       return;
     }
+    if (method === 'POST' && url === '/api/wager/intent') {
+      const body = await readJson(ctx);
+      try {
+        const { createIntent, isCustodialEnabled } = await import('./server-custodial');
+        if (!isCustodialEnabled()) { ctx.status = 503; ctx.body = { error: 'custodial wagers not enabled' }; return; }
+        const intent = await createIntent({
+          matchID: String(body?.matchID ?? '').trim(),
+          playerID: body?.playerID === '0' || body?.playerID === '1' ? body.playerID : '0',
+          amount: Number(body?.amount),
+        });
+        ctx.body = { intent };
+      } catch (e: any) { ctx.status = 400; ctx.body = { error: String(e?.message ?? e) }; }
+      return;
+    }
+    if (method === 'POST' && url === '/api/wager/funded') {
+      const body = await readJson(ctx);
+      try {
+        const { markFunded, isCustodialEnabled } = await import('./server-custodial');
+        if (!isCustodialEnabled()) { ctx.status = 503; ctx.body = { error: 'custodial wagers not enabled' }; return; }
+        const res = await markFunded({
+          matchID: String(body?.matchID ?? '').trim(),
+          playerID: body?.playerID === '0' || body?.playerID === '1' ? body.playerID : '0',
+          pubkey: String(body?.pubkey ?? '').trim(),
+          signature: String(body?.signature ?? '').trim(),
+        });
+        ctx.body = res;
+      } catch (e: any) { ctx.status = 400; ctx.body = { error: String(e?.message ?? e) }; }
+      return;
+    }
     if (method === 'POST' && url === '/api/result') {
       const body = await readJson(ctx);
       const { matchID, winner, loser, draw } = body ?? {};
       if (!matchID) { ctx.status = 400; ctx.body = { error: 'matchID required' }; return; }
       const status = await recordMatch(String(matchID), winner ?? null, loser ?? null, !!draw);
-      // Wagered-match settle: clients post `wager: { onchainId, winnerSeat }`.
-      if (body?.wager?.onchainId) {
+      // Wagered-match settle: clients post `wager: { onchainId, winnerSeat, mode? }`.
+      // mode='custodial' routes through the server-held escrow; default 'anchor'
+      // continues to use the on-chain master_wager program.
+      if (body?.wager?.onchainId || body?.wager?.mode === 'custodial') {
         try {
-          const { settleWagerMatch } = await import('./server-wager');
-          await settleWagerMatch({
-            onchainId: String(body.wager.onchainId),
-            winnerSeat: body.wager.winnerSeat === '0' || body.wager.winnerSeat === '1'
-              ? body.wager.winnerSeat : undefined,
-            draw: !!draw,
-          });
+          if (body?.wager?.mode === 'custodial') {
+            const { settleCustodialMatch } = await import('./server-custodial');
+            await settleCustodialMatch({
+              matchID: String(body.wager.onchainId ?? matchID),
+              winnerSeat: body.wager.winnerSeat === '0' || body.wager.winnerSeat === '1'
+                ? body.wager.winnerSeat : undefined,
+              draw: !!draw,
+            });
+          } else {
+            const { settleWagerMatch } = await import('./server-wager');
+            await settleWagerMatch({
+              onchainId: String(body.wager.onchainId),
+              winnerSeat: body.wager.winnerSeat === '0' || body.wager.winnerSeat === '1'
+                ? body.wager.winnerSeat : undefined,
+              draw: !!draw,
+            });
+          }
         } catch (e) {
           console.warn('[server] wager settle failed', e);
         }

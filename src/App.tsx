@@ -23,6 +23,9 @@ import {
   ixCreateMatch, ixJoinMatch, newMatchId, matchIdToHex, matchIdFromHex,
   masterUi, sendIxs, fetchMatch,
 } from './wager-program';
+import {
+  CUSTODIAL_WAGER_MODE, requestWagerIntent, depositCustodialWager,
+} from './wager-custodial';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 // Server base: in dev Vite proxies /games (lobby) and /socket.io to :8000.
@@ -2944,16 +2947,26 @@ function Lobby({
       if (wager && wager.kind === 'master') {
         const kind = await pickSolanaWallet();
         const phantom = await getSolanaWallet(kind);
-        const matchIdBuf = newMatchId();
         const conn = solConn();
-        const ixs = await ixCreateMatch({
-          connection: conn,
-          creator:    phantom.publicKey,
-          matchId:    matchIdBuf,
-          wagerAmount: masterUi(wager.amount),
-        });
-        await sendIxs(conn, phantom, ixs);
-        wager = { kind: 'master', amount: wager.amount, onchainId: matchIdToHex(matchIdBuf) };
+        if (CUSTODIAL_WAGER_MODE === 'custodial') {
+          // Custodial: pre-register with the server using a fresh id, then
+          // deposit into the server-held escrow with a memo. No on-chain
+          // program needed; settle happens server-side on game end.
+          const custId = matchIdToHex(newMatchId());
+          const intent = await requestWagerIntent({ matchID: custId, playerID: '0', amount: wager.amount });
+          await depositCustodialWager({ connection: conn, wallet: phantom, intent });
+          wager = { kind: 'master', amount: wager.amount, onchainId: custId, mode: 'custodial' };
+        } else {
+          const matchIdBuf = newMatchId();
+          const ixs = await ixCreateMatch({
+            connection: conn,
+            creator:    phantom.publicKey,
+            matchId:    matchIdBuf,
+            wagerAmount: masterUi(wager.amount),
+          });
+          await sendIxs(conn, phantom, ixs);
+          wager = { kind: 'master', amount: wager.amount, onchainId: matchIdToHex(matchIdBuf), mode: 'anchor' };
+        }
       }
       await upsertProfileApi(myName);
       // When using a custom deck, the color slot is null and the deck is passed
@@ -3009,14 +3022,21 @@ function Lobby({
       if (wager && wager.kind === 'master') {
         const kind = await pickSolanaWallet();
         const phantom = await getSolanaWallet(kind);
-        const matchIdBuf = newMatchId();
         const conn = solConn();
-        const ixs = await ixCreateMatch({
-          connection: conn, creator: phantom.publicKey,
-          matchId: matchIdBuf, wagerAmount: masterUi(wager.amount),
-        });
-        await sendIxs(conn, phantom, ixs);
-        wager = { kind: 'master', amount: wager.amount, onchainId: matchIdToHex(matchIdBuf) };
+        if (CUSTODIAL_WAGER_MODE === 'custodial') {
+          const custId = matchIdToHex(newMatchId());
+          const intent = await requestWagerIntent({ matchID: custId, playerID: '0', amount: wager.amount });
+          await depositCustodialWager({ connection: conn, wallet: phantom, intent });
+          wager = { kind: 'master', amount: wager.amount, onchainId: custId, mode: 'custodial' };
+        } else {
+          const matchIdBuf = newMatchId();
+          const ixs = await ixCreateMatch({
+            connection: conn, creator: phantom.publicKey,
+            matchId: matchIdBuf, wagerAmount: masterUi(wager.amount),
+          });
+          await sendIxs(conn, phantom, ixs);
+          wager = { kind: 'master', amount: wager.amount, onchainId: matchIdToHex(matchIdBuf), mode: 'anchor' };
+        }
       }
       await upsertProfileApi(myName);
       const colors: Array<Color | null> = ['0', '1'].map(s =>
@@ -3138,24 +3158,30 @@ function Lobby({
         return;
       }
       await upsertProfileApi(myName);
-      // For $MASTER wagers, deposit on-chain BEFORE joining the BG.io match so
-      // that we never "join" a match we haven't actually backed.
+      // For $MASTER wagers, deposit BEFORE joining the BG.io match so we
+      // never "join" a match we haven't actually backed.
       const w = readWager(m.setupData);
       if (w.kind === 'master') {
         if (!w.onchainId) {
-          setError('This wagered match was created without on-chain escrow; cannot join.');
+          setError('This wagered match was created without an escrow id; cannot join.');
           return;
         }
         const kind = await pickSolanaWallet();
         const phantom = await getSolanaWallet(kind);
-        const matchIdBuf = matchIdFromHex(w.onchainId);
         const conn = solConn();
-        const ixs = await ixJoinMatch({
-          connection: conn,
-          opponent:   phantom.publicKey,
-          matchId:    matchIdBuf,
-        });
-        await sendIxs(conn, phantom, ixs);
+        const isCustodial = (w as any).mode === 'custodial';
+        if (isCustodial) {
+          const intent = await requestWagerIntent({ matchID: w.onchainId, playerID: '1', amount: w.amount ?? 0 });
+          await depositCustodialWager({ connection: conn, wallet: phantom, intent });
+        } else {
+          const matchIdBuf = matchIdFromHex(w.onchainId);
+          const ixs = await ixJoinMatch({
+            connection: conn,
+            opponent:   phantom.publicKey,
+            matchId:    matchIdBuf,
+          });
+          await sendIxs(conn, phantom, ixs);
+        }
       }
       // Stash the joiner's choice; Board.tsx will auto-call chooseColor on mount.
       try {
@@ -5070,7 +5096,7 @@ export const SOLANA_RPC_URL =
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SOLANA_RPC) ||
   'https://api.mainnet-beta.solana.com';
 
-type Wager = { kind: 'free' } | { kind: 'master'; amount: number; onchainId?: string };
+type Wager = { kind: 'free' } | { kind: 'master'; amount: number; onchainId?: string; mode?: 'anchor' | 'custodial' };
 
 function parseWager(kind: 'free' | 'master', raw: string): Wager | null {
   if (kind === 'free') return { kind: 'free' };
@@ -5084,7 +5110,7 @@ function readWager(setupData: any): Wager {
   const w = setupData?.wager;
   if (w && w.kind === 'free') return { kind: 'free' };
   if (w && w.kind === 'master' && typeof w.amount === 'number') {
-    return { kind: 'master', amount: w.amount, onchainId: w.onchainId };
+    return { kind: 'master', amount: w.amount, onchainId: w.onchainId, mode: w.mode === 'custodial' ? 'custodial' : (w.onchainId ? 'anchor' : undefined) };
   }
   // Back-compat: legacy 'sol' wagers map to the new 'master' kind so that
   // matches created before the rebrand still display correctly.

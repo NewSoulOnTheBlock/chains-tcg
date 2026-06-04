@@ -484,8 +484,12 @@ export function ChainsBoard(props: Props) {
           replaySeed: matchID,
         }
       : {};
-    const wagerMeta = G.wager?.kind === 'master' && G.wager.onchainId && !draw
-      ? { wager: { onchainId: G.wager.onchainId, winnerSeat: winnerId === '0' ? '0' : '1' } }
+    const wagerMeta = G.wager?.kind === 'master' && !draw
+      ? { wager: {
+            onchainId: G.wager.onchainId,
+            winnerSeat: winnerId === '0' ? '0' : '1',
+            mode: G.wager.mode ?? 'anchor',
+        } }
       : {};
     recordResultApi(matchID, {
       winner: draw ? null : winnerName,
