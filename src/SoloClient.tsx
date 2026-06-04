@@ -16,7 +16,7 @@ import { Client } from 'boardgame.io/react';
 import { Local } from 'boardgame.io/multiplayer';
 import { ChainsTCG } from './Game';
 import { ChainsBoard } from './Board';
-import { MMTCGBot, type Difficulty } from './bot';
+import { MMTCGBot, enumerateMoves, type Difficulty } from './bot';
 import { dailySeed, dailyBotColor, todayKey, saveDailyResult } from './dailyChallenge';
 import { STARTER_DECKS, type Color } from './cards';
 
@@ -60,6 +60,11 @@ export function SoloClient({
       ...ChainsTCG,
       setup: (ctxLike: any /*, _ignored */) =>
         originalSetup(ctxLike, bakedSetupData),
+      // boardgame.io's LocalMaster only spins up bots when game.ai is defined,
+      // so even though our heuristic bot doesn't call enumerate(), the field
+      // must exist for `bots` to be initialized at all. See
+      // node_modules/boardgame.io/dist/esm/socketio-…js line 188.
+      ai: { enumerate: enumerateMoves },
       ...(seed ? { seed } : {}),
     };
 
