@@ -161,6 +161,50 @@ function Login({ onLogin, onFirstTime }: {
     setName(`${pick}${suffix}`);
   }
 
+  // ── Login-screen theme music ─────────────────────────────────────────────
+  // Browsers block autoplay-with-sound until the user interacts. Strategy:
+  //   1. Mount the <audio>, attempt to play() immediately.
+  //   2. If the promise rejects (autoplay policy), wait for the first
+  //      pointerdown anywhere on the screen and retry.
+  //   3. Always render a 🔊 / 🔇 toggle in the corner so the user can mute.
+  // Mute preference persists across sessions via localStorage.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [muted, setMuted] = useState<boolean>(() => local.get<boolean>('loginMuted', false));
+  const [playing, setPlaying] = useState(false);
+
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.volume = 0.35;
+    a.muted = muted;
+    const tryPlay = () => {
+      const p = a.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => setPlaying(true)).catch(() => {
+          // autoplay blocked — arm a one-shot listener for the first
+          // user interaction anywhere on the document.
+          const unlock = () => {
+            a.play().then(() => setPlaying(true)).catch(() => {});
+            window.removeEventListener('pointerdown', unlock);
+            window.removeEventListener('keydown', unlock);
+          };
+          window.addEventListener('pointerdown', unlock, { once: true });
+          window.addEventListener('keydown', unlock, { once: true });
+        });
+      }
+    };
+    tryPlay();
+    return () => {
+      a.pause();
+      setPlaying(false);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.muted = muted;
+    local.set('loginMuted', muted);
+  }, [muted]);
+
   const GOLD = '#D4AF37';
   const PURPLE = '#8A2BE2';
   const CYAN = '#4FD1C5';
@@ -172,6 +216,16 @@ function Login({ onLogin, onFirstTime }: {
       color: '#F8F8F8',
       background: 'linear-gradient(180deg, #050514 0%, #0A0A22 35%, #120A35 70%, #1A103D 100%)',
     }}>
+      {/* Hidden audio element — looping login theme. See the effect above
+          for autoplay-policy handling and the corner toggle below for mute. */}
+      <audio
+        ref={audioRef}
+        src="/login-theme.mp3"
+        loop
+        preload="auto"
+        style={{ display: 'none' }}
+      />
+
       {/* SideRays god-ray background — top-right origin, brand gold + soft
           purple. position:fixed full-bleed behind the rest of the login UI
           (which sits in normal flow above; new stacking context via the
@@ -192,6 +246,30 @@ function Login({ onLogin, onFirstTime }: {
           opacity={0.85}
         />
       </div>
+
+      {/* Music mute / unmute toggle — top-right corner, above everything. */}
+      <button
+        onClick={() => setMuted(m => !m)}
+        title={muted ? 'Unmute music' : 'Mute music'}
+        aria-label={muted ? 'Unmute music' : 'Mute music'}
+        style={{
+          position: 'fixed', top: 14, right: 14, zIndex: 50,
+          width: 38, height: 38, borderRadius: 19,
+          background: 'rgba(10,5,30,0.55)',
+          border: '1px solid rgba(212,175,55,0.45)',
+          color: '#D4AF37', fontSize: 16,
+          cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
+          transition: 'transform 0.12s ease, background 0.15s ease',
+        }}
+        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(40,20,80,0.7)')}
+        onMouseLeave={e => (e.currentTarget.style.background = 'rgba(10,5,30,0.55)')}
+      >
+        {muted ? '🔇' : (playing ? '🔊' : '🎵')}
+      </button>
       <style>{`
         @keyframes loginGlow {
           0%, 100% { text-shadow: 0 0 22px rgba(212,175,55,0.50), 0 0 6px rgba(212,175,55,0.7); }
