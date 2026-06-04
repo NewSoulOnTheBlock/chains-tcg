@@ -574,6 +574,9 @@ export function ChainsBoard(props: Props) {
   useEffect(() => { refreshProfiles(); }, [refreshProfiles]);
 
   // On gameover, post result to API. Server dedupes by matchID so it's safe for both clients to post.
+  // Solo (vs-bot) matches use a `solo-…` matchID and skip the server hop —
+  // their results are tracked locally via SoloClient → dailyChallenge.ts.
+  const isSolo = !!matchID && matchID.startsWith('solo-');
   const recordedRef = useRef(false);
   useEffect(() => {
     if (!ctx.gameover || recordedRef.current || !matchID) return;
@@ -586,6 +589,16 @@ export function ChainsBoard(props: Props) {
     if (draw) Haptics.turn();
     else if (winnerId === myId) Haptics.win();
     else Haptics.loss();
+    if (isSolo) {
+      // SoloClient handles solo result recording; broadcast a window event so
+      // it can save the daily-best without us importing it (decouples Board).
+      try {
+        window.dispatchEvent(new CustomEvent('mmtcg:solo-end', {
+          detail: { matchID, draw, winnerSeat: winnerId, turns: ctx.turn },
+        }));
+      } catch { /* swallow */ }
+      return;
+    }
     const rankedMeta = G.ranked
       ? {
           ranked: true,
@@ -948,8 +961,8 @@ export function ChainsBoard(props: Props) {
         sendChatMessage={sendChatMessage}
       />
 
-      {/* Proximity voice with your opponent (PeerJS WebRTC). */}
-      {matchID && playerID && (
+      {/* Proximity voice with your opponent (PeerJS WebRTC). Skipped in solo. */}
+      {matchID && playerID && !isSolo && (
         <VoiceChat matchID={matchID} playerID={playerID} displayName={myName} />
       )}
     </div>

@@ -26,6 +26,10 @@ import {
 import {
   CUSTODIAL_WAGER_MODE, requestWagerIntent, depositCustodialWager,
 } from './wager-custodial';
+import { SoloClient } from './SoloClient';
+import type { Difficulty } from './bot';
+import type { SoloMode } from './SoloClient';
+import { saveDailyResult, todayKey, todayBest } from './dailyChallenge';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 // Server base: in dev Vite proxies /games (lobby) and /socket.io to :8000.
@@ -1344,8 +1348,8 @@ function ExampleTurn({ hl }: { hl: (s: string) => React.ReactNode }) {
 
 // ── Landing screen (post-login hub) ─────────────────────────────────────────
 function Landing({
-  myName, onPlay, onRanked, onProfile, onRules, onLogout,
-}: { myName: string; onPlay: () => void; onRanked: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
+  myName, onPlay, onRanked, onSolo, onProfile, onRules, onLogout,
+}: { myName: string; onPlay: () => void; onRanked: () => void; onSolo: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
   const mobile = useIsMobile();
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#000', color: '#fff', fontFamily: 'system-ui' }}>
@@ -1385,6 +1389,7 @@ function Landing({
       }}>
         <MenuBtn primary onClick={onPlay}>▶  PLAY</MenuBtn>
         <MenuBtn ranked onClick={onRanked}>🏆  RANKED</MenuBtn>
+        <MenuBtn onClick={onSolo}>🤖  VS BOT</MenuBtn>
         <MenuBtn onClick={onProfile}>👤  PROFILE</MenuBtn>
         <MenuBtn onClick={onRules}>📖  RULES</MenuBtn>
         <MenuBtn onClick={() => window.open('https://x.com/MemeticMasters', '_blank', 'noopener')}>📰  NEWS</MenuBtn>
@@ -4596,7 +4601,7 @@ function WagerStatusBadge({ matchID, compact }: { matchID: string; compact?: boo
 }
 
 // ── Root ────────────────────────────────────────────────────────────────────
-type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile' | 'ranked';
+type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile' | 'ranked' | 'solo';
 
 /**
  * Print-mode renderer used by scripts/render-cards.mjs. Lays out every card in
@@ -4624,7 +4629,133 @@ function PrintAllCards() {
   );
 }
 
-// One-time "Add to Home Screen" banner. Listens for Chrome/Android's
+// Solo (vs-bot) setup modal: pick difficulty + mode + deck color, then launch
+// the in-browser SoloClient. No server hops, no wager, no voice — see
+// src/SoloClient.tsx + src/bot.ts.
+function SoloSetupModal({
+  myName, onLaunch, onClose,
+}: {
+  myName: string;
+  onLaunch: (cfg: { difficulty: Difficulty; mode: SoloMode; color: Color }) => void;
+  onClose: () => void;
+}) {
+  const [difficulty, setDifficulty] = useState<Difficulty>('normal');
+  const [mode, setMode] = useState<SoloMode>('casual');
+  const [color, setColor] = useState<Color>('sol');
+  const dateKey = todayKey();
+  const best = todayBest(difficulty);
+  void myName;
+
+  const btn = (active: boolean, accent: string): React.CSSProperties => ({
+    background: active ? accent : '#1a1730',
+    color: active ? '#fff' : '#ccc',
+    border: `2px solid ${active ? accent : '#3a3050'}`,
+    borderRadius: 8,
+    padding: '10px 14px',
+    fontWeight: 700,
+    cursor: 'pointer',
+    fontSize: 13,
+    minWidth: 80,
+  });
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(2,2,8,0.78)', backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: 'linear-gradient(160deg, #150f2a, #0a0716)',
+        border: '1px solid #6c4bd8',
+        borderRadius: 14,
+        padding: 22, maxWidth: 480, width: '100%',
+        color: '#fff', fontFamily: 'Inter, sans-serif',
+        boxShadow: '0 18px 50px rgba(0,0,0,0.6)',
+        display: 'flex', flexDirection: 'column', gap: 16,
+      }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: 1 }}>🤖 Play vs Bot</div>
+          <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>Single-player, runs entirely in your browser.</div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, letterSpacing: 1 }}>DIFFICULTY</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['easy', 'normal', 'hard'] as Difficulty[]).map(d => (
+              <button key={d} onClick={() => setDifficulty(d)}
+                style={btn(difficulty === d,
+                  d === 'easy' ? '#3aa66a' : d === 'normal' ? '#6c4bd8' : '#c8455d')}>
+                {d.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, letterSpacing: 1 }}>MODE</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setMode('casual')} style={btn(mode === 'casual', '#6c4bd8')}>
+              CASUAL
+            </button>
+            <button onClick={() => setMode('daily')} style={btn(mode === 'daily', '#ffaf3a')}>
+              ⭐ DAILY ({dateKey})
+            </button>
+          </div>
+          <div style={{ fontSize: 11, opacity: 0.65, marginTop: 6 }}>
+            {mode === 'daily'
+              ? 'Same shuffle + bot deck for every player today. Race for the fastest win.'
+              : 'Random shuffle and random bot deck every match.'}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, letterSpacing: 1 }}>YOUR DECK</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {(['bnb', 'sol', 'hl', 'eth', 'xrp'] as Color[]).map(c => {
+              const meta = COLOR_META[c];
+              const active = color === c;
+              return (
+                <button key={c} onClick={() => setColor(c)} style={{
+                  background: active ? meta.hex : '#1a1730',
+                  color: active ? meta.ink : '#ccc',
+                  border: `2px solid ${active ? meta.hex : '#3a3050'}`,
+                  borderRadius: 8, padding: '10px 12px',
+                  fontWeight: 700, cursor: 'pointer', fontSize: 12,
+                  textTransform: 'uppercase',
+                }}>{c}</button>
+              );
+            })}
+          </div>
+        </div>
+
+        {best && (
+          <div style={{
+            fontSize: 11, opacity: 0.8, padding: '8px 10px',
+            background: 'rgba(255,175,58,0.08)', borderRadius: 6,
+            border: '1px solid rgba(255,175,58,0.3)',
+          }}>
+            Today's best ({difficulty}): {best.win ? `✅ won in ${Math.round(best.ms / 1000)}s · ${best.turns} turns` : `❌ lost in ${best.turns} turns`}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <button onClick={() => onLaunch({ difficulty, mode, color })} style={{
+            flex: 1, background: '#6c4bd8', color: '#fff',
+            border: 'none', borderRadius: 8, padding: '12px 16px',
+            fontWeight: 800, cursor: 'pointer', fontSize: 14, letterSpacing: 1,
+          }}>START MATCH</button>
+          <button onClick={onClose} style={{
+            background: 'transparent', color: '#aaa',
+            border: '1px solid #555', borderRadius: 8,
+            padding: '12px 16px', cursor: 'pointer', fontWeight: 600,
+          }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// One-time "Add to Home Screen" banner. Listens for Chrome's
 // beforeinstallprompt; iOS Safari doesn't fire it, so we surface a textual
 // hint there ("tap Share → Add to Home Screen"). Either is dismissable for
 // 7 days via localStorage.
@@ -4724,6 +4855,29 @@ export default function App() {
   const [view, setView] = useState<View>(() => sess.get<View>('view', 'landing'));
   const [pendingWallet, setPendingWallet] = useState<ConnectedWallet | null>(null);
   const [viewedProfile, setViewedProfile] = useState<string | null>(null);
+  const [soloSetup, setSoloSetup] = useState<boolean>(false);
+  const [soloCfg, setSoloCfg] = useState<{ difficulty: Difficulty; mode: SoloMode; color: Color } | null>(null);
+  const soloStartRef = useRef<number>(0);
+
+  // Track solo match start/end for daily-best recording. Board fires
+  // `mmtcg:solo-end` when a solo match resolves.
+  useEffect(() => {
+    function onEnd(e: any) {
+      if (!soloCfg) return;
+      const detail = e?.detail ?? {};
+      const win = detail.winnerSeat === '0';
+      const turns = Number(detail.turns ?? 0);
+      const ms = Date.now() - (soloStartRef.current || Date.now());
+      if (soloCfg.mode === 'daily') {
+        saveDailyResult({
+          date: todayKey(), win, turns, ms,
+          difficulty: soloCfg.difficulty,
+        });
+      }
+    }
+    window.addEventListener('mmtcg:solo-end', onEnd);
+    return () => window.removeEventListener('mmtcg:solo-end', onEnd);
+  }, [soloCfg]);
 
   // On boot: if we have a saved seat from a previous tab, verify the match
   // still exists and our seat is still claimed by us. Otherwise clear it so
@@ -4813,6 +4967,26 @@ export default function App() {
   return (
     <>
       <InstallPrompt />
+      {soloCfg && (
+        <SoloClient
+          playerName={name || 'Player'}
+          difficulty={soloCfg.difficulty}
+          mode={soloCfg.mode}
+          playerDeckColor={soloCfg.color}
+          onExit={() => setSoloCfg(null)}
+        />
+      )}
+      {soloSetup && !soloCfg && (
+        <SoloSetupModal
+          myName={name}
+          onClose={() => setSoloSetup(false)}
+          onLaunch={(cfg) => {
+            soloStartRef.current = Date.now();
+            setSoloCfg(cfg);
+            setSoloSetup(false);
+          }}
+        />
+      )}
       {showMusic && <MenuMusic />}
       {view === 'profile'
         ? <ProfilePage myName={name} onBack={() => goto('landing')} />
@@ -4829,7 +5003,7 @@ export default function App() {
                     onBack={() => goto('landing')}
                     onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
                   />
-                : <Landing myName={name} onPlay={() => goto('lobby')} onRanked={() => goto('ranked')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
+                : <Landing myName={name} onPlay={() => goto('lobby')} onRanked={() => goto('ranked')} onSolo={() => setSoloSetup(true)} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
     </>
   );
 }
