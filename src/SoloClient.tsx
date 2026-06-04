@@ -27,12 +27,15 @@ export function SoloClient({
   difficulty,
   mode,
   playerDeckColor,
+  customDeck,
   onExit,
 }: {
   playerName: string;
   difficulty: Difficulty;
   mode: SoloMode;
   playerDeckColor: Color;
+  /** If provided (and length > 0), used instead of STARTER_DECKS[playerDeckColor]. */
+  customDeck?: string[] | null;
   onExit: () => void;
 }) {
   // Build a per-mount Client. Includes the seed when mode='daily' so today's
@@ -50,10 +53,13 @@ export function SoloClient({
 
     // Bake setupData into the wrapped setup() because the React Client doesn't
     // accept a setupData prop (Local mode has no lobby to forward it from).
+    const useCustom = !!(customDeck && customDeck.length > 0);
     const bakedSetupData = {
-      colors: [playerDeckColor, botColor] as Array<Color | null>,
+      // When using a custom deck, leave the player color as null so Game.setup
+      // derives the theme color from the deck contents.
+      colors: [useCustom ? null : playerDeckColor, botColor] as Array<Color | null>,
       names: [playerName, `Bot (${difficulty})`],
-      decks: [STARTER_DECKS[playerDeckColor], STARTER_DECKS[botColor]],
+      decks: [useCustom ? customDeck! : STARTER_DECKS[playerDeckColor], STARTER_DECKS[botColor]],
     };
     const originalSetup = ChainsTCG.setup as any;
     const wrappedGame: any = {
@@ -83,7 +89,7 @@ export function SoloClient({
       multiplayer: Local({ bots: { '1': BoundBot as any } }),
       debug: false,
     });
-  }, [difficulty, mode, playerDeckColor, playerName]);
+  }, [difficulty, mode, playerDeckColor, playerName, customDeck]);
 
   // Track match start time for daily-best recording.
   const startedAt = useRef<number>(Date.now());

@@ -4683,15 +4683,39 @@ function SoloSetupModal({
   myName, onLaunch, onClose,
 }: {
   myName: string;
-  onLaunch: (cfg: { difficulty: Difficulty; mode: SoloMode; color: Color }) => void;
+  onLaunch: (cfg: { difficulty: Difficulty; mode: SoloMode; color: Color; customDeck: string[] | null }) => void;
   onClose: () => void;
 }) {
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
   const [mode, setMode] = useState<SoloMode>('casual');
   const [color, setColor] = useState<Color>('sol');
+  // null = use one of the 5 starter decks; otherwise the chosen saved deck id.
+  const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
+  const [decks, setDecks] = useState<DeckEntry[]>([]);
+  const [decksLoading, setDecksLoading] = useState<boolean>(true);
   const dateKey = todayKey();
   const best = todayBest(difficulty);
-  void myName;
+
+  // Load this player's saved decks so they can play vs bot with one of them.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setDecksLoading(true);
+      try {
+        const list = await listDecksApi(myName);
+        if (cancelled) return;
+        setDecks(list);
+      } catch {
+        if (!cancelled) setDecks([]);
+      } finally {
+        if (!cancelled) setDecksLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [myName]);
+
+  const chosenCustom = selectedDeckId == null ? null : decks.find(d => d.id === selectedDeckId) ?? null;
+  const customInvalid = chosenCustom ? !validateDeck(chosenCustom.cards).ok : false;
 
   const btn = (active: boolean, accent: string): React.CSSProperties => ({
     background: active ? accent : '#1a1730',
@@ -4757,22 +4781,69 @@ function SoloSetupModal({
 
         <div>
           <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, letterSpacing: 1 }}>YOUR DECK</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {(['bnb', 'sol', 'hl', 'eth', 'xrp'] as Color[]).map(c => {
-              const meta = COLOR_META[c];
-              const active = color === c;
+
+          {/* Starter vs. custom deck picker. Custom decks come from the library. */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+            <button
+              onClick={() => setSelectedDeckId(null)}
+              style={{
+                background: selectedDeckId == null ? '#6c4bd8' : '#1a1730',
+                color: selectedDeckId == null ? '#fff' : '#ccc',
+                border: `2px solid ${selectedDeckId == null ? '#6c4bd8' : '#3a3050'}`,
+                borderRadius: 8, padding: '8px 12px',
+                fontWeight: 700, cursor: 'pointer', fontSize: 12,
+              }}
+            >STARTER</button>
+            {decksLoading && (
+              <div style={{ fontSize: 11, opacity: 0.6, alignSelf: 'center' }}>loading decks…</div>
+            )}
+            {!decksLoading && decks.map(d => {
+              const active = selectedDeckId === d.id;
+              const ok = validateDeck(d.cards).ok;
               return (
-                <button key={c} onClick={() => setColor(c)} style={{
-                  background: active ? meta.hex : '#1a1730',
-                  color: active ? meta.ink : '#ccc',
-                  border: `2px solid ${active ? meta.hex : '#3a3050'}`,
-                  borderRadius: 8, padding: '10px 12px',
+                <button key={d.id} onClick={() => setSelectedDeckId(d.id)} style={{
+                  background: active ? '#3aa66a' : '#1a1730',
+                  color: active ? '#fff' : ok ? '#ccc' : '#c8455d',
+                  border: `2px solid ${active ? '#3aa66a' : '#3a3050'}`,
+                  borderRadius: 8, padding: '8px 12px',
                   fontWeight: 700, cursor: 'pointer', fontSize: 12,
-                  textTransform: 'uppercase',
-                }}>{c}</button>
+                  opacity: ok ? 1 : 0.7,
+                }} title={ok ? d.name : `${d.name} (invalid — fix in Deck Library)`}>
+                  {d.name}{!ok ? ' ⚠' : ''}
+                </button>
               );
             })}
+            {!decksLoading && decks.length === 0 && (
+              <div style={{ fontSize: 11, opacity: 0.6, alignSelf: 'center' }}>
+                No saved decks yet — build one in the Deck Library.
+              </div>
+            )}
           </div>
+
+          {/* Starter color picker — only meaningful when no custom deck is chosen. */}
+          {selectedDeckId == null ? (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {(['bnb', 'sol', 'hl', 'eth', 'xrp'] as Color[]).map(c => {
+                const meta = COLOR_META[c];
+                const active = color === c;
+                return (
+                  <button key={c} onClick={() => setColor(c)} style={{
+                    background: active ? meta.hex : '#1a1730',
+                    color: active ? meta.ink : '#ccc',
+                    border: `2px solid ${active ? meta.hex : '#3a3050'}`,
+                    borderRadius: 8, padding: '10px 12px',
+                    fontWeight: 700, cursor: 'pointer', fontSize: 12,
+                    textTransform: 'uppercase',
+                  }}>{c}</button>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, opacity: 0.65 }}>
+              Using saved deck: <b>{chosenCustom?.name ?? '—'}</b>
+              {customInvalid && <span style={{ color: '#c8455d' }}> (invalid — fix in Deck Library)</span>}
+            </div>
+          )}
         </div>
 
         {best && (
@@ -4786,11 +4857,18 @@ function SoloSetupModal({
         )}
 
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-          <button onClick={() => onLaunch({ difficulty, mode, color })} style={{
-            flex: 1, background: '#6c4bd8', color: '#fff',
-            border: 'none', borderRadius: 8, padding: '12px 16px',
-            fontWeight: 800, cursor: 'pointer', fontSize: 14, letterSpacing: 1,
-          }}>START MATCH</button>
+          <button
+            disabled={customInvalid}
+            onClick={() => onLaunch({
+              difficulty, mode, color,
+              customDeck: chosenCustom ? chosenCustom.cards : null,
+            })}
+            style={{
+              flex: 1, background: customInvalid ? '#3a2a4a' : '#6c4bd8', color: '#fff',
+              border: 'none', borderRadius: 8, padding: '12px 16px',
+              fontWeight: 800, cursor: customInvalid ? 'not-allowed' : 'pointer', fontSize: 14, letterSpacing: 1,
+              opacity: customInvalid ? 0.6 : 1,
+            }}>START MATCH</button>
           <button onClick={onClose} style={{
             background: 'transparent', color: '#aaa',
             border: '1px solid #555', borderRadius: 8,
@@ -4903,7 +4981,7 @@ export default function App() {
   const [pendingWallet, setPendingWallet] = useState<ConnectedWallet | null>(null);
   const [viewedProfile, setViewedProfile] = useState<string | null>(null);
   const [soloSetup, setSoloSetup] = useState<boolean>(false);
-  const [soloCfg, setSoloCfg] = useState<{ difficulty: Difficulty; mode: SoloMode; color: Color } | null>(null);
+  const [soloCfg, setSoloCfg] = useState<{ difficulty: Difficulty; mode: SoloMode; color: Color; customDeck: string[] | null } | null>(null);
   const soloStartRef = useRef<number>(0);
 
   // Track solo match start/end for daily-best recording. Board fires
@@ -5020,6 +5098,7 @@ export default function App() {
           difficulty={soloCfg.difficulty}
           mode={soloCfg.mode}
           playerDeckColor={soloCfg.color}
+          customDeck={soloCfg.customDeck}
           onExit={() => setSoloCfg(null)}
         />
       )}
