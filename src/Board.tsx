@@ -666,6 +666,23 @@ export function ChainsBoard(props: Props) {
         />
       )}
 
+      {/* Solo: clear indicator when the bot is taking its turn so the
+          user doesn't think the UI is frozen. */}
+      {isSolo && !myTurn && !mulliganPhase && !ctx.gameover && (
+        <div style={{
+          position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 150, padding: '8px 16px',
+          background: 'rgba(76, 29, 149, 0.92)', color: '#fff',
+          border: '1px solid #a78bfa', borderRadius: 999,
+          fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 700,
+          fontSize: 13, letterSpacing: 1, textTransform: 'uppercase',
+          boxShadow: '0 0 16px rgba(167,139,250,0.55)',
+          pointerEvents: 'none',
+        }}>
+          🤖 Bot is thinking…
+        </div>
+      )}
+
       {/* Deck-pick overlay — second player picks here if they arrived without a stashed color */}
       {iMustPick && (
         <div style={{
