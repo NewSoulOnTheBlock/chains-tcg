@@ -59,7 +59,7 @@ This repo includes a `render.yaml` blueprint that provisions one Node web servic
 1. Push this repo to GitHub.
 2. In the Render dashboard: **New → Blueprint**, point at the repo, click **Apply**.
 3. Render builds (`npm ci && npm run build`) and starts (`npm start`) the web service. The boardgame.io socket.io server, lobby REST API, custom `/api/*` profile endpoints, and the static React build are all served from the same port.
-4. After first deploy, copy the service URL (e.g. `https://chains-tcg.onrender.com`), then set the `ALLOW_ORIGIN` env var on the web service to that URL and redeploy. This locks down CORS to your domain.
+4. The production site lives at `https://www.masterstcg.com`. `ALLOW_ORIGIN` is set in `render.yaml` to permit both the apex (`https://masterstcg.com`) and `www` host; it accepts a comma-separated list if you need to add more origins.
 
 Share the URL with anyone — they sign in with a name, see all open matches, and either join one or create their own. Win/loss records persist globally in Postgres and show up on the in-app leaderboard.
 
@@ -70,7 +70,7 @@ Share the URL with anyone — they sign in with a name, see all open matches, an
 | `PORT` | Port to listen on (Render sets this automatically). |
 | `DATABASE_URL` | Postgres connection string. Without it, server uses an in-memory fallback. |
 | `PGSSL` | Set to `1` to force SSL on Postgres (required on Render). |
-| `ALLOW_ORIGIN` | Production origin to permit for socket.io connections. |
+| `ALLOW_ORIGIN` | Production origin(s) to permit for socket.io + REST connections. Accepts a single URL or a comma-separated list (e.g. `https://www.masterstcg.com,https://masterstcg.com`). |
 | `VITE_SERVER_BASE` | (Build-time, optional) Override server URL the client connects to. Leave empty to use same origin. |
 | `VITE_API_BASE` | (Build-time, optional) Override REST API base. Leave empty for same origin. |
 

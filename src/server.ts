@@ -20,8 +20,12 @@ const server = Server({
   origins: [
     Origins.LOCALHOST_IN_DEVELOPMENT,
     Origins.LOCALHOST,
-    // Allow same-origin (when client served from this server). Use ALLOW_ORIGIN env to add prod domain.
-    ...(process.env.ALLOW_ORIGIN ? [process.env.ALLOW_ORIGIN] : []),
+    // Allow same-origin (when client served from this server). ALLOW_ORIGIN may be a
+    // single URL or a comma-separated list (e.g. "https://www.masterstcg.com,https://masterstcg.com").
+    ...((process.env.ALLOW_ORIGIN || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean)),
   ],
 });
 

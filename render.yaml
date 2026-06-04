@@ -26,7 +26,8 @@ services:
       - key: PGSSL
         value: "1"            # Render Postgres requires SSL
       - key: ALLOW_ORIGIN
-        sync: false           # set this to your public URL after first deploy, e.g. https://chains-tcg.onrender.com
+        value: "https://www.masterstcg.com,https://masterstcg.com"
+        # Comma-separated list of allowed origins for socket.io + REST. Include both apex and www.
       - key: HELIUS_API_KEY
         sync: false           # required to populate the Memetic Masters library — paste your Helius API key
       - key: MEMETIC_MASTERS_COLLECTION

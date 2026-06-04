@@ -1305,7 +1305,7 @@ function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: str
   if (gameover.winner !== myId) return null;
   if (dismissed) return null;
 
-  const siteUrl = (typeof window !== 'undefined' ? window.location.origin : 'https://memetic-masters.onrender.com');
+  const siteUrl = (typeof window !== 'undefined' ? window.location.origin : 'https://www.masterstcg.com');
   const imgUrl = `${siteUrl}/share-win.jpg`;
   const tweetText = `I just won in Memetic Masters TCG! ⚔️\n\nPlay the 5-chain meme card game at ${siteUrl}`;
   const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
