@@ -5,7 +5,7 @@
 
 export type WalletChain = 'evm' | 'solana';
 export type ConnectedWallet = { chain: WalletChain; address: string };
-export type SolanaWalletKind = 'phantom' | 'solflare' | 'backpack';
+export type SolanaWalletKind = 'phantom' | 'solflare' | 'backpack' | 'jupiter';
 
 declare global {
   interface Window {
@@ -14,6 +14,7 @@ declare global {
     solflare?: any;
     backpack?: any;
     phantom?: any;
+    jupiter?: any;
   }
 }
 
@@ -33,15 +34,15 @@ export async function connectEvm(): Promise<ConnectedWallet> {
 }
 
 export async function connectSolana(): Promise<ConnectedWallet> {
-  // Try Phantom first, then Solflare, then Backpack.
-  for (const kind of ['phantom', 'solflare', 'backpack'] as SolanaWalletKind[]) {
+  // Try Phantom first, then Solflare, then Backpack, then Jupiter.
+  for (const kind of ['phantom', 'solflare', 'backpack', 'jupiter'] as SolanaWalletKind[]) {
     const p = getSolanaProviderRaw(kind);
     if (p) {
       const w = await connectSolanaWith(kind);
       return w;
     }
   }
-  throw new Error('No Solana wallet detected. Install Phantom, Solflare, or Backpack.');
+  throw new Error('No Solana wallet detected. Install Phantom, Solflare, Backpack, or Jupiter.');
 }
 
 export async function connectSolanaWith(kind: SolanaWalletKind): Promise<ConnectedWallet> {
@@ -136,16 +137,29 @@ function getSolanaProviderRaw(kind: SolanaWalletKind): any {
     if ((window as any).xnft?.solana) return (window as any).xnft.solana;
     return null;
   }
+  if (kind === 'jupiter') {
+    // Jupiter Mobile (JUP wallet) injects via window.jupiter when available.
+    // It also implements the Wallet Standard, but the extension/mobile bridges
+    // we've tested expose either window.jupiter.solana or window.jupiter directly.
+    if ((window as any).jupiter?.solana?.isJupiter) return (window as any).jupiter.solana;
+    if ((window as any).jupiter?.isJupiter) return (window as any).jupiter;
+    if ((window as any).jupiter?.solana) return (window as any).jupiter.solana;
+    return null;
+  }
   return null;
 }
 
 function labelFor(kind: SolanaWalletKind): string {
-  return kind === 'phantom' ? 'Phantom' : kind === 'solflare' ? 'Solflare' : 'Backpack';
+  return kind === 'phantom'  ? 'Phantom'
+       : kind === 'solflare' ? 'Solflare'
+       : kind === 'backpack' ? 'Backpack'
+       : kind === 'jupiter'  ? 'Jupiter'
+       : 'Wallet';
 }
 
 /** Returns which Solana wallets are currently installed. */
 export function detectSolanaWallets(): Array<{ kind: SolanaWalletKind; label: string; installed: boolean }> {
-  return (['phantom', 'solflare', 'backpack'] as SolanaWalletKind[]).map(kind => ({
+  return (['phantom', 'solflare', 'backpack', 'jupiter'] as SolanaWalletKind[]).map(kind => ({
     kind,
     label: labelFor(kind),
     installed: !!getSolanaProviderRaw(kind),

@@ -15,7 +15,7 @@ import {
   listDecksApi, createDeckApi, updateDeckApi, deleteDeckApi, activateDeckApi, type DeckEntry,
   createChallengeApi, listIncomingChallengesApi, listOutgoingChallengesApi, respondChallengeApi, type Challenge,
 } from './profiles';
-import { connectEvm, connectSolana, getSolanaWallet, detectSolanaWallets, shortAddr, type ConnectedWallet, type SolanaWalletKind } from './wallet';
+import { connectSolanaWith, connectSolana, getSolanaWallet, detectSolanaWallets, shortAddr, type ConnectedWallet, type SolanaWalletKind } from './wallet';
 import { CardHover, CardPreview } from './CardPreview';
 import { RankedAPI, tierColors, rankLabel, type PublicRankedProfile, type LeaderboardEntry } from './ranked-client';
 import { Connection } from '@solana/web3.js';
@@ -134,12 +134,12 @@ function Login({ onLogin, onFirstTime }: {
 }) {
   const [name, setName] = useState(local.get<string>('lastName', '') || sess.get<string>('lastName', ''));
   const [err, setErr] = useState('');
-  const [busy, setBusy] = useState<'evm' | 'sol' | null>(null);
+  const [busy, setBusy] = useState<SolanaWalletKind | null>(null);
 
-  async function doConnect(kind: 'evm' | 'sol') {
+  async function doConnect(kind: SolanaWalletKind) {
     setErr(''); setBusy(kind);
     try {
-      const w = kind === 'evm' ? await connectEvm() : await connectSolana();
+      const w = await connectSolanaWith(kind);
       const existing = await getProfileByWalletApi(w.address);
       if (existing) onLogin(existing.name);
       else onFirstTime(w);
@@ -309,58 +309,45 @@ function Login({ onLogin, onFirstTime }: {
                 textAlign: 'center', marginBottom: 14,
               }}>CONNECT YOUR REALM</div>
 
-              {/* Wallet cards */}
+              {/* Wallet cards — 4 Solana options */}
               <div style={{
                 display: 'grid', gap: 12,
-                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
               }}>
-                {/* EVM */}
-                <button
-                  className="login-walletcard"
-                  onClick={() => doConnect('evm')}
-                  disabled={!!busy}
-                  style={{
-                    background: 'linear-gradient(135deg, #f7931a 0%, #ffb347 100%)',
-                    color: '#1a1408',
-                    border: 'none', borderRadius: 14,
-                    padding: '16px 16px', cursor: busy ? 'not-allowed' : 'pointer',
-                    textAlign: 'left', fontFamily: 'inherit',
-                    boxShadow: '0 10px 26px rgba(247,147,26,0.32), inset 0 1px 0 rgba(255,255,255,0.25)',
-                    opacity: busy ? 0.6 : 1,
-                  }}
-                >
-                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 3, opacity: 0.85 }}>🛡 EVM REALMS</div>
-                  <div style={{ fontFamily: '"Cinzel", serif', fontSize: 18, fontWeight: 800, letterSpacing: 1, marginTop: 4 }}>
-                    {busy === 'evm' ? 'Summoning…' : 'MetaMask · Rabby · Coinbase'}
-                  </div>
-                  <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>
-                    {busy === 'evm' ? '…' : '→ Connect Wallet'}
-                  </div>
-                </button>
-
-                {/* Solana */}
-                <button
-                  className="login-walletcard"
-                  onClick={() => doConnect('sol')}
-                  disabled={!!busy}
-                  style={{
-                    background: 'linear-gradient(135deg, #8A2BE2 0%, #4FD1C5 100%)',
-                    color: '#0a0a18',
-                    border: 'none', borderRadius: 14,
-                    padding: '16px 16px', cursor: busy ? 'not-allowed' : 'pointer',
-                    textAlign: 'left', fontFamily: 'inherit',
-                    boxShadow: '0 10px 26px rgba(138,43,226,0.40), inset 0 1px 0 rgba(255,255,255,0.25)',
-                    opacity: busy ? 0.6 : 1,
-                  }}
-                >
-                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 3, opacity: 0.85 }}>⚡ SOLANA KINGDOM</div>
-                  <div style={{ fontFamily: '"Cinzel", serif', fontSize: 18, fontWeight: 800, letterSpacing: 1, marginTop: 4 }}>
-                    {busy === 'sol' ? 'Summoning…' : 'Phantom Wallet'}
-                  </div>
-                  <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>
-                    {busy === 'sol' ? '…' : '→ Connect Wallet'}
-                  </div>
-                </button>
+                {([
+                  { kind: 'phantom',  label: 'Phantom',  gradient: 'linear-gradient(135deg, #AB9FF2 0%, #6E5BD9 100%)', install: 'https://phantom.app/' },
+                  { kind: 'solflare', label: 'Solflare', gradient: 'linear-gradient(135deg, #FFC517 0%, #FC9E37 100%)', install: 'https://solflare.com/' },
+                  { kind: 'backpack', label: 'Backpack', gradient: 'linear-gradient(135deg, #E33E3F 0%, #B8323C 100%)', install: 'https://backpack.app/' },
+                  { kind: 'jupiter',  label: 'Jupiter',  gradient: 'linear-gradient(135deg, #C7F284 0%, #6BCBA2 100%)', install: 'https://jup.ag/mobile' },
+                ] as Array<{ kind: SolanaWalletKind; label: string; gradient: string; install: string }>).map(w => {
+                  const detected = detectSolanaWallets().find(d => d.kind === w.kind)?.installed;
+                  return (
+                    <button
+                      key={w.kind}
+                      className="login-walletcard"
+                      onClick={() => detected ? doConnect(w.kind) : window.open(w.install, '_blank', 'noopener')}
+                      disabled={!!busy}
+                      style={{
+                        background: w.gradient,
+                        color: '#0a0a18',
+                        border: 'none', borderRadius: 14,
+                        padding: '16px 16px', cursor: busy ? 'not-allowed' : 'pointer',
+                        textAlign: 'left', fontFamily: 'inherit',
+                        boxShadow: '0 10px 26px rgba(138,43,226,0.32), inset 0 1px 0 rgba(255,255,255,0.25)',
+                        opacity: busy && busy !== w.kind ? 0.45 : 1,
+                        filter: detected ? 'none' : 'grayscale(0.4)',
+                      }}
+                    >
+                      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 3, opacity: 0.85 }}>⚡ SOLANA</div>
+                      <div style={{ fontFamily: '"Cinzel", serif', fontSize: 18, fontWeight: 800, letterSpacing: 1, marginTop: 4 }}>
+                        {busy === w.kind ? 'Summoning…' : w.label}
+                      </div>
+                      <div style={{ marginTop: 8, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>
+                        {busy === w.kind ? '…' : (detected ? '→ Connect Wallet' : '↗ Install First')}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
 
               {err && (
@@ -4122,6 +4109,7 @@ function SolanaWalletPicker({ onPick, onCancel }: {
     phantom:  'https://phantom.app/',
     solflare: 'https://solflare.com/',
     backpack: 'https://backpack.app/',
+    jupiter:  'https://jup.ag/mobile',
   };
   return (
     <div onClick={onCancel} style={{
