@@ -106,6 +106,83 @@ async function fetchMemeticMastersLibrary(walletAddress: string): Promise<Librar
   }
 }
 
+// ── Boosters (PREVIEW / mock backend) ───────────────────────────────────────
+// In-memory mock state for the Boosters UI. Survives only for the lifetime
+// of the server process. Replace with on-chain state + Postgres rows in
+// Phase 3/4 (see plan.md). The shape of these functions matches what the
+// final implementation will return so the client doesn't have to change.
+
+type MockSealed = { packId: string; mintedAt: number; opened: boolean; opener: string };
+type MockOwned  = Record<string, number>;
+type MockWallet = { sealed: MockSealed[]; owned: MockOwned };
+
+const BOOSTER_CAP       = Number(process.env.BOOSTER_SUPPLY_CAP ?? 2000);
+const BOOSTER_PRICE_SOL = Number(process.env.BOOSTER_PRICE_SOL  ?? 0.15);
+const BOOSTER_PRICE_MAS = Number(process.env.BOOSTER_PRICE_MAS  ?? 1_000_000);
+const BOOSTER_MODE: 'preview' | 'live' = (process.env.BOOSTER_MODE === 'live') ? 'live' : 'preview';
+
+let _boosterMinted = 0;
+const _boosterByWallet = new Map<string, MockWallet>();
+
+function _walletState(addr: string): MockWallet {
+  let w = _boosterByWallet.get(addr);
+  if (!w) { w = { sealed: [], owned: {} }; _boosterByWallet.set(addr, w); }
+  return w;
+}
+
+function boostersSupplySnapshot() {
+  return {
+    minted: _boosterMinted,
+    cap: BOOSTER_CAP,
+    remaining: Math.max(0, BOOSTER_CAP - _boosterMinted),
+    priceSol: BOOSTER_PRICE_SOL,
+    priceMaster: BOOSTER_PRICE_MAS,
+    mode: BOOSTER_MODE,
+  };
+}
+
+function boostersInventorySnapshot(wallet: string) {
+  const w = _walletState(wallet);
+  return {
+    sealed: w.sealed.filter(p => !p.opened).map(p => ({
+      packId: p.packId,
+      mintedAt: p.mintedAt,
+      nftMint: null as string | null,
+    })),
+    owned: Object.entries(w.owned).map(([cardId, qty]) => ({
+      cardId, qty, nftMints: [] as string[],
+    })),
+  };
+}
+
+function boostersBuyMock(wallet: string, currency: 'sol' | 'master') {
+  if (_boosterMinted >= BOOSTER_CAP) {
+    return { ok: false as const, error: 'sold out' };
+  }
+  const w = _walletState(wallet);
+  const recent = w.sealed.filter(p => Date.now() - p.mintedAt < 60_000).length;
+  if (recent >= 10) return { ok: false as const, error: 'rate limited (preview)' };
+
+  _boosterMinted += 1;
+  const packId = `pk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  w.sealed.push({ packId, mintedAt: Date.now(), opened: false, opener: wallet });
+  void currency;
+  return { ok: true as const, packId, mode: BOOSTER_MODE };
+}
+
+function boostersOpenMock(wallet: string, packId: string) {
+  const w = _walletState(wallet);
+  const pack = w.sealed.find(p => p.packId === packId && !p.opened);
+  if (!pack) return { ok: false as const, error: 'pack not found or already opened' };
+  pack.opened = true;
+  const { CARDS } = require('./cards') as { CARDS: Record<string, unknown> };
+  const ids = Object.keys(CARDS);
+  const picks: string[] = [];
+  for (let i = 0; i < 10; i++) picks.push(ids[Math.floor(Math.random() * ids.length)]);
+  for (const id of picks) w.owned[id] = (w.owned[id] ?? 0) + 1;
+  return { ok: true as const, cardIds: picks, mode: BOOSTER_MODE };
+}
+
 app.use(async (ctx, next) => {
   const url = ctx.request.url || '';
   const method = ctx.request.method;
@@ -256,6 +333,38 @@ app.use(async (ctx, next) => {
     if (method === 'GET' && url.startsWith('/api/library/')) {
       const addr = decodeURIComponent(url.slice('/api/library/'.length));
       ctx.body = { cards: await fetchMemeticMastersLibrary(addr) };
+      return;
+    }
+    // ── Boosters (PREVIEW MODE) ───────────────────────────────────────────────
+    // Mock implementation. No on-chain mint yet — see plan.md for the full
+    // pipeline. Supply counter lives in-memory; resets on server restart.
+    if (method === 'GET' && url === '/api/boosters/supply') {
+      ctx.body = boostersSupplySnapshot();
+      return;
+    }
+    if (method === 'GET' && url.startsWith('/api/boosters/inventory/')) {
+      const addr = decodeURIComponent(url.slice('/api/boosters/inventory/'.length));
+      ctx.body = boostersInventorySnapshot(addr);
+      return;
+    }
+    if (method === 'POST' && url === '/api/boosters/buy-intent') {
+      const body = await readJson(ctx);
+      const wallet = String(body?.wallet ?? '').trim();
+      const currency = body?.currency === 'master' ? 'master' : 'sol';
+      if (!wallet) { ctx.status = 400; ctx.body = { ok: false, error: 'wallet required' }; return; }
+      const r = boostersBuyMock(wallet, currency);
+      if (!r.ok) ctx.status = 400;
+      ctx.body = r;
+      return;
+    }
+    if (method === 'POST' && url === '/api/boosters/open-intent') {
+      const body = await readJson(ctx);
+      const wallet = String(body?.wallet ?? '').trim();
+      const packId = String(body?.packId ?? '').trim();
+      if (!wallet || !packId) { ctx.status = 400; ctx.body = { ok: false, error: 'wallet and packId required' }; return; }
+      const r = boostersOpenMock(wallet, packId);
+      if (!r.ok) ctx.status = 400;
+      ctx.body = r;
       return;
     }
     // ── Challenges ────────────────────────────────────────────────────────────

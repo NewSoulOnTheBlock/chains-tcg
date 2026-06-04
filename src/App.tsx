@@ -27,6 +27,7 @@ import { SoloClient } from './SoloClient';
 import type { Difficulty } from './bot';
 import type { SoloMode } from './SoloClient';
 import { saveDailyResult, todayKey, todayBest } from './dailyChallenge';
+import { BoostersPage } from './Boosters';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 // Server base: in dev Vite proxies /games (lobby) and /socket.io to :8000.
@@ -1402,8 +1403,8 @@ function ExampleTurn({ hl }: { hl: (s: string) => React.ReactNode }) {
 
 // ── Landing screen (post-login hub) ─────────────────────────────────────────
 function Landing({
-  myName, onPlay, onRanked, onSolo, onProfile, onRules, onLogout,
-}: { myName: string; onPlay: () => void; onRanked: () => void; onSolo: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
+  myName, onPlay, onRanked, onSolo, onBoosters, onProfile, onRules, onLogout,
+}: { myName: string; onPlay: () => void; onRanked: () => void; onSolo: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
   const mobile = useIsMobile();
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#000', color: '#fff', fontFamily: 'system-ui' }}>
@@ -1444,6 +1445,7 @@ function Landing({
         <MenuBtn primary onClick={onPlay}>▶  PLAY</MenuBtn>
         <MenuBtn ranked onClick={onRanked}>🏆  RANKED</MenuBtn>
         <MenuBtn onClick={onSolo}>🤖  VS BOT</MenuBtn>
+        <MenuBtn onClick={onBoosters}>📦  BOOSTERS</MenuBtn>
         <MenuBtn onClick={onProfile}>👤  PROFILE</MenuBtn>
         <MenuBtn onClick={onRules}>📖  RULES</MenuBtn>
         <MenuBtn onClick={() => window.open('https://x.com/MemeticMasters', '_blank', 'noopener')}>📰  NEWS</MenuBtn>
@@ -4648,7 +4650,7 @@ function WagerStatusBadge({ matchID, compact }: { matchID: string; compact?: boo
 }
 
 // ── Root ────────────────────────────────────────────────────────────────────
-type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile' | 'ranked' | 'solo';
+type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile' | 'ranked' | 'solo' | 'boosters';
 
 /**
  * Print-mode renderer used by scripts/render-cards.mjs. Lays out every card in
@@ -5088,7 +5090,7 @@ export default function App() {
 
   // Landing + Profile share the same audio element so music keeps playing
   // (and the user's mute state is preserved) when switching between them.
-  const showMusic = view === 'landing' || view === 'profile' || view === 'rules' || view === 'lobby' || view === 'ranked';
+  const showMusic = view === 'landing' || view === 'profile' || view === 'rules' || view === 'lobby' || view === 'ranked' || view === 'boosters';
   return (
     <>
       <InstallPrompt />
@@ -5118,18 +5120,20 @@ export default function App() {
         ? <ProfilePage myName={name} onBack={() => goto('landing')} />
         : view === 'rules'
           ? <RulesPage onBack={() => goto('landing')} />
-          : view === 'view-profile' && viewedProfile
-            ? <PublicProfile name={viewedProfile} onBack={() => goto('lobby')} />
-            : view === 'ranked'
-              ? <RankedHub myName={name} onBack={() => goto('landing')} onJoined={joinedSeat} onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }} />
-              : view === 'lobby'
-                ? <Lobby
-                    myName={name}
-                    onJoined={joinedSeat}
-                    onBack={() => goto('landing')}
-                    onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
-                  />
-                : <Landing myName={name} onPlay={() => goto('lobby')} onRanked={() => goto('ranked')} onSolo={() => setSoloSetup(true)} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
+          : view === 'boosters'
+            ? <BoostersPage myName={name} onBack={() => goto('landing')} />
+            : view === 'view-profile' && viewedProfile
+              ? <PublicProfile name={viewedProfile} onBack={() => goto('lobby')} />
+              : view === 'ranked'
+                ? <RankedHub myName={name} onBack={() => goto('landing')} onJoined={joinedSeat} onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }} />
+                : view === 'lobby'
+                  ? <Lobby
+                      myName={name}
+                      onJoined={joinedSeat}
+                      onBack={() => goto('landing')}
+                      onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
+                    />
+                  : <Landing myName={name} onPlay={() => goto('lobby')} onRanked={() => goto('ranked')} onSolo={() => setSoloSetup(true)} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
     </>
   );
 }
