@@ -18,7 +18,8 @@ import {
 } from '@solana/web3.js';
 import {
   getAssociatedTokenAddress, createAssociatedTokenAccountInstruction,
-  createTransferInstruction, getAccount, TOKEN_PROGRAM_ID,
+  createTransferInstruction, getAccount, TOKEN_2022_PROGRAM_ID,
+  TokenAccountNotFoundError, TokenInvalidAccountOwnerError,
 } from '@solana/spl-token';
 import { MASTER_MINT, MASTER_DECIMALS, sendIxs, type WalletAdapter, masterUi } from './wager-program';
 
@@ -67,25 +68,71 @@ export async function depositCustodialWager(args: {
   if (!wallet.publicKey) throw new Error('Wallet not connected');
   const mint = new PublicKey(intent.mint);
   const escrow = new PublicKey(intent.escrowPubkey);
-  const fromAta = await getAssociatedTokenAddress(mint, wallet.publicKey);
+  // $MASTER (pump.fun) is a Token-2022 mint — all ATA derivations + ixs
+  // must specify the 2022 program id, otherwise we look up the wrong ATA
+  // (and would get "no MASTER ATA" errors even when the user holds plenty).
+  const fromAta = await getAssociatedTokenAddress(
+    mint, wallet.publicKey, false, TOKEN_2022_PROGRAM_ID,
+  );
   const toAta = new PublicKey(intent.escrowAta);
 
   const ixs: TransactionInstruction[] = [];
 
   // Sanity: ensure the escrow ATA exists; player pays the tiny rent if not (one-time).
-  try { await getAccount(connection, toAta); }
-  catch {
-    ixs.push(createAssociatedTokenAccountInstruction(wallet.publicKey, toAta, escrow, mint));
+  try { await getAccount(connection, toAta, undefined, TOKEN_2022_PROGRAM_ID); }
+  catch (e: any) {
+    if (e instanceof TokenAccountNotFoundError || e instanceof TokenInvalidAccountOwnerError) {
+      ixs.push(createAssociatedTokenAccountInstruction(
+        wallet.publicKey, toAta, escrow, mint, TOKEN_2022_PROGRAM_ID,
+      ));
+    } else {
+      throw new Error(`Could not verify escrow token account (RPC error: ${e?.message ?? e}). Please try again.`);
+    }
   }
-  // Player must already hold $MASTER; if their ATA somehow doesn't exist we
-  // surface a clear error rather than silently creating an empty one.
-  try { await getAccount(connection, fromAta); }
-  catch {
-    throw new Error('Your wallet has no $MASTER ATA — acquire some $MASTER first.');
+  let payerAccount: PublicKey = fromAta;
+  let foundBalance = false;
+  try {
+    const acct = await getAccount(connection, fromAta, undefined, TOKEN_2022_PROGRAM_ID);
+    foundBalance = acct.amount >= BigInt(intent.amount);
+    if (!foundBalance) {
+      throw new Error(`Your $MASTER balance is too low for this wager (need ${intent.amount} base units, have ${acct.amount.toString()}).`);
+    }
+  } catch (e: any) {
+    if (e instanceof TokenAccountNotFoundError || e instanceof TokenInvalidAccountOwnerError) {
+      const parsed = await connection.getParsedTokenAccountsByOwner(
+        wallet.publicKey, { mint, programId: TOKEN_2022_PROGRAM_ID },
+      ).catch(err => {
+        throw new Error(`Could not look up your $MASTER token accounts (RPC error: ${err?.message ?? err}). Please try again.`);
+      });
+      const need = BigInt(intent.amount);
+      const hit = parsed.value.find(p => {
+        const raw = p.account.data.parsed?.info?.tokenAmount?.amount;
+        try { return raw && BigInt(raw) >= need; } catch { return false; }
+      });
+      if (!hit) {
+        const total = parsed.value.reduce((acc, p) => {
+          const raw = p.account.data.parsed?.info?.tokenAmount?.amount;
+          try { return acc + (raw ? BigInt(raw) : 0n); } catch { return acc; }
+        }, 0n);
+        if (total === 0n) {
+          throw new Error('This wallet has no $MASTER. Acquire some first, or connect a different wallet.');
+        }
+        throw new Error(`This wallet does not have a single $MASTER account with enough balance for this wager (need ${intent.amount} base units, max account balance found = ${total.toString()}). Consolidate balances or lower the wager.`);
+      }
+      payerAccount = hit.pubkey;
+      foundBalance = true;
+    } else if (/balance is too low/i.test(String(e?.message))) {
+      throw e;
+    } else {
+      throw new Error(`Could not verify your $MASTER balance (RPC error: ${e?.message ?? e}). If this persists, set VITE_SOLANA_RPC to a private RPC endpoint.`);
+    }
+  }
+  if (!foundBalance) {
+    throw new Error('This wallet has no $MASTER. Acquire some first, or connect a different wallet.');
   }
 
   ixs.push(createTransferInstruction(
-    fromAta, toAta, wallet.publicKey, BigInt(intent.amount), [], TOKEN_PROGRAM_ID,
+    payerAccount, toAta, wallet.publicKey, BigInt(intent.amount), [], TOKEN_2022_PROGRAM_ID,
   ));
 
   // Memo on its own instruction so the server can find it deterministically.

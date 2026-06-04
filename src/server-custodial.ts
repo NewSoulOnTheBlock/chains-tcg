@@ -18,7 +18,7 @@ import {
 } from '@solana/web3.js';
 import {
   getAssociatedTokenAddress, createAssociatedTokenAccountInstruction,
-  createTransferInstruction, createBurnInstruction, getAccount, TOKEN_PROGRAM_ID,
+  createTransferInstruction, createBurnInstruction, getAccount, TOKEN_2022_PROGRAM_ID,
 } from '@solana/spl-token';
 import { MASTER_MINT, MASTER_DECIMALS, masterUi } from './wager-program';
 import { getPool } from './db';
@@ -105,7 +105,7 @@ export async function createIntent(args: {
   const pool = getPool()!;
 
   const amountBase = masterUi(args.amount).toString();
-  const escrowAta = (await getAssociatedTokenAddress(MASTER_MINT, kp.publicKey)).toBase58();
+  const escrowAta = (await getAssociatedTokenAddress(MASTER_MINT, kp.publicKey, false, TOKEN_2022_PROGRAM_ID)).toBase58();
 
   await pool.query(
     `INSERT INTO custodial_wagers (match_id, amount, mint, created_at)
@@ -158,8 +158,8 @@ export async function markFunded(args: {
   if (tx.meta?.err) throw new Error('deposit tx failed on-chain');
 
   const player = new PublicKey(args.pubkey);
-  const playerAta = (await getAssociatedTokenAddress(MASTER_MINT, player)).toBase58();
-  const escrowAta = (await getAssociatedTokenAddress(MASTER_MINT, kp.publicKey)).toBase58();
+  const playerAta = (await getAssociatedTokenAddress(MASTER_MINT, player, false, TOKEN_2022_PROGRAM_ID)).toBase58();
+  const escrowAta = (await getAssociatedTokenAddress(MASTER_MINT, kp.publicKey, false, TOKEN_2022_PROGRAM_ID)).toBase58();
   const expectedMemo = memoFor(args.matchID, args.playerID);
   const expectedAmount = BigInt(row.amount);
 
@@ -173,13 +173,15 @@ export async function markFunded(args: {
   for (const ix of allInstrs) {
     const program = (ix as any).program;
     const parsed = (ix as any).parsed;
-    if (program === 'spl-token' && parsed?.type === 'transfer') {
+    // Accept both classic SPL Token and Token-2022 (pump.fun moved to 2022).
+    const isToken = program === 'spl-token' || program === 'spl-token-2022';
+    if (isToken && parsed?.type === 'transfer') {
       const info = parsed.info;
       const matchSrc = info.source === playerAta;
       const matchDst = info.destination === escrowAta;
       const amt = BigInt(info.amount ?? info.tokenAmount?.amount ?? 0);
       if (matchSrc && matchDst && amt >= expectedAmount) sawTransfer = true;
-    } else if (program === 'spl-token' && parsed?.type === 'transferChecked') {
+    } else if (isToken && parsed?.type === 'transferChecked') {
       const info = parsed.info;
       const matchSrc = info.source === playerAta;
       const matchDst = info.destination === escrowAta;
@@ -248,11 +250,11 @@ export async function settleCustodialMatch(opts: {
       for (const [seat, pubkey] of [['0', row.p0_pubkey], ['1', row.p1_pubkey]] as const) {
         if (!pubkey) continue;
         const dest = new PublicKey(pubkey);
-        const destAta = await getAssociatedTokenAddress(MASTER_MINT, dest);
-        try { await getAccount(conn(), destAta); }
-        catch { ixs.push(createAssociatedTokenAccountInstruction(kp.publicKey, destAta, dest, MASTER_MINT)); }
-        const srcAta = await getAssociatedTokenAddress(MASTER_MINT, kp.publicKey);
-        ixs.push(createTransferInstruction(srcAta, destAta, kp.publicKey, amountBase, [], TOKEN_PROGRAM_ID));
+        const destAta = await getAssociatedTokenAddress(MASTER_MINT, dest, false, TOKEN_2022_PROGRAM_ID);
+        try { await getAccount(conn(), destAta, undefined, TOKEN_2022_PROGRAM_ID); }
+        catch { ixs.push(createAssociatedTokenAccountInstruction(kp.publicKey, destAta, dest, MASTER_MINT, TOKEN_2022_PROGRAM_ID)); }
+        const srcAta = await getAssociatedTokenAddress(MASTER_MINT, kp.publicKey, false, TOKEN_2022_PROGRAM_ID);
+        ixs.push(createTransferInstruction(srcAta, destAta, kp.publicKey, amountBase, [], TOKEN_2022_PROGRAM_ID));
         void seat;
       }
       const tx = new Transaction().add(...ixs);
@@ -279,15 +281,15 @@ export async function settleCustodialMatch(opts: {
 
   try {
     const winner = new PublicKey(winnerPubkeyStr);
-    const winnerAta = await getAssociatedTokenAddress(MASTER_MINT, winner);
-    const escrowAta = await getAssociatedTokenAddress(MASTER_MINT, kp.publicKey);
+    const winnerAta = await getAssociatedTokenAddress(MASTER_MINT, winner, false, TOKEN_2022_PROGRAM_ID);
+    const escrowAta = await getAssociatedTokenAddress(MASTER_MINT, kp.publicKey, false, TOKEN_2022_PROGRAM_ID);
 
     const ixs = [];
-    try { await getAccount(conn(), winnerAta); }
-    catch { ixs.push(createAssociatedTokenAccountInstruction(kp.publicKey, winnerAta, winner, MASTER_MINT)); }
-    ixs.push(createTransferInstruction(escrowAta, winnerAta, kp.publicKey, payout, [], TOKEN_PROGRAM_ID));
+    try { await getAccount(conn(), winnerAta, undefined, TOKEN_2022_PROGRAM_ID); }
+    catch { ixs.push(createAssociatedTokenAccountInstruction(kp.publicKey, winnerAta, winner, MASTER_MINT, TOKEN_2022_PROGRAM_ID)); }
+    ixs.push(createTransferInstruction(escrowAta, winnerAta, kp.publicKey, payout, [], TOKEN_2022_PROGRAM_ID));
     if (burn > 0n) {
-      ixs.push(createBurnInstruction(escrowAta, MASTER_MINT, kp.publicKey, burn, [], TOKEN_PROGRAM_ID));
+      ixs.push(createBurnInstruction(escrowAta, MASTER_MINT, kp.publicKey, burn, [], TOKEN_2022_PROGRAM_ID));
     }
     const tx = new Transaction().add(...ixs);
     tx.feePayer = kp.publicKey;
@@ -362,7 +364,7 @@ export async function adminRefund(matchID: string): Promise<{
   if (row.refunded) return { ok: true, refundedSeats: [], sig: row.settle_sig };
 
   const amountBase = BigInt(row.amount);
-  const escrowAta = await getAssociatedTokenAddress(MASTER_MINT, kp.publicKey);
+  const escrowAta = await getAssociatedTokenAddress(MASTER_MINT, kp.publicKey, false, TOKEN_2022_PROGRAM_ID);
   const ixs = [];
   const refundedSeats: Array<'0' | '1'> = [];
   for (const [seat, pubkey, sig] of [
@@ -371,10 +373,10 @@ export async function adminRefund(matchID: string): Promise<{
   ]) {
     if (!sig || !pubkey) continue;
     const dest = new PublicKey(pubkey);
-    const destAta = await getAssociatedTokenAddress(MASTER_MINT, dest);
-    try { await getAccount(conn(), destAta); }
-    catch { ixs.push(createAssociatedTokenAccountInstruction(kp.publicKey, destAta, dest, MASTER_MINT)); }
-    ixs.push(createTransferInstruction(escrowAta, destAta, kp.publicKey, amountBase, [], TOKEN_PROGRAM_ID));
+    const destAta = await getAssociatedTokenAddress(MASTER_MINT, dest, false, TOKEN_2022_PROGRAM_ID);
+    try { await getAccount(conn(), destAta, undefined, TOKEN_2022_PROGRAM_ID); }
+    catch { ixs.push(createAssociatedTokenAccountInstruction(kp.publicKey, destAta, dest, MASTER_MINT, TOKEN_2022_PROGRAM_ID)); }
+    ixs.push(createTransferInstruction(escrowAta, destAta, kp.publicKey, amountBase, [], TOKEN_2022_PROGRAM_ID));
     refundedSeats.push(seat);
   }
   if (ixs.length === 0) {
