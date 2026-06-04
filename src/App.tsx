@@ -38,11 +38,51 @@ const COLOR_ORDER: Color[] = ['bnb', 'sol', 'hl', 'eth', 'xrp'];
 const lobby = new LobbyClient({ server: SERVER_BASE || undefined });
 
 // Lazy-init Solana connection (only used for wagered matches).
+// We build a wrapper that transparently fails over to a public-RPC pool when
+// the primary endpoint 403s or rate-limits — common when the build did not
+// inject VITE_SOLANA_RPC (e.g. HELIUS_API_KEY unset in the deploy env).
 let _solConn: Connection | null = null;
 function solConn(): Connection {
   if (!_solConn) {
-    const url = (import.meta.env.VITE_SOLANA_RPC as string | undefined) || 'https://api.mainnet-beta.solana.com';
-    _solConn = new Connection(url, 'confirmed');
+    const env = (import.meta.env.VITE_SOLANA_RPC as string | undefined) || '';
+    const fallbacks = [
+      'https://solana-rpc.publicnode.com',
+      'https://solana-mainnet.public.blastapi.io',
+      'https://solana.drpc.org',
+      'https://api.mainnet-beta.solana.com',
+    ];
+    const candidates = [env, ...fallbacks].filter(Boolean) as string[];
+    const conns = candidates.map(u => new Connection(u, 'confirmed'));
+    const primary = conns[0];
+    // Patch _rpcRequest on the primary so any 403/429/5xx auto-rotates.
+    let idx = 0;
+    const tryNext = async (method: string, args: any[]): Promise<any> => {
+      let lastErr: any;
+      for (let i = 0; i < conns.length; i++) {
+        const c = conns[(idx + i) % conns.length];
+        try {
+          const res = await (c as any)._rpcRequestOriginal(method, args);
+          if (res?.error && /403|forbidden|429|rate/i.test(JSON.stringify(res.error))) {
+            lastErr = new Error(JSON.stringify(res.error));
+            continue;
+          }
+          if (i > 0) {
+            idx = (idx + i) % conns.length;
+            try { console.warn('[rpc] failover →', candidates[idx]); } catch {}
+          }
+          return res;
+        } catch (e: any) {
+          lastErr = e;
+          if (!/403|forbidden|429|rate|fetch|network|timeout/i.test(String(e?.message))) throw e;
+        }
+      }
+      throw lastErr ?? new Error('all RPC endpoints failed');
+    };
+    for (const c of conns) {
+      (c as any)._rpcRequestOriginal = (c as any)._rpcRequest.bind(c);
+    }
+    (primary as any)._rpcRequest = tryNext;
+    _solConn = primary;
   }
   return _solConn;
 }
