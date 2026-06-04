@@ -94,15 +94,40 @@ export function VoiceChat({
         if (cancelled || !window.Peer) return;
         const myId = peerIdFor(matchID, playerID);
         const otherId = peerIdFor(matchID, playerID === '0' ? '1' : '0');
-        const peer = new window.Peer(myId, { debug: 1 });
+        // Free public TURN (openrelay) so users behind symmetric NAT or
+        // cellular CGNAT can actually pass audio. Without TURN PeerJS
+        // happily signals + reports "stream" but no media frames flow.
+        const peer = new window.Peer(myId, {
+          debug: 1,
+          config: {
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: 'stun:global.stun.twilio.com:3478' },
+              { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
+              { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+              { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+            ],
+          },
+        });
         peerRef.current = peer;
         setStatus('connecting');
 
         const attachRemote = (remote: MediaStream) => {
-          if (audioRef.current) {
-            audioRef.current.srcObject = remote;
-            audioRef.current.play().catch(() => {});
-          }
+          const el = audioRef.current;
+          if (!el) return;
+          el.srcObject = remote;
+          el.muted = false;
+          el.volume = 1.0;
+          const tryPlay = () => el.play().catch(err => {
+            console.warn('[voice] autoplay blocked, will retry on click:', err);
+            // One-shot listener: any future click anywhere on the doc kicks playback.
+            const kick = () => { el.play().catch(() => {}); document.removeEventListener('click', kick); };
+            document.addEventListener('click', kick, { once: true });
+          });
+          tryPlay();
+          console.log('[voice] remote stream attached', {
+            tracks: remote.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, muted: t.muted })),
+          });
           setStatus('live');
         };
 
@@ -140,6 +165,7 @@ export function VoiceChat({
           // Common case: "peer-unavailable" while the other side hasn't joined yet.
           // Don't surface that one; surface real failures (network, broker down, etc.).
           const msg = String(e?.type || e?.message || e);
+          console.warn('[voice] peer error:', msg, e);
           if (msg.includes('peer-unavailable')) return;
           setError(msg); setStatus('error');
         });
