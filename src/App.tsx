@@ -33,6 +33,7 @@ import ShinyText, { ShinyBrand, ShinyButtonLabel } from './ShinyText';
 // gzipped), which we don't want in the in-game bundle. Loaded on demand
 // only when the Landing screen mounts.
 const PixelTrail = React.lazy(() => import('./PixelTrail'));
+import SideRays from './SideRays';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 // Server base: in dev Vite proxies /games (lobby) and /socket.io to :8000.
@@ -171,6 +172,26 @@ function Login({ onLogin, onFirstTime }: {
       color: '#F8F8F8',
       background: 'linear-gradient(180deg, #050514 0%, #0A0A22 35%, #120A35 70%, #1A103D 100%)',
     }}>
+      {/* SideRays god-ray background — top-right origin, brand gold + soft
+          purple. position:fixed full-bleed behind the rest of the login UI
+          (which sits in normal flow above; new stacking context via the
+          following content forms the correct z-order). pointer-events:none
+          is baked into the component's container CSS so clicks pass through. */}
+      <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
+        <SideRays
+          speed={2.2}
+          rayColor1="#f3ba2f"
+          rayColor2="#9945ff"
+          intensity={2}
+          spread={2.2}
+          origin="top-right"
+          tilt={-4}
+          saturation={1.4}
+          blend={0.65}
+          falloff={1.6}
+          opacity={0.85}
+        />
+      </div>
       <style>{`
         @keyframes loginGlow {
           0%, 100% { text-shadow: 0 0 22px rgba(212,175,55,0.50), 0 0 6px rgba(212,175,55,0.7); }
