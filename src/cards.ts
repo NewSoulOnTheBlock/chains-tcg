@@ -168,7 +168,7 @@ const IMAGES: Record<string, string> = {
   xrp_algo:     emo('1f9ee'), // 🧮 abacus (Trading Algorithm)
   xrp_assassin: emo('1f50d'), // 🔍 magnifying glass (Doxx)
   xrp_strike:   emo('1f40b'), // 🐋 whale (Whale Dump)
-  xrp_subpoena: emo('1f4dd'), // 📝 memo (SEC Subpoena)
+  xrp_subpoena: '/cards/xrp_subpoena.jpg?v=1',
 };
 
 /**
