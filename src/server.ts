@@ -15,13 +15,26 @@ const distDir = path.resolve(__dirname, '..', 'dist');
 
 const PORT = Number(process.env.PORT) || 8000;
 
+// Boardgame.io's koa-cors enforces this list on EVERY /api/* and /games/*
+// request. If the request's Origin header isn't in this array (and isn't a
+// LOCALHOST_IN_DEVELOPMENT match) the server returns 403 before our routes
+// run — so failing to include the prod domain here will break the entire
+// REST surface for browser clients.
+//
+// We hard-code the production domains as a safety net so a mis-set
+// ALLOW_ORIGIN env var can't take the site down. ALLOW_ORIGIN (comma-
+// separated) is still honored on top of these.
+const PROD_ORIGINS = [
+  'https://www.masterstcg.com',
+  'https://masterstcg.com',
+];
+
 const server = Server({
   games: [ChainsTCG],
   origins: [
     Origins.LOCALHOST_IN_DEVELOPMENT,
     Origins.LOCALHOST,
-    // Allow same-origin (when client served from this server). ALLOW_ORIGIN may be a
-    // single URL or a comma-separated list (e.g. "https://www.masterstcg.com,https://masterstcg.com").
+    ...PROD_ORIGINS,
     ...((process.env.ALLOW_ORIGIN || '')
       .split(',')
       .map(s => s.trim())
