@@ -87,7 +87,7 @@ const IMAGES: Record<string, string> = {
 
   // Solana memes
   sol_pnut:     '/cards/pnut.webp?v=2',
-  sol_bonk:     cmc(23095),
+  sol_bonk:     '/cards/bonk.png?v=1',
   sol_popcat:   cmc(28782),
   sol_mew:      cmc(30126),
   sol_bome:     '/cards/bome.jpg?v=2',
