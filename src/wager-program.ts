@@ -335,8 +335,54 @@ export async function sendIxs(
   tx.recentBlockhash = blockhash;
   if (extraSigners.length) tx.partialSign(...extraSigners);
   const signed = await wallet.signTransaction(tx);
-  const sig = await conn.sendRawTransaction(signed.serialize(), { skipPreflight: false });
-  await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+  const raw = signed.serialize();
+  const sig = await conn.sendRawTransaction(raw, { skipPreflight: false, maxRetries: 0 });
+  // Robust confirmation loop:
+  //  - Re-broadcast the signed tx every 2s (defends against single-RPC drops).
+  //  - Poll signature status. Accept on confirmed/finalized.
+  //  - If the blockhash window passes, do ONE last status check (the tx may
+  //    have landed even if our confirm timed out) before declaring failure.
+  const deadline = Date.now() + 75_000; // ~75s ceiling — usually < 30s.
+  let confirmed = false;
+  while (Date.now() < deadline) {
+    try {
+      const st = await conn.getSignatureStatuses([sig], { searchTransactionHistory: true });
+      const s = st?.value?.[0];
+      if (s) {
+        if (s.err) throw new Error(`tx failed on-chain: ${JSON.stringify(s.err)}`);
+        if (s.confirmationStatus === 'confirmed' || s.confirmationStatus === 'finalized') {
+          confirmed = true;
+          break;
+        }
+      }
+      // Best-effort current height to bail early if blockhash truly expired.
+      try {
+        const bh = await conn.getBlockHeight('confirmed');
+        if (bh > lastValidBlockHeight + 150 && !s) {
+          // 150-slot grace past the window; if still nothing, give up.
+          break;
+        }
+      } catch { /* RPC hiccup; keep polling */ }
+      // Rebroadcast (best-effort — ignore failures, the pool failover handles it).
+      conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 }).catch(() => {});
+    } catch (e: any) {
+      // If status check itself failed, just try again next loop.
+      if (/tx failed on-chain/.test(String(e?.message))) throw e;
+    }
+    await new Promise(r => setTimeout(r, 2_000));
+  }
+  if (!confirmed) {
+    // Final check after the loop in case the last status poll missed a
+    // confirmation that landed mid-tick.
+    const st = await conn.getSignatureStatuses([sig], { searchTransactionHistory: true }).catch(() => null);
+    const s = st?.value?.[0];
+    if (s && !s.err && (s.confirmationStatus === 'confirmed' || s.confirmationStatus === 'finalized')) {
+      confirmed = true;
+    }
+  }
+  if (!confirmed) {
+    throw new Error(`Transaction ${sig} did not confirm in time. It may still land — check Solscan in a minute before retrying.`);
+  }
   return sig;
 }
 
