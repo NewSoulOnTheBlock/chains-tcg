@@ -34,6 +34,7 @@ import ShinyText, { ShinyBrand, ShinyButtonLabel } from './ShinyText';
 // only when the Landing screen mounts.
 const PixelTrail = React.lazy(() => import('./PixelTrail'));
 import SideRays from './SideRays';
+import Iridescence from './Iridescence';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 // Server base: in dev Vite proxies /games (lobby) and /socket.io to :8000.
@@ -1697,8 +1698,27 @@ function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void })
   const achievements = useMemo(() => computeAchievements({ prof, deck, ranked }), [prof, deck, ranked]);
 
   return (
-    <div style={{ fontFamily: PROFILE_FONT, background: PROFILE_TOKENS.bg, minHeight: '100vh', color: '#e9eef7' }}>
-      <ProfileTopBar onBack={onBack} onEdit={() => setEditing(true)} />
+    <div style={{ fontFamily: PROFILE_FONT, background: PROFILE_TOKENS.bg, minHeight: '100vh', color: '#e9eef7', position: 'relative' }}>
+      {/* Iridescent gold-purple shimmer background. Fixed full-bleed, z=0,
+          pointer-events: none, dimmed via opacity so the page UI on top
+          stays readable. Tint biases R+B high, G mid so the rainbow shader
+          biases toward gold highlights and purple shadows. */}
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 0,
+        pointerEvents: 'none',
+        opacity: 0.32,
+        mixBlendMode: 'screen',
+      }}>
+        <Iridescence
+          color={[1.0, 0.62, 0.95]}
+          speed={0.6}
+          amplitude={0.08}
+          mouseReact={false}
+        />
+      </div>
+
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        <ProfileTopBar onBack={onBack} onEdit={() => setEditing(true)} />
 
       {loading ? (
         <ProfileSkeleton />
@@ -1751,6 +1771,7 @@ function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void })
           onSaved={async () => { await reload(); setEditing(false); }}
         />
       )}
+      </div>
     </div>
   );
 }
