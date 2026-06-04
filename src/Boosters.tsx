@@ -17,6 +17,7 @@ import {
   getBoosterSupply, getBoosterInventory, buyBoosterIntent, openBoosterPack,
   type BoosterSupply, type BoosterInventory,
 } from './boosters-api';
+import { ShinyBrand, ShinyButtonLabel } from './ShinyText';
 
 type Currency = 'sol' | 'master';
 
@@ -145,8 +146,8 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
         background: 'rgba(6,3,18,0.85)', backdropFilter: 'blur(8px)',
         borderBottom: '1px solid #2a1e54',
       }}>
-        <button onClick={onBack} style={ghostBtn}>← Back</button>
-        <div style={{ fontWeight: 800, letterSpacing: 2, fontSize: 14 }}>📦 BOOSTERS — GENESIS SET</div>
+        <button onClick={onBack} style={ghostBtn}><ShinyButtonLabel text="← Back" /></button>
+        <div style={{ fontWeight: 800, letterSpacing: 2, fontSize: 14 }}><ShinyBrand text="📦 BOOSTERS — GENESIS SET" /></div>
         <div style={{ minWidth: 80, textAlign: 'right', fontSize: 11, opacity: 0.7 }}>
           {walletAddress ? short(walletAddress) : 'no wallet linked'}
         </div>
@@ -163,7 +164,7 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
             <PackArt />
             <div style={{ flex: '1 1 280px', minWidth: 240 }}>
               <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>
-                Genesis Booster Pack
+                <ShinyBrand text="Genesis Booster Pack" />
               </div>
               <div style={{ fontSize: 13, opacity: 0.85, marginTop: 4, lineHeight: 1.5 }}>
                 10 cards per pack. Guaranteed split:
@@ -197,10 +198,12 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
                   boxShadow: '0 8px 24px rgba(108,75,216,0.35)',
                 }}
               >
-                {soldOut ? 'SOLD OUT' :
+                <ShinyButtonLabel text={
+                  soldOut ? 'SOLD OUT' :
                   !walletAddress ? 'LINK SOLANA WALLET IN PROFILE' :
                   busy === 'buy' ? 'PROCESSING…' :
-                  `BUY 1 PACK${isLive ? '' : ' (PREVIEW)'}`}
+                  `BUY 1 PACK${isLive ? '' : ' (PREVIEW)'}`
+                } />
               </button>
 
               {err && (
@@ -365,7 +368,7 @@ function SealedTile({ packId, mintedAt, opening, onOpen }: {
         background: opening ? '#3a3050' : '#3aa66a', color: '#fff',
         border: 'none', borderRadius: 6, padding: '8px 10px',
         fontWeight: 800, cursor: opening ? 'wait' : 'pointer', fontSize: 12, letterSpacing: 1,
-      }}>{opening ? 'OPENING…' : '✂ OPEN'}</button>
+      }}><ShinyButtonLabel text={opening ? 'OPENING…' : '✂ OPEN'} /></button>
       <div style={{ fontSize: 9, opacity: 0.4, fontFamily: 'monospace', textAlign: 'center' }}>{packId}</div>
     </div>
   );
@@ -431,7 +434,7 @@ function RevealModal({ cardIds, onClose }: { cardIds: string[]; onClose: () => v
         boxShadow: '0 18px 50px rgba(0,0,0,0.6)',
       }}>
         <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: 2, marginBottom: 14, textAlign: 'center' }}>
-          ✨ PACK CONTENTS ✨
+          <ShinyBrand text="✨ PACK CONTENTS ✨" />
         </div>
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8,
@@ -451,7 +454,7 @@ function RevealModal({ cardIds, onClose }: { cardIds: string[]; onClose: () => v
           background: '#6c4bd8', color: '#fff',
           border: 'none', borderRadius: 8, padding: '12px 16px',
           fontWeight: 800, letterSpacing: 1, cursor: 'pointer', fontSize: 14,
-        }}>ADD TO LIBRARY</button>
+        }}><ShinyButtonLabel text="ADD TO LIBRARY" /></button>
       </div>
     </div>
   );
@@ -474,7 +477,10 @@ const ghostBtn: React.CSSProperties = {
 };
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: 1.5 }}>{children}</div>;
+  // Auto-shine plain-string section titles so every header on the page picks
+  // up the brand shimmer consistently.
+  const inner = typeof children === 'string' ? <ShinyBrand text={children} /> : children;
+  return <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: 1.5 }}>{inner}</div>;
 }
 
 function Empty({ children }: { children: React.ReactNode }) {

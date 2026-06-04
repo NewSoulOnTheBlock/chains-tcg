@@ -28,6 +28,7 @@ import type { Difficulty } from './bot';
 import type { SoloMode } from './SoloClient';
 import { saveDailyResult, todayKey, todayBest } from './dailyChallenge';
 import { BoostersPage } from './Boosters';
+import ShinyText, { ShinyBrand, ShinyButtonLabel } from './ShinyText';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 // Server base: in dev Vite proxies /games (lobby) and /socket.io to :8000.
@@ -1422,7 +1423,9 @@ function Landing({
         padding: mobile ? '10px 12px' : '14px 22px',
         gap: 8, flexWrap: 'wrap',
       }}>
-        <div style={{ fontWeight: 800, fontSize: mobile ? 13 : 16, letterSpacing: 1.5, textShadow: '0 2px 8px #000' }}>MEMETIC MASTERS TCG</div>
+        <div style={{ fontWeight: 800, fontSize: mobile ? 13 : 16, letterSpacing: 1.5, textShadow: '0 2px 8px #000' }}>
+          <ShinyBrand text="MEMETIC MASTERS TCG" />
+        </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, color: '#ddd', textShadow: '0 1px 4px #000' }}>Signed in as <b>{myName}</b></span>
           <button onClick={onLogout} style={ghostBtn}>Sign out</button>
@@ -1505,6 +1508,11 @@ function MenuBtn({ children, onClick, primary, ranked }: { children: React.React
   const shadow = ranked
     ? '0 6px 24px rgba(192,132,252,0.5)'
     : primary ? '0 6px 24px rgba(255,126,26,0.45)' : '0 4px 16px rgba(0,0,0,0.6)';
+  // Auto-shine the button label when it's plain text. The motion span has
+  // pointer-events: none-ish behavior built-in; clicks still hit the button.
+  const renderedChildren = typeof children === 'string'
+    ? <ShinyButtonLabel text={children} />
+    : children;
   return (
     <button
       onClick={onClick}
@@ -1526,7 +1534,7 @@ function MenuBtn({ children, onClick, primary, ranked }: { children: React.React
       onMouseDown={e => (e.currentTarget.style.transform = 'translateY(1px)')}
       onMouseUp={e => (e.currentTarget.style.transform = 'translateY(0)')}
       onMouseLeave={e => (e.currentTarget.style.transform = 'translateY(0)')}
-    >{children}</button>
+    >{renderedChildren}</button>
   );
 }
 
@@ -4870,7 +4878,7 @@ function SoloSetupModal({
               border: 'none', borderRadius: 8, padding: '12px 16px',
               fontWeight: 800, cursor: customInvalid ? 'not-allowed' : 'pointer', fontSize: 14, letterSpacing: 1,
               opacity: customInvalid ? 0.6 : 1,
-            }}>START MATCH</button>
+            }}><ShinyButtonLabel text="START MATCH" /></button>
           <button onClick={onClose} style={{
             background: 'transparent', color: '#aaa',
             border: '1px solid #555', borderRadius: 8,
