@@ -62,7 +62,7 @@ function solConn(): Connection {
         const c = conns[(idx + i) % conns.length];
         try {
           const res = await (c as any)._rpcRequestOriginal(method, args);
-          if (res?.error && /403|forbidden|429|rate/i.test(JSON.stringify(res.error))) {
+          if (res?.error && /401|403|forbidden|429|rate|invalid api key|unauthor/i.test(JSON.stringify(res.error))) {
             lastErr = new Error(JSON.stringify(res.error));
             continue;
           }
@@ -73,7 +73,7 @@ function solConn(): Connection {
           return res;
         } catch (e: any) {
           lastErr = e;
-          if (!/403|forbidden|429|rate|fetch|network|timeout/i.test(String(e?.message))) throw e;
+          if (!/401|403|forbidden|429|rate|invalid api key|unauthor|fetch|network|timeout/i.test(String(e?.message))) throw e;
         }
       }
       throw lastErr ?? new Error('all RPC endpoints failed');
