@@ -14,6 +14,8 @@
     "render:cards": "node scripts/render-cards.mjs"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
     "anchor": "^1.4.2",
@@ -25,6 +27,7 @@
     "pg": "^8.13.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "three": "^0.184.0",
     "utf-8-validate": "^6.0.6"
   },
   "devDependencies": {
@@ -33,6 +36,7 @@
     "@types/pg": "^8.11.10",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@types/three": "^0.184.1",
     "@vitejs/plugin-react": "^4.3.1",
     "playwright": "^1.60.0",
     "tsx": "^4.16.5",

@@ -29,6 +29,10 @@ import type { SoloMode } from './SoloClient';
 import { saveDailyResult, todayKey, todayBest } from './dailyChallenge';
 import { BoostersPage } from './Boosters';
 import ShinyText, { ShinyBrand, ShinyButtonLabel } from './ShinyText';
+// PixelTrail is lazy-loaded — it pulls in three + r3f + drei (~240KB
+// gzipped), which we don't want in the in-game bundle. Loaded on demand
+// only when the Landing screen mounts.
+const PixelTrail = React.lazy(() => import('./PixelTrail'));
 
 // ── Config ──────────────────────────────────────────────────────────────────
 // Server base: in dev Vite proxies /games (lobby) and /socket.io to :8000.
@@ -1415,6 +1419,24 @@ function Landing({
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0, imageRendering: 'pixelated' }}
       />
       <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.1) 55%, rgba(0,0,0,0.75) 100%)', zIndex: 1 }} />
+
+      {/* Pixelated gold cursor trail — z=1 sits between the dark overlay
+          and the UI (z=2). The menu buttons receive clicks because they sit
+          higher in the stacking context; the trail fills the empty space
+          around them. Suspense fallback is empty: the trail simply isn't
+          there for the ~200ms while three.js loads. */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
+        <React.Suspense fallback={null}>
+          <PixelTrail
+            gridSize={60}
+            trailSize={0.08}
+            maxAge={350}
+            interpolate={3}
+            color="#f3ba2f"
+            gooeyFilter={{ id: 'mmtcg-landing-goo', strength: 2 }}
+          />
+        </React.Suspense>
+      </div>
 
       {/* Top bar */}
       <div style={{
