@@ -143,16 +143,50 @@ export async function depositCustodialWager(args: {
   }));
 
   void SystemProgram; // silence unused import in some bundlers
-  const sig = await sendIxs(connection, wallet, ixs);
 
-  // Report to server (signed → server verifies on-chain).
-  await postJson('/api/wager/funded', {
-    matchID: intent.memo.split(':')[1],
-    playerID: intent.memo.split(':')[2],
-    pubkey: wallet.publicKey.toBase58(),
-    signature: sig,
-  });
-  return sig;
+  // Send tx. If the client-side polling can't confirm in time (RPC lag —
+  // happens often on free public endpoints) but the tx really did land,
+  // the signature still appears in the error message; capture and re-use
+  // it. The server independently verifies via getParsedTransaction with
+  // its own retries, so it can confirm what the client couldn't.
+  let sig: string;
+  try {
+    sig = await sendIxs(connection, wallet, ixs);
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    const m = msg.match(/Transaction ([1-9A-HJ-NP-Za-km-z]{40,90}) did not confirm/);
+    if (!m) throw e;
+    sig = m[1];
+    console.warn('[deposit] client confirm timed out; will let server verify', sig);
+  }
+
+  // Report to server with bounded retries — server will keep checking the
+  // chain until it finds the tx, but if its own RPC is briefly unhappy
+  // we don't want one transient 500 to permanently strand the deposit.
+  let lastErr: any;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      await postJson('/api/wager/funded', {
+        matchID: intent.memo.split(':')[1],
+        playerID: intent.memo.split(':')[2],
+        pubkey: wallet.publicKey.toBase58(),
+        signature: sig,
+      });
+      return sig;
+    } catch (e: any) {
+      lastErr = e;
+      // "signature not found on-chain" → wait and retry; tx is propagating.
+      if (/not found on-chain|still propagat|try again/i.test(String(e?.message))) {
+        await new Promise(r => setTimeout(r, 4_000 + attempt * 2_000));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error(
+    `Deposit tx ${sig} was sent but the server could not verify it after several attempts. ` +
+    `It may still land — wait a minute and either retry, or contact support with this signature for a manual recovery.`
+  );
 }
 
 /** Convert UI $MASTER amount to base-unit string (avoids JSON bigint pain). */

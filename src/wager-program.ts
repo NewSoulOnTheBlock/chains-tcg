@@ -342,7 +342,7 @@ export async function sendIxs(
   //  - Poll signature status. Accept on confirmed/finalized.
   //  - If the blockhash window passes, do ONE last status check (the tx may
   //    have landed even if our confirm timed out) before declaring failure.
-  const deadline = Date.now() + 75_000; // ~75s ceiling — usually < 30s.
+  const deadline = Date.now() + 120_000; // ~2min ceiling for stubborn RPCs.
   let confirmed = false;
   while (Date.now() < deadline) {
     try {
