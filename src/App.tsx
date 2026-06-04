@@ -1524,14 +1524,17 @@ function ContractAddressFooter() {
 }
 
 function MenuBtn({ children, onClick, primary, ranked }: { children: React.ReactNode; onClick: () => void; primary?: boolean; ranked?: boolean }) {
+  // Translucent white frosted-glass fills so the gold PixelTrail underneath
+  // can flash through the buttons on hover. Primary/Ranked keep a tinted
+  // wash to stay distinguishable but are still see-through.
   const bg = ranked
-    ? 'linear-gradient(90deg, #7b2cbf, #c084fc)'
-    : primary ? 'linear-gradient(90deg, #ff7e1a, #ffb347)' : 'rgba(20,20,20,0.75)';
+    ? 'linear-gradient(90deg, rgba(192,132,252,0.28), rgba(123,44,191,0.22))'
+    : primary
+      ? 'linear-gradient(90deg, rgba(255,179,71,0.32), rgba(255,126,26,0.22))'
+      : 'rgba(255,255,255,0.14)';
   const shadow = ranked
-    ? '0 6px 24px rgba(192,132,252,0.5)'
-    : primary ? '0 6px 24px rgba(255,126,26,0.45)' : '0 4px 16px rgba(0,0,0,0.6)';
-  // Auto-shine the button label when it's plain text. The motion span has
-  // pointer-events: none-ish behavior built-in; clicks still hit the button.
+    ? '0 6px 24px rgba(192,132,252,0.35)'
+    : primary ? '0 6px 24px rgba(255,126,26,0.35)' : '0 4px 16px rgba(0,0,0,0.45)';
   const renderedChildren = typeof children === 'string'
     ? <ShinyButtonLabel text={children} />
     : children;
@@ -1542,7 +1545,7 @@ function MenuBtn({ children, onClick, primary, ranked }: { children: React.React
         padding: '14px 22px',
         background: bg,
         color: '#fff',
-        border: (primary || ranked) ? 'none' : '1px solid rgba(255,255,255,0.25)',
+        border: '1px solid rgba(255,255,255,0.45)',
         borderRadius: 6,
         fontWeight: 800,
         fontSize: 16,
@@ -1550,8 +1553,10 @@ function MenuBtn({ children, onClick, primary, ranked }: { children: React.React
         cursor: 'pointer',
         textAlign: 'left',
         backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
         boxShadow: shadow,
-        transition: 'transform 0.08s ease',
+        transition: 'transform 0.08s ease, background 0.15s ease',
+        textShadow: '0 1px 4px rgba(0,0,0,0.85)',
       }}
       onMouseDown={e => (e.currentTarget.style.transform = 'translateY(1px)')}
       onMouseUp={e => (e.currentTarget.style.transform = 'translateY(0)')}
