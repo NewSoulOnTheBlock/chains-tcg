@@ -187,7 +187,10 @@ app.use(async (ctx, next) => {
       const cards    = Array.isArray(body?.cards) ? body.cards.map(String) : null;
       if (!deckName)   { ctx.status = 400; ctx.body = { error: 'deck name required' }; return; }
       if (!cards)      { ctx.status = 400; ctx.body = { error: 'cards[] required' }; return; }
-      const v = validateDeck(cards);
+      // Allow incomplete decks at creation so users can start with an empty
+      // shell and fill it in. Card IDs and copy limits are still enforced.
+      // Full size validation runs at activate time.
+      const v = validateDeck(cards, { requireSize: false });
       if (!v.ok) { ctx.status = 400; ctx.body = { error: 'invalid deck', issues: v.issues }; return; }
       try {
         const deck = await createDeck(name, deckName, cards);
@@ -207,8 +210,20 @@ app.use(async (ctx, next) => {
         const name    = (params.get('name') ?? '').trim();
         if (!name) { ctx.status = 400; ctx.body = { error: 'name required' }; return; }
         if (method === 'POST' && isAct) {
-          try { ctx.body = { deck: await activateDeck(name, deckId) }; }
-          catch (e: any) { ctx.status = 404; ctx.body = { error: String(e?.message ?? e) }; }
+          try {
+            // Enforce full deck legality before letting a deck become active —
+            // partial decks are fine to save but cannot be played.
+            const all = await listDecks(name);
+            const target = all.find(d => d.id === deckId);
+            if (!target) { ctx.status = 404; ctx.body = { error: 'Deck not found' }; return; }
+            const v = validateDeck(target.cards);
+            if (!v.ok) {
+              ctx.status = 400;
+              ctx.body = { error: 'Deck is incomplete — finish it before activating.', issues: v.issues };
+              return;
+            }
+            ctx.body = { deck: await activateDeck(name, deckId) };
+          } catch (e: any) { ctx.status = 404; ctx.body = { error: String(e?.message ?? e) }; }
           return;
         }
         if (method === 'PUT' && !isAct) {
@@ -218,7 +233,8 @@ app.use(async (ctx, next) => {
           if (body?.cards !== undefined) {
             if (!Array.isArray(body.cards)) { ctx.status = 400; ctx.body = { error: 'cards[] required' }; return; }
             const cards = body.cards.map(String);
-            const v = validateDeck(cards);
+            // Saving in progress: allow partial decks (validate IDs + copies only).
+            const v = validateDeck(cards, { requireSize: false });
             if (!v.ok) { ctx.status = 400; ctx.body = { error: 'invalid deck', issues: v.issues }; return; }
             patch.cards = cards;
           }

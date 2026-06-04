@@ -412,10 +412,11 @@ export type DeckIssue = { code: string; message: string };
 export type DeckValidation = { ok: boolean; size: number; issues: DeckIssue[] };
 
 /** Validate a custom deck. Returns ok + total size + every issue (so the UI can list them all). */
-export function validateDeck(cards: string[]): DeckValidation {
+export function validateDeck(cards: string[], opts?: { requireSize?: boolean }): DeckValidation {
+  const requireSize = opts?.requireSize ?? true;
   const issues: DeckIssue[] = [];
   const size = cards.length;
-  if (size !== DECK_SIZE) {
+  if (requireSize && size !== DECK_SIZE) {
     issues.push({
       code: 'size',
       message: `Deck must be exactly ${DECK_SIZE} cards (currently ${size}).`,
