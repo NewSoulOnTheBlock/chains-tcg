@@ -136,7 +136,7 @@ const IMAGES: Record<string, string> = {
 
   // ── Solana machines/moves ──
   sol_priority: '/cards/mev-bundler.png?v=1',
-  sol_oracle:   emo('1f9e0'), // 🧠 brain (AI Trading Agent)
+  sol_oracle:   '/cards/ai-trading-agent.png?v=1',
   sol_amm:      '/cards/amm-router.png?v=1',
   sol_tgbot:    emo('1f4ac'), // 💬 chat bubble (Telegram Bot Suite)
   sol_zap:      emo('1f3f9'), // 🏹 bow & arrow (Snipe)
