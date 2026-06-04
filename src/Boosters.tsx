@@ -12,12 +12,24 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CARDS, COLOR_META, type Color } from './cards';
 import { getProfileApi } from './profiles';
+import Lightfall from './Lightfall';
 import {
   getBoosterSupply, getBoosterInventory, buyBoosterIntent, openBoosterPack,
   type BoosterSupply, type BoosterInventory,
 } from './boosters-api';
 
 type Currency = 'sol' | 'master';
+
+// Brand-logo palette: 4 of the 5 chain colors (XRP's near-black is dropped —
+// black streaks would be invisible against the dark background). Used to tint
+// the Lightfall WebGL background behind the entire Boosters page.
+const BRAND_STREAK_COLORS = [
+  COLOR_META.bnb.hex, // #f3ba2f BnB orange-gold
+  COLOR_META.sol.hex, // #9945ff Solana purple
+  COLOR_META.hl.hex,  // #50d2c1 Hyperliquid teal
+  COLOR_META.eth.hex, // #f5f5f5 Ethereum white
+];
+const BRAND_BG_GLOW = COLOR_META.sol.hex; // anchor ambient glow to Solana purple — matches existing radial gradient
 
 export function BoostersPage({ myName, onBack }: { myName: string; onBack: () => void }) {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
@@ -92,9 +104,39 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
   return (
     <div style={{
       position: 'fixed', inset: 0, overflow: 'auto',
-      background: 'radial-gradient(ellipse at top, #1a1240 0%, #060312 60%, #000 100%)',
+      background: '#050015',
       color: '#fff', fontFamily: 'Inter, system-ui, sans-serif',
     }}>
+      {/* WebGL brand-color light-streak background. Pointer-events disabled
+          so the canvas doesn't block clicks on the actual UI above it. */}
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 0,
+        pointerEvents: 'none',
+      }}>
+        <Lightfall
+          colors={BRAND_STREAK_COLORS}
+          backgroundColor={BRAND_BG_GLOW}
+          speed={0.8}
+          streakCount={6}
+          streakWidth={1.1}
+          streakLength={1.2}
+          glow={1.05}
+          density={0.8}
+          twinkle={1}
+          zoom={2.4}
+          backgroundGlow={0.55}
+          opacity={0.85}
+          mouseInteraction={false}
+        />
+        {/* Dark vignette so foreground content stays readable. */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'radial-gradient(ellipse at center, rgba(0,0,0,0) 30%, rgba(0,0,0,0.55) 100%)',
+        }} />
+      </div>
+
+      {/* All real content sits above the canvas. */}
+      <div style={{ position: 'relative', zIndex: 1 }}>
       {/* Top bar */}
       <div style={{
         position: 'sticky', top: 0, zIndex: 5,
@@ -211,6 +253,7 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
         {reveal && (
           <RevealModal cardIds={reveal.cardIds} onClose={() => setReveal(null)} />
         )}
+      </div>
       </div>
     </div>
   );

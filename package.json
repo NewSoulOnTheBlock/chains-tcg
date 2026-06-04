@@ -20,6 +20,7 @@
     "boardgame.io": "^0.50.2",
     "bufferutil": "^4.0.1",
     "koa-static": "^5.0.0",
+    "ogl": "^1.0.11",
     "pg": "^8.13.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
