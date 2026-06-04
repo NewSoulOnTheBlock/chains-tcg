@@ -227,11 +227,16 @@ function Login({ onLogin, onFirstTime }: {
       />
 
       {/* SideRays god-ray background — top-right origin, brand gold + soft
-          purple. position:fixed full-bleed behind the rest of the login UI
-          (which sits in normal flow above; new stacking context via the
-          following content forms the correct z-order). pointer-events:none
-          is baked into the component's container CSS so clicks pass through. */}
-      <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
+          purple. Sits at z=1 so it paints OVER the static lobby-bg image,
+          radial gradients, and drifting fog (all z=0); mix-blend-mode
+          "screen" makes it add light additively rather than block the
+          existing scene. The floating particles (also z=1) and content
+          grid (z=2) sit above. */}
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 1,
+        pointerEvents: 'none',
+        mixBlendMode: 'screen',
+      }}>
         <SideRays
           speed={2.2}
           rayColor1="#f3ba2f"
@@ -243,7 +248,7 @@ function Login({ onLogin, onFirstTime }: {
           saturation={1.4}
           blend={0.65}
           falloff={1.6}
-          opacity={0.85}
+          opacity={0.95}
         />
       </div>
 
