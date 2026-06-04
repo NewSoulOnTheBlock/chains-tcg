@@ -90,7 +90,7 @@ const IMAGES: Record<string, string> = {
   sol_bonk:     '/cards/bonk.png?v=1',
   sol_popcat:   '/cards/popcat.png?v=1',
   sol_mew:      '/cards/mew.png?v=1',
-  sol_bome:     '/cards/bome.jpg?v=2',
+  sol_bome:     '/cards/bome.png?v=3',
   sol_wif:      cmc(28752),
   sol_fartcoin: cmc(33597),
   sol_goat:     cmc(33440),
