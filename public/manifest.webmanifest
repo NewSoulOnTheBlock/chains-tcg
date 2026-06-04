@@ -1,0 +1,26 @@
+{
+  "name": "Memetic Masters TCG",
+  "short_name": "Memetic Masters",
+  "description": "5-chain MTG-style trading card game built on boardgame.io.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0a1e",
+  "theme_color": "#0a0a1e",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

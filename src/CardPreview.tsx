@@ -176,17 +176,29 @@ export function TemplatedPreview({ def, tpl }: { def: CardDef; tpl: { url: strin
 }
 
 /**
- * Wrapper that shows a CardPreview on hover (desktop) or long-press (touch).
- * Renders the child inline; the preview is a fixed-position floating element.
+ * Wrapper that shows a CardPreview on hover (desktop) or tap-to-pin (touch).
+ *
+ * Touch behaviour: a short tap pins a centered lightbox preview instead of
+ * firing the child's onClick. The lightbox offers an explicit "Play" button
+ * which calls `onActivate` — eliminating the "I tapped a card and accidentally
+ * cast it" misclick. A long-press still shows the floating preview at the
+ * touch point for parity with the old behaviour.
+ *
+ * Desktop behaviour is unchanged (hover preview, child onClick fires normally).
  */
 export function CardHover({
-  defId, children, openDelay = 220,
+  defId, children, openDelay = 220, onActivate, activateLabel = 'Play', pinOnTap = false,
 }: {
   defId: string | null | undefined;
   children: React.ReactNode;
   openDelay?: number;
+  onActivate?: () => void;
+  activateLabel?: string;
+  /** When true, a short touch tap pins a centered lightbox instead of firing the child's onClick. */
+  pinOnTap?: boolean;
 }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [pinned, setPinned] = useState(false);
   const openT = useRef<number | null>(null);
   const longT = useRef<number | null>(null);
 
@@ -208,14 +220,17 @@ export function CardHover({
   };
   const onMouseLeave = () => { clear(); setPos(null); };
 
-  // Long-press for touch
-  const startPt = useRef<{ x: number; y: number } | null>(null);
+  // Touch: tap-to-pin (short tap → lightbox), long-press → floating preview.
+  const startPt = useRef<{ x: number; y: number; t: number } | null>(null);
+  const longFired = useRef(false);
   const onTouchStart = (e: React.TouchEvent) => {
     if (!def) return;
     const t = e.touches[0];
-    startPt.current = { x: t.clientX, y: t.clientY };
+    startPt.current = { x: t.clientX, y: t.clientY, t: Date.now() };
+    longFired.current = false;
     clear();
     longT.current = window.setTimeout(() => {
+      longFired.current = true;
       setPos({ x: t.clientX, y: t.clientY });
     }, 350);
   };
@@ -224,15 +239,26 @@ export function CardHover({
     const t = e.touches[0];
     const dx = t.clientX - startPt.current.x;
     const dy = t.clientY - startPt.current.y;
-    // Any meaningful movement → user is scrolling/panning, not long-pressing.
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) clear();
   };
-  const onTouchEnd = () => { clear(); /* keep preview until tap outside */ };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const start = startPt.current;
+    clear();
+    if (!start || !def) return;
+    const elapsed = Date.now() - start.t;
+    // Short, deliberate tap that didn't trigger long-press → pin lightbox and
+    // suppress the synthetic click that would have played the card.
+    if (!longFired.current && elapsed < 350 && pinOnTap) {
+      e.preventDefault();
+      e.stopPropagation();
+      setPinned(true);
+      setPos(null);
+    }
+  };
 
   useEffect(() => {
     if (!pos) return;
     const onDocTouch = (e: TouchEvent) => {
-      // Dismiss touch preview when user taps elsewhere
       if ((e.target as HTMLElement)?.dataset?.cardpreview !== '1') setPos(null);
     };
     document.addEventListener('touchstart', onDocTouch, { passive: true });
@@ -257,7 +283,65 @@ export function CardHover({
           <CardPreview def={def} />
         </FloatingPreview>
       )}
+      {pinned && def && (
+        <PinnedPreview
+          def={def}
+          onClose={() => setPinned(false)}
+          onActivate={onActivate ? () => { setPinned(false); onActivate(); } : undefined}
+          activateLabel={activateLabel}
+        />
+      )}
     </span>
+  );
+}
+
+function PinnedPreview({
+  def, onClose, onActivate, activateLabel,
+}: {
+  def: any;
+  onClose: () => void;
+  onActivate?: () => void;
+  activateLabel: string;
+}) {
+  // Centered lightbox over a dim backdrop. Tapping the backdrop dismisses.
+  return createPortal(
+    <div
+      data-cardpreview="1"
+      onClick={onClose}
+      onTouchStart={(e) => e.stopPropagation()}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9999,
+        background: 'rgba(0,0,0,0.72)',
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        gap: 14, padding: 16,
+      }}
+    >
+      <div data-cardpreview="1" onClick={(e) => e.stopPropagation()}>
+        <CardPreview def={def} />
+      </div>
+      <div data-cardpreview="1" style={{ display: 'flex', gap: 10 }} onClick={(e) => e.stopPropagation()}>
+        {onActivate && (
+          <button
+            onClick={onActivate}
+            style={{
+              background: '#6c4bd8', color: '#fff', border: 'none',
+              borderRadius: 8, padding: '12px 22px', fontWeight: 700,
+              fontSize: 16, cursor: 'pointer',
+            }}
+          >{activateLabel}</button>
+        )}
+        <button
+          onClick={onClose}
+          style={{
+            background: '#2a2a3e', color: '#fff', border: '1px solid #555',
+            borderRadius: 8, padding: '12px 22px', fontWeight: 600,
+            fontSize: 16, cursor: 'pointer',
+          }}
+        >Close</button>
+      </div>
+    </div>,
+    document.body
   );
 }
 

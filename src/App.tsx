@@ -4624,6 +4624,92 @@ function PrintAllCards() {
   );
 }
 
+// One-time "Add to Home Screen" banner. Listens for Chrome/Android's
+// beforeinstallprompt; iOS Safari doesn't fire it, so we surface a textual
+// hint there ("tap Share → Add to Home Screen"). Either is dismissable for
+// 7 days via localStorage.
+function InstallPrompt() {
+  const DISMISS_KEY = 'mmtcg.installDismissedUntil';
+  const [deferred, setDeferred] = useState<any>(null);
+  const [showIos, setShowIos] = useState(false);
+  const [hidden, setHidden] = useState(true);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    // Already installed (standalone display) — never show.
+    const isStandalone =
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true;
+    if (isStandalone) return;
+    // Honor a recent dismissal.
+    const until = Number(localStorage.getItem(DISMISS_KEY) || 0);
+    if (until && Date.now() < until) return;
+
+    const onBeforeInstall = (e: any) => {
+      e.preventDefault();
+      setDeferred(e);
+      setHidden(false);
+    };
+    window.addEventListener('beforeinstallprompt', onBeforeInstall);
+
+    // iOS heuristic: Safari on iOS doesn't fire beforeinstallprompt.
+    const ua = window.navigator.userAgent;
+    const isIosSafari = /iPad|iPhone|iPod/.test(ua) && /Safari/.test(ua) && !/CriOS|FxiOS/.test(ua);
+    if (isIosSafari) {
+      setShowIos(true);
+      setHidden(false);
+    }
+
+    return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall);
+  }, []);
+
+  if (hidden) return null;
+
+  const dismiss = () => {
+    try { localStorage.setItem(DISMISS_KEY, String(Date.now() + 7 * 24 * 3600 * 1000)); } catch {}
+    setHidden(true);
+  };
+  const install = async () => {
+    if (!deferred) return;
+    try { deferred.prompt(); await deferred.userChoice; } catch {}
+    setDeferred(null);
+    setHidden(true);
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', left: 12, right: 12, bottom: 12,
+      maxWidth: 460, marginLeft: 'auto', marginRight: 'auto',
+      background: 'linear-gradient(135deg, #1b1230 0%, #3a1f5a 100%)',
+      color: '#fff', border: '1px solid #6c4bd8', borderRadius: 10,
+      padding: '10px 12px', zIndex: 90,
+      boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+      display: 'flex', alignItems: 'center', gap: 10,
+      fontFamily: 'Inter, sans-serif', fontSize: 13,
+    }}>
+      <div style={{ fontSize: 22 }}>📲</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, marginBottom: 2 }}>Install Memetic Masters</div>
+        <div style={{ fontSize: 11, opacity: 0.85 }}>
+          {showIos
+            ? 'Tap the Share icon, then "Add to Home Screen" for fullscreen play.'
+            : 'Add to your home screen — no browser chrome, faster loads.'}
+        </div>
+      </div>
+      {!showIos && (
+        <button onClick={install} style={{
+          background: '#6c4bd8', color: '#fff', border: 'none', borderRadius: 6,
+          padding: '6px 12px', fontWeight: 700, cursor: 'pointer', fontSize: 12,
+        }}>Install</button>
+      )}
+      <button onClick={dismiss} title="Dismiss for a week" style={{
+        background: 'transparent', color: '#aaa', border: 'none',
+        fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1,
+      }}>×</button>
+    </div>
+  );
+}
+
 export default function App() {
   // Print mode: render every card as a 280×400 CardPreview in a grid for offline
   // capture by scripts/render-cards.mjs. Triggered by `#print` or `?print`.
@@ -4726,6 +4812,7 @@ export default function App() {
   const showMusic = view === 'landing' || view === 'profile' || view === 'rules' || view === 'lobby' || view === 'ranked';
   return (
     <>
+      <InstallPrompt />
       {showMusic && <MenuMusic />}
       {view === 'profile'
         ? <ProfilePage myName={name} onBack={() => goto('landing')} />

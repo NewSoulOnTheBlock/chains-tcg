@@ -11,6 +11,7 @@ import { mulliganDrawCount, MULLIGAN_FLOOR, MULLIGAN_INITIAL_HAND } from './Game
 import { recordResultApi, getProfileApi, formatRecord, type Profile } from './profiles';
 import { CardHover } from './CardPreview';
 import { VoiceChat } from './Voice';
+import { Haptics } from './haptics';
 
 type Props = BoardProps<GState>;
 
@@ -126,7 +127,7 @@ function CostPips({ def }: { def: CardDef }) {
 }
 
 function CardFace({
-  defId, instance, footer, onClick, selected, faceDown,
+  defId, instance, footer, onClick, selected, faceDown, pinOnTap,
 }: {
   defId: string;
   instance?: Instance;
@@ -134,6 +135,7 @@ function CardFace({
   onClick?: () => void;
   selected?: boolean;
   faceDown?: boolean;
+  pinOnTap?: boolean;
 }) {
   const mobile = useIsMobile();
   const W = mobile ? 92 : 138;
@@ -153,7 +155,7 @@ function CardFace({
   const dimmed = instance?.summoningSick || instance?.tapped;
   const tpl = templateFor(def);
   return (
-    <CardHover defId={defId}>
+    <CardHover defId={defId} pinOnTap={pinOnTap} onActivate={pinOnTap ? onClick : undefined}>
     <div onClick={onClick}
       style={{
         width: W, height: H, margin: 2, padding: tpl ? 0 : 5, borderRadius: 8,
@@ -423,6 +425,7 @@ export function ChainsBoard(props: Props) {
         def.effect === 'destroyMachine' ||
         def.effect === 'damage2' || def.effect === 'damage3' || def.effect === 'damage5';
       if (needsTarget) {
+        Haptics.tap();
         setSelectedHand(idx);
         const kind: 'meme' | 'any' | 'machine' =
           def.effect === 'destroyMachine' ? 'machine' :
@@ -432,11 +435,13 @@ export function ChainsBoard(props: Props) {
         return;
       }
     }
+    Haptics.play();
     moves.playCard(idx);
   }
 
   function pickTarget(uid: string) {
     if (selectedHand == null) return;
+    Haptics.play();
     moves.playCard(selectedHand, uid);
     setSelectedHand(null);
     setTargetMode(null);
@@ -473,6 +478,10 @@ export function ChainsBoard(props: Props) {
     const winnerId = ctx.gameover.winner as string | undefined;
     const winnerName = winnerId === myId ? myName : winnerId === oppId ? oppName : null;
     const loserName  = winnerName ? (winnerName === myName ? oppName : myName) : null;
+    // Buzz for the result.
+    if (draw) Haptics.turn();
+    else if (winnerId === myId) Haptics.win();
+    else Haptics.loss();
     const rankedMeta = G.ranked
       ? {
           ranked: true,
@@ -511,13 +520,13 @@ export function ChainsBoard(props: Props) {
         myName={myName} oppName={oppName}
         myProfile={myProfile} oppProfile={oppProfile}
         onOpenRules={() => setShowRules(true)}
-        onEndTurn={() => moves.passTurn()}
+        onEndTurn={() => { Haptics.turn(); moves.passTurn(); }}
         canEndTurn={myTurn && !inBlockers && !ctx.gameover && !mulliganPhase}
         attackerCount={G.combat.attackers.length}
-        onConfirmAttackers={() => moves.confirmAttackers()}
+        onConfirmAttackers={() => { Haptics.attack(); moves.confirmAttackers(); }}
         canAttack={myTurn && !inBlockers && !ctx.gameover && !mulliganPhase}
         inBlockers={inBlockers}
-        onConfirmBlocks={() => moves.confirmBlocks()}
+        onConfirmBlocks={() => { Haptics.attack(); moves.confirmBlocks(); }}
         turnDeadline={G.turnDeadline ?? 0}
         canForceEnd={!myTurn && !ctx.gameover && ctx.phase === 'play'}
         onForceEnd={() => moves.forceEndTurn()}
@@ -733,6 +742,7 @@ export function ChainsBoard(props: Props) {
                   <CardFace
                     defId={id}
                     selected={selectedHand === i}
+                    pinOnTap
                     onClick={() => isActive && myTurn && !inBlockers && tryPlay(i)}
                   />
                 </div>
@@ -750,11 +760,11 @@ export function ChainsBoard(props: Props) {
           onOpenHand={() => setHandOpen(true)}
           attackerCount={G.combat.attackers.length}
           canAttack={myTurn && !inBlockers && !ctx.gameover && !mulliganPhase && G.combat.attackers.length > 0}
-          onAttack={() => moves.confirmAttackers()}
+          onAttack={() => { Haptics.attack(); moves.confirmAttackers(); }}
           canEndTurn={myTurn && !inBlockers && !ctx.gameover && !mulliganPhase}
-          onEndTurn={() => moves.passTurn()}
+          onEndTurn={() => { Haptics.turn(); moves.passTurn(); }}
           inBlockers={inBlockers}
-          onConfirmBlocks={() => moves.confirmBlocks()}
+          onConfirmBlocks={() => { Haptics.attack(); moves.confirmBlocks(); }}
           targetMode={!!targetMode}
           onCancelTarget={() => { setSelectedHand(null); setTargetMode(null); }}
         />
@@ -1845,6 +1855,7 @@ function MobileHandSheet({
                 <CardFace
                   defId={id}
                   selected={selectedIdx === i}
+                  pinOnTap
                   onClick={() => canPlay && onPlay(i)}
                 />
               </div>
