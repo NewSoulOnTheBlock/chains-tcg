@@ -302,3 +302,93 @@ export async function settleCustodialMatch(opts: {
     console.error('[custodial] settle failed', opts.matchID, e);
   }
 }
+
+/** Public-safe wager status for a match. Returns null if unknown. */
+export async function getWagerStatus(matchID: string): Promise<null | {
+  matchID: string;
+  amountBase: string;
+  decimals: number;
+  p0Funded: boolean;
+  p1Funded: boolean;
+  settled: boolean;
+  refunded: boolean;
+  settleSig: string | null;
+}> {
+  await ensureSchema();
+  const pool = getPool();
+  if (!pool) return null;
+  const r = await pool.query<{
+    amount: string; p0_sig: string|null; p1_sig: string|null;
+    settle_sig: string|null; refunded: boolean;
+  }>(
+    `SELECT amount, p0_sig, p1_sig, settle_sig, refunded
+       FROM custodial_wagers WHERE match_id = $1`,
+    [matchID],
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  return {
+    matchID,
+    amountBase: row.amount,
+    decimals: MASTER_DECIMALS,
+    p0Funded: !!row.p0_sig,
+    p1Funded: !!row.p1_sig,
+    settled: !!row.settle_sig && !row.refunded,
+    refunded: row.refunded,
+    settleSig: row.settle_sig,
+  };
+}
+
+/** Admin-only: refund whichever seats are funded for a match. Marks the row
+ *  refunded so the normal settle path becomes a no-op afterwards. */
+export async function adminRefund(matchID: string): Promise<{
+  ok: true; refundedSeats: Array<'0' | '1'>; sig: string | null;
+}> {
+  const kp = escrow();
+  if (!kp) throw new Error('Custodial wagers not enabled on this server');
+  await ensureSchema();
+  const pool = getPool()!;
+  const row = (await pool.query<{
+    amount: string; p0_pubkey: string|null; p1_pubkey: string|null;
+    p0_sig: string|null; p1_sig: string|null;
+    settle_sig: string|null; refunded: boolean;
+  }>(
+    `SELECT amount, p0_pubkey, p1_pubkey, p0_sig, p1_sig, settle_sig, refunded
+       FROM custodial_wagers WHERE match_id = $1`,
+    [matchID],
+  )).rows[0];
+  if (!row) throw new Error('no wager row for that matchID');
+  if (row.settle_sig && !row.refunded) throw new Error('already settled — cannot refund');
+  if (row.refunded) return { ok: true, refundedSeats: [], sig: row.settle_sig };
+
+  const amountBase = BigInt(row.amount);
+  const escrowAta = await getAssociatedTokenAddress(MASTER_MINT, kp.publicKey);
+  const ixs = [];
+  const refundedSeats: Array<'0' | '1'> = [];
+  for (const [seat, pubkey, sig] of [
+    ['0', row.p0_pubkey, row.p0_sig] as const,
+    ['1', row.p1_pubkey, row.p1_sig] as const,
+  ]) {
+    if (!sig || !pubkey) continue;
+    const dest = new PublicKey(pubkey);
+    const destAta = await getAssociatedTokenAddress(MASTER_MINT, dest);
+    try { await getAccount(conn(), destAta); }
+    catch { ixs.push(createAssociatedTokenAccountInstruction(kp.publicKey, destAta, dest, MASTER_MINT)); }
+    ixs.push(createTransferInstruction(escrowAta, destAta, kp.publicKey, amountBase, [], TOKEN_PROGRAM_ID));
+    refundedSeats.push(seat);
+  }
+  if (ixs.length === 0) {
+    await pool.query(`UPDATE custodial_wagers SET refunded = TRUE WHERE match_id = $1`, [matchID]);
+    return { ok: true, refundedSeats: [], sig: null };
+  }
+  const tx = new Transaction().add(...ixs);
+  tx.feePayer = kp.publicKey;
+  tx.recentBlockhash = (await conn().getLatestBlockhash('confirmed')).blockhash;
+  const sig = await sendAndConfirmTransaction(conn(), tx, [kp], { commitment: 'confirmed' });
+  await pool.query(
+    `UPDATE custodial_wagers SET refunded = TRUE, settle_sig = $2, settled_at = $3 WHERE match_id = $1`,
+    [matchID, sig, Date.now()],
+  );
+  console.log('[custodial] admin-refunded', matchID, 'seats=', refundedSeats, 'sig=', sig);
+  return { ok: true, refundedSeats, sig };
+}

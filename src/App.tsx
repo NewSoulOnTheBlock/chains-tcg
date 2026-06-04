@@ -4502,6 +4502,7 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
       </div>
       {!isFull ? (
         <div style={{ padding: 24, color: '#ccc' }}>
+          <WagerStatusBadge matchID={seat.matchID} />
           <h3>Share this link with your opponent:</h3>
           <pre style={{ background: '#111', padding: 8, border: '1px solid #333', borderRadius: 4, color: '#9cf' }}>
             {window.location.origin + window.location.pathname + '#match=' + seat.matchID}
@@ -4513,6 +4514,7 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
       ) : (
         <>
           <BattleMusic />
+          <WagerStatusBadge matchID={seat.matchID} compact />
           <ChainsClient
             matchID={seat.matchID}
             playerID={seat.playerID}
@@ -4521,6 +4523,75 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
         </>
       )}
     </div>
+  );
+}
+
+/** Tiny widget that polls /api/wager/status. Renders nothing if the match has
+ *  no custodial wager row (the bg.io matchID differs from the custId; we look
+ *  up the match's setupData first to find the custId). */
+function WagerStatusBadge({ matchID, compact }: { matchID: string; compact?: boolean }) {
+  const [custId, setCustId] = useState<string | null>(null);
+  const [amount, setAmount] = useState<number | null>(null);
+  const [status, setStatus] = useState<null | { p0Funded: boolean; p1Funded: boolean; settled: boolean; refunded: boolean }>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const m = await lobby.getMatch(GAME_NAME, matchID);
+        const w = readWager((m as any).setupData);
+        if (w.kind === 'master' && w.mode === 'custodial' && w.onchainId) {
+          if (alive) { setCustId(w.onchainId); setAmount(w.amount); }
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { alive = false; };
+  }, [matchID]);
+
+  useEffect(() => {
+    if (!custId) return;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const r = await fetch(`${SERVER_BASE}/api/wager/status?matchID=${encodeURIComponent(custId)}`);
+        const j = await r.json();
+        if (alive && j?.status) setStatus(j.status);
+      } catch { /* ignore */ }
+    };
+    poll();
+    const t = setInterval(poll, 4000);
+    return () => { alive = false; clearInterval(t); };
+  }, [custId]);
+
+  if (!custId || !status) return null;
+  const label =
+    status.refunded ? '↩ Refunded'
+    : status.settled ? '✅ Settled'
+    : status.p0Funded && status.p1Funded ? '💰 Both deposited — match live'
+    : status.p0Funded || status.p1Funded ? `⌛ Waiting for opponent deposit (${amount} $MASTER each)`
+    : `⌛ Waiting for deposits (${amount} $MASTER each)`;
+  const color =
+    status.refunded ? '#aaa'
+    : status.settled ? '#22c55e'
+    : status.p0Funded && status.p1Funded ? '#22c55e'
+    : '#f0b90b';
+  if (compact) {
+    return (
+      <div style={{
+        position: 'fixed', left: 16, top: 16, zIndex: 50,
+        background: '#15192a', color, border: `1px solid ${color}`,
+        borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700,
+        fontFamily: 'Inter, sans-serif',
+      }}>{label}</div>
+    );
+  }
+  return (
+    <div style={{
+      display: 'inline-block', marginBottom: 16,
+      background: '#15192a', color, border: `1px solid ${color}`,
+      borderRadius: 6, padding: '8px 14px', fontSize: 13, fontWeight: 700,
+      fontFamily: 'Inter, sans-serif',
+    }}>{label}</div>
   );
 }
 

@@ -292,6 +292,34 @@ app.use(async (ctx, next) => {
       ctx.body = { challenge: updated };
       return;
     }
+    if (method === 'GET' && url.startsWith('/api/wager/status')) {
+      try {
+        const u = new URL('http://x' + url);
+        const matchID = (u.searchParams.get('matchID') ?? '').trim();
+        if (!matchID) { ctx.status = 400; ctx.body = { error: 'matchID required' }; return; }
+        const { getWagerStatus } = await import('./server-custodial');
+        const status = await getWagerStatus(matchID);
+        ctx.body = { status };
+      } catch (e: any) { ctx.status = 500; ctx.body = { error: String(e?.message ?? e) }; }
+      return;
+    }
+    if (method === 'POST' && url === '/api/wager/admin/refund') {
+      const adminToken = process.env.ADMIN_TOKEN;
+      const provided = ctx.request.headers['x-admin-token'];
+      if (!adminToken || provided !== adminToken) {
+        ctx.status = 401; ctx.body = { error: 'unauthorized' }; return;
+      }
+      const body = await readJson(ctx);
+      try {
+        const { adminRefund, isCustodialEnabled } = await import('./server-custodial');
+        if (!isCustodialEnabled()) { ctx.status = 503; ctx.body = { error: 'custodial wagers not enabled' }; return; }
+        const matchID = String(body?.matchID ?? '').trim();
+        if (!matchID) { ctx.status = 400; ctx.body = { error: 'matchID required' }; return; }
+        const res = await adminRefund(matchID);
+        ctx.body = res;
+      } catch (e: any) { ctx.status = 400; ctx.body = { error: String(e?.message ?? e) }; }
+      return;
+    }
     if (method === 'POST' && url === '/api/wager/intent') {
       const body = await readJson(ctx);
       try {
