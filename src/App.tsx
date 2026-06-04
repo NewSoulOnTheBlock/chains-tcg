@@ -1524,23 +1524,10 @@ function Landing({
       />
       <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.1) 55%, rgba(0,0,0,0.75) 100%)', zIndex: 1 }} />
 
-      {/* Pixelated gold cursor trail — z=1 sits between the dark overlay
-          and the UI (z=2). The menu buttons receive clicks because they sit
-          higher in the stacking context; the trail fills the empty space
-          around them. Suspense fallback is empty: the trail simply isn't
-          there for the ~200ms while three.js loads. */}
-      <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
-        <React.Suspense fallback={null}>
-          <PixelTrail
-            gridSize={60}
-            trailSize={0.08}
-            maxAge={350}
-            interpolate={3}
-            color="#f3ba2f"
-            gooeyFilter={{ id: 'mmtcg-landing-goo', strength: 2 }}
-          />
-        </React.Suspense>
-      </div>
+      {/* PixelTrail removed from Landing — its r3f Canvas was painting opaque
+          over the intro art ~1s after mount (right when the lazy chunk
+          resolved). Component file kept in src/PixelTrail.tsx for re-use
+          on another page later. */}
 
       {/* Top bar */}
       <div style={{
