@@ -3193,11 +3193,28 @@ function Lobby({
           setError('This wagered match was created without an escrow id; cannot join.');
           return;
         }
+        console.log('[join] picking wallet…');
         const kind = await pickSolanaWallet();
-        const phantom = await getSolanaWallet(kind);
+        console.log('[join] wallet kind selected =', kind);
+        let phantom: any;
+        try {
+          phantom = await Promise.race([
+            getSolanaWallet(kind),
+            new Promise((_, rej) => setTimeout(() => rej(new Error(
+              `${kind} did not respond to connect within 20s — extension is likely asleep or this page lost its provider bridge. Reload the page and try again.`
+            )), 20_000)),
+          ]);
+        } catch (err: any) {
+          console.error('[join] getSolanaWallet failed:', err);
+          throw err;
+        }
+        console.log('[join] wallet connected, publicKey =', phantom?.publicKey?.toBase58?.() ?? '<none>');
         const conn = solConn();
+        console.log('[join] requesting wager intent', { matchID: w.onchainId, amount: w.amount });
         const intent = await requestWagerIntent({ matchID: w.onchainId, playerID: '1', amount: w.amount ?? 0 });
+        console.log('[join] intent ok, depositing…');
         await depositCustodialWager({ connection: conn, wallet: phantom, intent });
+        console.log('[join] deposit confirmed');
       }
       // Stash the joiner's choice; Board.tsx will auto-call chooseColor on mount.
       try {
@@ -3212,7 +3229,10 @@ function Lobby({
       const joined = await lobby.joinMatch(GAME_NAME, m.matchID, { playerID: pid, playerName: myName });
       setJoinTarget(null);
       onJoined({ matchID: m.matchID, playerID: pid, credentials: joined.playerCredentials, playerName: myName });
-    } catch (e: any) { setError(String(e?.message ?? e)); }
+    } catch (e: any) {
+      console.error('[join] confirmJoin failed:', e);
+      setError(String(e?.message ?? e));
+    }
   }
 
   // Split available matches between the two side panels of the art frame.
@@ -3429,6 +3449,13 @@ function Lobby({
               <button onClick={() => setJoinTarget(null)} style={LOBBY_GHOST_BTN}>Cancel</button>
               <button onClick={confirmJoin} style={LOBBY_GOLD_BTN}>Accept &amp; enter match</button>
             </div>
+            {error && (
+              <div style={{
+                marginTop: 12, padding: '8px 10px', borderRadius: 6,
+                background: 'rgba(217,75,75,0.14)', border: '1px solid rgba(217,75,75,0.55)',
+                color: '#ffb8b8', fontSize: 12, whiteSpace: 'pre-wrap',
+              }}>{error}</div>
+            )}
           </div>
         </div>
       )}
