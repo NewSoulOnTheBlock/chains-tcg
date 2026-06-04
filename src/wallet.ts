@@ -95,6 +95,16 @@ async function robustSolanaConnect(provider: any, kind: SolanaWalletKind): Promi
         /unexpected/i.test(msg) ||
         /disconnected port/i.test(msg) ||
         /service worker/i.test(msg);
+      // Extension context invalidated: Phantom was reloaded/updated while
+      // this page was still open. The injected provider is now a zombie
+      // pointing into a dead extension context — no retry helps, the page
+      // itself must be reloaded to get a fresh content-script injection.
+      const isContextDead = /context invalidated/i.test(msg);
+      if (isContextDead) {
+        throw new Error(
+          `${labelFor(kind)} was reloaded or updated while this page was open, so its connection to the page is broken. Please reload the page (Ctrl+R / Cmd+R) and try again.`
+        );
+      }
       if (isWorkerAsleep && attempt === 0) {
         await new Promise(r => setTimeout(r, 600));
         continue;

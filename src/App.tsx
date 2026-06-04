@@ -328,7 +328,16 @@ function Login({ onLogin, onFirstTime }: {
                   marginTop: 14, padding: '10px 12px', borderRadius: 8,
                   background: 'rgba(217,75,75,0.12)', border: '1px solid rgba(217,75,75,0.45)',
                   color: '#ffb8b8', fontSize: 13,
-                }}>{err}</div>
+                }}>
+                  <div>{err}</div>
+                  {/context invalidated|reloaded or updated/i.test(err) && (
+                    <button onClick={() => window.location.reload()} style={{
+                      marginTop: 8, padding: '6px 12px', borderRadius: 6,
+                      background: '#D4AF37', color: '#1a1408', fontWeight: 700,
+                      border: 'none', cursor: 'pointer', fontSize: 12,
+                    }}>Reload Page Now</button>
+                  )}
+                </div>
               )}
 
               {/* Divider */}
