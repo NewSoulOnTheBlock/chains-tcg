@@ -47,10 +47,49 @@ export async function connectSolana(): Promise<ConnectedWallet> {
 export async function connectSolanaWith(kind: SolanaWalletKind): Promise<ConnectedWallet> {
   const provider = getSolanaProviderRaw(kind);
   if (!provider) throw new Error(`${labelFor(kind)} not detected. Install the extension.`);
-  if (!provider.publicKey) await provider.connect();
+  await robustSolanaConnect(provider, kind);
   const address = String(provider.publicKey?.toString?.() ?? '');
   if (!address) throw new Error(`${labelFor(kind)} returned no public key.`);
   return { chain: 'solana', address };
+}
+
+/**
+ * Phantom (and other Solana wallets) occasionally throw "Unexpected error"
+ * (-32603) when `.connect()` is called against a stale provider — most often
+ * after a page navigation, after the user manually disconnected from the
+ * extension, or when a previous connect popup never resolved. We work around
+ * this with a 3-step handshake:
+ *   1. Try eager `connect({ onlyIfTrusted: true })` — silent, no popup.
+ *   2. If that fails, call `disconnect()` to clear any stuck state.
+ *   3. Call `connect()` normally to show the popup.
+ * Any thrown error from steps 1+2 is swallowed; only step 3 surfaces errors.
+ */
+async function robustSolanaConnect(provider: any, kind: SolanaWalletKind): Promise<void> {
+  // Already have a live publicKey? Trust it.
+  if (provider.publicKey) return;
+  // Step 1: eager (no popup) — many wallets resolve here on repeat visits.
+  try {
+    await provider.connect({ onlyIfTrusted: true });
+    if (provider.publicKey) return;
+  } catch { /* expected on first visit / cleared trust */ }
+  // Step 2: clear any stuck session.
+  try { await provider.disconnect?.(); } catch { /* noop */ }
+  // Step 3: real connect. Map Phantom's generic -32603 into a friendlier message.
+  try {
+    await provider.connect();
+  } catch (e: any) {
+    const code = e?.code;
+    const msg  = String(e?.message ?? '');
+    if (code === 4001 || /reject/i.test(msg)) {
+      throw new Error(`${labelFor(kind)} connection cancelled.`);
+    }
+    if (code === -32603 || /unexpected/i.test(msg)) {
+      throw new Error(
+        `${labelFor(kind)} returned "Unexpected error". This usually means the wallet has stale state — please open the ${labelFor(kind)} extension, click your account → "Disconnect" from this site, then reload the page and try again.`
+      );
+    }
+    throw e;
+  }
 }
 
 function getSolanaProviderRaw(kind: SolanaWalletKind): any {
@@ -93,7 +132,7 @@ export function detectSolanaWallets(): Array<{ kind: SolanaWalletKind; label: st
 export async function getSolanaWallet(kind: SolanaWalletKind = 'phantom'): Promise<any> {
   const provider = getSolanaProviderRaw(kind);
   if (!provider) throw new Error(`${labelFor(kind)} wallet required. Install the extension to wager $MASTER.`);
-  if (!provider.publicKey) await provider.connect();
+  await robustSolanaConnect(provider, kind);
   return provider;
 }
 
