@@ -2436,6 +2436,20 @@ function RulesDrawer({ onClose }: { onClose: () => void }) {
             padding: '4px 12px', cursor: 'pointer', fontWeight: 700,
           }}>✕</button>
         </div>
+        <div style={{
+          borderRadius: 10, overflow: 'hidden',
+          border: '1px solid #ffd76a55',
+          boxShadow: '0 0 24px rgba(212,175,55,0.18)',
+          background: '#000',
+        }}>
+          <video
+            src="/rules-intro.mp4"
+            controls
+            playsInline
+            preload="metadata"
+            style={{ display: 'block', width: '100%', height: 'auto' }}
+          />
+        </div>
         <RulesPanel side="left" />
         <RulesPanel side="right" />
       </div>

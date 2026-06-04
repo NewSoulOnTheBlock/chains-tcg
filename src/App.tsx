@@ -839,6 +839,27 @@ function RulesPage({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
+      {/* Intro video */}
+      <div style={{
+        position: 'relative', zIndex: 1,
+        maxWidth: 1100, margin: '20px auto 0', padding: '0 22px',
+      }}>
+        <div style={{
+          borderRadius: 14, overflow: 'hidden',
+          border: `1px solid ${RULES_TOKENS.border}`,
+          boxShadow: `0 0 40px rgba(212,175,55,0.18), 0 8px 28px rgba(0,0,0,0.5)`,
+          background: '#000',
+        }}>
+          <video
+            src="/rules-intro.mp4"
+            controls
+            playsInline
+            preload="metadata"
+            style={{ display: 'block', width: '100%', height: 'auto' }}
+          />
+        </div>
+      </div>
+
       {/* Hero */}
       <div style={{
         position: 'relative', zIndex: 1,
