@@ -135,7 +135,7 @@ const IMAGES: Record<string, string> = {
   bnb_honeypot: '/cards/honeypot.png?v=1',
 
   // ── Solana machines/moves ──
-  sol_priority: emo('1f4e6'), // 📦 package (MEV Bundler)
+  sol_priority: '/cards/mev-bundler.png?v=1',
   sol_oracle:   emo('1f9e0'), // 🧠 brain (AI Trading Agent)
   sol_amm:      emo('1f500'), // 🔀 shuffle (AMM Router)
   sol_tgbot:    emo('1f4ac'), // 💬 chat bubble (Telegram Bot Suite)
