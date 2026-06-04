@@ -37,7 +37,9 @@ services:
       - key: CUSTODIAL_ESCROW_KEYPAIR
         sync: false           # JSON byte array of a Solana Keypair secret key, e.g. "[12,34,...]" (64 numbers). Generate with `solana-keygen new -o escrow.json --no-bip39-passphrase` then paste contents of escrow.json. Fund the resulting pubkey with SOL (fees) + a $MASTER ATA.
       - key: SOLANA_RPC
-        sync: false           # mainnet RPC URL, e.g. https://api.mainnet-beta.solana.com or a Helius/Quicknode endpoint
+        sync: false           # mainnet RPC URL, e.g. https://mainnet.helius-rpc.com/?api-key=YOUR_KEY (server-side reads for settlement)
+      - key: VITE_SOLANA_RPC
+        sync: false           # OPTIONAL — client-side RPC. If unset, the build auto-derives one from HELIUS_API_KEY. Public mainnet-beta returns 403 for token-account reads.
       - key: CUSTODIAL_BURN_BPS
         value: "1000"         # 10% rake (burn). Adjust if desired.
       - key: CUSTODIAL_MIN_WAGER_UI
