@@ -9,7 +9,8 @@ import {
 import type { GState, Instance } from './Game';
 import { mulliganDrawCount, MULLIGAN_FLOOR, MULLIGAN_INITIAL_HAND } from './Game';
 import { recordResultApi, getProfileApi, formatRecord, type Profile } from './profiles';
-import { CardHover } from './CardPreview';
+import { CardHover, CardPreview } from './CardPreview';
+import { createPortal } from 'react-dom';
 import { VoiceChat } from './Voice';
 import { Haptics } from './haptics';
 
@@ -123,6 +124,109 @@ function CostPips({ def }: { def: CardDef }) {
       <Pip c="any" n={def.cost.any ?? 0} />
       {COLORS.map(c => <Pip key={c} c={c} n={def.cost?.[c] ?? 0} />)}
     </div>
+  );
+}
+
+/**
+ * Pointer-Events-based drag wrapper. The user grabs a card, drags it onto the
+ * battlefield (any element with `data-dropzone="battlefield"`), and releases
+ * to play it. Short taps that never cross the 10px threshold pass through to
+ * the child's normal click handling (which on mobile means the tap-to-pin
+ * lightbox in CardHover).
+ *
+ * Works for both touch and mouse via Pointer Events. `touch-action: none` on
+ * the source stops the page from scrolling while the user drags.
+ */
+function DraggableCard({
+  defId, onDrop, onCancel, onDragStateChange, children,
+}: {
+  defId: string;
+  onDrop: () => void;
+  onCancel?: () => void;
+  onDragStateChange?: (dragging: boolean) => void;
+  children: React.ReactNode;
+}) {
+  const [drag, setDrag] = useState<{ x: number; y: number; ok: boolean } | null>(null);
+  const startRef = useRef<{ x: number; y: number } | null>(null);
+  const movedRef = useRef(false);
+  const idRef = useRef<number | null>(null);
+
+  function findDrop(x: number, y: number): Element | null {
+    const el = document.elementFromPoint(x, y);
+    return el ? el.closest('[data-dropzone="battlefield"]') : null;
+  }
+
+  function onPointerDown(e: React.PointerEvent) {
+    if (e.button && e.button !== 0) return;
+    startRef.current = { x: e.clientX, y: e.clientY };
+    movedRef.current = false;
+    idRef.current = e.pointerId;
+    try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch {}
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    if (idRef.current !== e.pointerId || !startRef.current) return;
+    const dx = e.clientX - startRef.current.x;
+    const dy = e.clientY - startRef.current.y;
+    if (!movedRef.current && Math.hypot(dx, dy) > 10) {
+      movedRef.current = true;
+      Haptics.tap();
+      onDragStateChange?.(true);
+    }
+    if (movedRef.current) {
+      setDrag({ x: e.clientX, y: e.clientY, ok: !!findDrop(e.clientX, e.clientY) });
+    }
+  }
+  function onPointerUp(e: React.PointerEvent) {
+    if (idRef.current !== e.pointerId) return;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId); } catch {}
+    const moved = movedRef.current;
+    setDrag(null);
+    startRef.current = null; movedRef.current = false; idRef.current = null;
+    if (!moved) return; // short tap → let normal click flow run
+    onDragStateChange?.(false);
+    const drop = findDrop(e.clientX, e.clientY);
+    if (drop) { Haptics.play(); onDrop(); }
+    else { Haptics.invalid(); onCancel?.(); }
+  }
+  function onPointerCancel(e: React.PointerEvent) {
+    if (idRef.current !== e.pointerId) return;
+    const wasMoved = movedRef.current;
+    setDrag(null);
+    startRef.current = null; movedRef.current = false; idRef.current = null;
+    if (wasMoved) onDragStateChange?.(false);
+    onCancel?.();
+  }
+
+  const def = CARDS[defId];
+
+  return (
+    <span
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      style={{
+        touchAction: 'none',
+        display: 'inline-block',
+        opacity: drag ? 0.35 : 1,
+        transition: drag ? 'none' : 'opacity 0.12s',
+      }}
+    >
+      {children}
+      {drag && def && createPortal(
+        <div style={{
+          position: 'fixed', left: drag.x, top: drag.y,
+          transform: 'translate(-50%, -50%) scale(0.55) rotate(-3deg)',
+          pointerEvents: 'none', zIndex: 9998,
+          filter: drag.ok
+            ? 'drop-shadow(0 12px 24px rgba(108, 75, 216, 0.85))'
+            : 'drop-shadow(0 8px 16px rgba(0, 0, 0, 0.6))',
+        }}>
+          <CardPreview def={def} />
+        </div>,
+        document.body
+      )}
+    </span>
   );
 }
 
@@ -662,6 +766,7 @@ export function ChainsBoard(props: Props) {
         width: '100%',
         maxWidth: mobile ? '100%' : 'min(1280px, calc(100dvh - 280px))',
       }}>
+        <div data-dropzone="battlefield">
         <MobilePlaymatScaler enabled={mobile}>
         <Playmat
         me={me} opp={opp} myId={myId} oppId={oppId}
@@ -706,6 +811,7 @@ export function ChainsBoard(props: Props) {
       />
       </MobilePlaymatScaler>
       </div>
+      </div>
 
       {/* Hand — curved fan layout on desktop, collapsed peek bar on mobile */}
       {!mobile && (
@@ -739,12 +845,17 @@ export function ChainsBoard(props: Props) {
                   onMouseEnter={e => { e.currentTarget.style.transform = `translateY(-14px) rotate(${rot * 0.4}deg) scale(1.08)`; }}
                   onMouseLeave={e => { e.currentTarget.style.transform = `translateY(${lift}px) rotate(${rot}deg)`; }}
                 >
-                  <CardFace
+                  <DraggableCard
                     defId={id}
-                    selected={selectedHand === i}
-                    pinOnTap
-                    onClick={() => isActive && myTurn && !inBlockers && tryPlay(i)}
-                  />
+                    onDrop={() => isActive && myTurn && !inBlockers && tryPlay(i)}
+                  >
+                    <CardFace
+                      defId={id}
+                      selected={selectedHand === i}
+                      pinOnTap
+                      onClick={() => isActive && myTurn && !inBlockers && tryPlay(i)}
+                    />
+                  </DraggableCard>
                 </div>
               );
             })}
@@ -1809,11 +1920,15 @@ function MobileHandSheet({
   onClose: () => void;
   onPlay: (i: number) => void;
 }) {
+  const [dragging, setDragging] = useState(false);
   return (
     <div onClick={onClose} style={{
       position: 'fixed', inset: 0, zIndex: 140,
-      background: 'rgba(4,6,12,0.78)', backdropFilter: 'blur(6px)',
+      background: dragging ? 'rgba(4,6,12,0.10)' : 'rgba(4,6,12,0.78)',
+      backdropFilter: dragging ? 'none' : 'blur(6px)',
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+      transition: 'background 0.15s ease',
+      pointerEvents: dragging ? 'none' : 'auto',
     }}>
       <div onClick={e => e.stopPropagation()} style={{
         width: '100%', maxHeight: '85dvh', overflowY: 'auto',
@@ -1823,6 +1938,9 @@ function MobileHandSheet({
         borderTopLeftRadius: 14, borderTopRightRadius: 14,
         padding: 14, paddingBottom: 'calc(14px + env(safe-area-inset-bottom))',
         display: 'flex', flexDirection: 'column', gap: 12,
+        opacity: dragging ? 0 : 1,
+        transition: 'opacity 0.15s ease',
+        pointerEvents: dragging ? 'none' : 'auto',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontWeight: 800, fontSize: 14, letterSpacing: 1.5, color: '#ffd76a' }}>
@@ -1852,12 +1970,18 @@ function MobileHandSheet({
                 outline: selectedIdx === i ? '2px solid #ffd76a' : 'none',
                 borderRadius: 8,
               }}>
-                <CardFace
+                <DraggableCard
                   defId={id}
-                  selected={selectedIdx === i}
-                  pinOnTap
-                  onClick={() => canPlay && onPlay(i)}
-                />
+                  onDrop={() => { if (canPlay) { onPlay(i); } }}
+                  onDragStateChange={setDragging}
+                >
+                  <CardFace
+                    defId={id}
+                    selected={selectedIdx === i}
+                    pinOnTap
+                    onClick={() => canPlay && onPlay(i)}
+                  />
+                </DraggableCard>
               </div>
             ))}
           </div>
