@@ -138,7 +138,7 @@ const IMAGES: Record<string, string> = {
   sol_priority: '/cards/mev-bundler.png?v=1',
   sol_oracle:   '/cards/ai-trading-agent.png?v=1',
   sol_amm:      '/cards/amm-router.png?v=1',
-  sol_tgbot:    emo('1f4ac'), // 💬 chat bubble (Telegram Bot Suite)
+  sol_tgbot:    '/cards/telegram-bot-suite.png?v=1',
   sol_zap:      emo('1f3f9'), // 🏹 bow & arrow (Snipe)
   sol_bounce:   emo('1f3c3'), // 🏃 runner (Frontrun)
   sol_tgpump:   emo('1f4e2'), // 📢 loudspeaker (Telegram Pump)
