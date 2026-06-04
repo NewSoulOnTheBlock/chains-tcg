@@ -4125,7 +4125,7 @@ function SolanaWalletPicker({ onPick, onCancel }: {
   };
   return (
     <div onClick={onCancel} style={{
-      position: 'fixed', inset: 0, zIndex: 200,
+      position: 'fixed', inset: 0, zIndex: 300,
       background: 'rgba(4,6,12,0.78)', backdropFilter: 'blur(6px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 16,
