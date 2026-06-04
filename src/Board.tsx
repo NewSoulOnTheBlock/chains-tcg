@@ -1688,6 +1688,9 @@ function Playmat(props: {
     myName, oppName,
   } = props;
 
+  const mePump  = me.machines.filter(m => CARDS[m.defId]?.effect === 'pump_all_+1+1').length;
+  const oppPump = opp.machines.filter(m => CARDS[m.defId]?.effect === 'pump_all_+1+1').length;
+
   // Zone rectangles in percentage of the mat (left, top, width, height).
   // Tuned to match the labels on /playmat.png.
   const Z = {
@@ -1765,6 +1768,7 @@ function Playmat(props: {
           const blockable = blockerSelected && isAttacker;
           return (
             <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp
+              pumpBonus={oppPump}
               onClick={(memeTargetable || blockable) ? () => onOppMemeClick(inst.uid) : undefined}
               targetable={memeTargetable || blockable}
               selected={attacking}
@@ -1793,6 +1797,7 @@ function Playmat(props: {
           const blockedBy = blocks[inst.uid] ?? [];
           return (
             <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp
+              pumpBonus={mePump}
               onClick={() => onMyMemeClick(inst.uid)}
               targetable={memeTargetable}
               selected={inst.uid === selectedBlocker || attacking}
@@ -2439,12 +2444,13 @@ function RulesDrawer({ onClose }: { onClose: () => void }) {
 }
 
 function MiniCard({
-  defId, instance, faceUp, faceDown, onClick, selected, targetable, footer,
+  defId, instance, faceUp, faceDown, onClick, selected, targetable, footer, pumpBonus,
 }: {
   defId?: string; instance?: Instance;
   faceUp?: boolean; faceDown?: boolean;
   onClick?: () => void; selected?: boolean; targetable?: boolean;
   footer?: React.ReactNode;
+  pumpBonus?: number;
 }) {
   if (faceDown || !defId) {
     return (
@@ -2490,12 +2496,19 @@ function MiniCard({
         transition: 'transform 0.15s ease, box-shadow 0.15s ease',
       }}>
       <div style={{ fontSize: 8, fontWeight: 800, lineHeight: 1.0, overflow: 'hidden' }}>{def.name}</div>
-      {def.power != null && def.toughness != null && (
-        <div style={{ fontSize: 10, fontWeight: 800, alignSelf: 'flex-end',
-          background: '#000a', padding: '0 4px', borderRadius: 3 }}>
-          {def.power}/{(def.toughness ?? 1) - (instance?.damage ?? 0)}
-        </div>
-      )}
+      {def.power != null && def.toughness != null && (() => {
+        const bonus = pumpBonus ?? 0;
+        const pow = (def.power ?? 0) + bonus;
+        const tou = (def.toughness ?? 1) + bonus - (instance?.damage ?? 0);
+        return (
+          <div style={{ fontSize: 10, fontWeight: 800, alignSelf: 'flex-end',
+            background: '#000a', padding: '0 4px', borderRadius: 3,
+            color: bonus > 0 ? '#7CFC7C' : undefined,
+            textShadow: bonus > 0 ? '0 0 4px #0f0' : undefined }}>
+            {pow}/{tou}
+          </div>
+        );
+      })()}
       {footer && <div style={{ fontSize: 7, lineHeight: 1.0 }}>{footer}</div>}
     </div>
     </CardHover>
