@@ -74,21 +74,38 @@ async function robustSolanaConnect(provider: any, kind: SolanaWalletKind): Promi
   } catch { /* expected on first visit / cleared trust */ }
   // Step 2: clear any stuck session.
   try { await provider.disconnect?.(); } catch { /* noop */ }
-  // Step 3: real connect. Map Phantom's generic -32603 into a friendlier message.
-  try {
-    await provider.connect();
-  } catch (e: any) {
-    const code = e?.code;
-    const msg  = String(e?.message ?? '');
-    if (code === 4001 || /reject/i.test(msg)) {
-      throw new Error(`${labelFor(kind)} connection cancelled.`);
+  // Step 3: real connect. Map known errors to friendlier messages, and
+  // auto-retry once if Phantom's MV3 service worker was asleep.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await provider.connect();
+      return;
+    } catch (e: any) {
+      const code = e?.code;
+      const msg  = String(e?.message ?? '');
+      if (code === 4001 || /reject/i.test(msg)) {
+        throw new Error(`${labelFor(kind)} connection cancelled.`);
+      }
+      // Phantom MV3 service-worker-asleep symptom: content script logs
+      // "Failed to send message to service worker" and connect rejects with
+      // a generic -32603. First retry after a short delay usually succeeds
+      // because the failed call itself wakes the worker.
+      const isWorkerAsleep =
+        code === -32603 ||
+        /unexpected/i.test(msg) ||
+        /disconnected port/i.test(msg) ||
+        /service worker/i.test(msg);
+      if (isWorkerAsleep && attempt === 0) {
+        await new Promise(r => setTimeout(r, 600));
+        continue;
+      }
+      if (isWorkerAsleep) {
+        throw new Error(
+          `${labelFor(kind)} is sleeping (known Phantom 26.x bug). To wake it: click the ${labelFor(kind)} extension icon in your browser toolbar so the popup opens, then immediately click Connect here again. If that fails, disable and re-enable the extension in chrome://extensions.`
+        );
+      }
+      throw e;
     }
-    if (code === -32603 || /unexpected/i.test(msg)) {
-      throw new Error(
-        `${labelFor(kind)} returned "Unexpected error". This usually means the wallet has stale state — please open the ${labelFor(kind)} extension, click your account → "Disconnect" from this site, then reload the page and try again.`
-      );
-    }
-    throw e;
   }
 }
 
