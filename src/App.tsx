@@ -3219,8 +3219,8 @@ function Lobby({
 
         {/* Floating button to open the WorkAdventure-style Memetic Plaza overlay. */}
         <button
-          onClick={() => window.open('https://play.workadventu.re/@/bereket-bank-1762291590/world-of-trenchcraft/world-of-trenchcraft', '_blank', 'noopener,noreferrer')}
-          title="Enter the World of Trenchcraft on WorkAdventure"
+          onClick={() => window.open('https://play.workadventu.re/@/asdasd-1775062076/asdasd/memetic-masters-hq', '_blank', 'noopener,noreferrer')}
+          title="Enter Memetic Masters HQ on WorkAdventure"
           style={{
             position: 'fixed', right: 16, top: 16, zIndex: 50,
             background: 'linear-gradient(135deg,#3a1f5a,#1b1230)',
