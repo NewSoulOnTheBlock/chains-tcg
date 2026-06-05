@@ -37,7 +37,7 @@ import { create, mplCore } from '@metaplex-foundation/mpl-core';
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
-export const BOOSTER_PRICE_SOL = Number(process.env.BOOSTER_PRICE_SOL ?? 0.4);
+export const BOOSTER_PRICE_SOL = Number(process.env.BOOSTER_PRICE_SOL ?? 0.2);
 export const BOOSTER_PRICE_LAMPORTS = Math.round(BOOSTER_PRICE_SOL * 1e9);
 export const BOOSTER_SUPPLY_CAP = Number(process.env.BOOSTER_SUPPLY_CAP ?? 100);
 // Display-only offset added to the on-chain mint count for marketing/scarcity.
