@@ -1,10 +1,12 @@
 // src/boosters-api.ts
-// HTTP client for the /api/boosters/* endpoints.
+// HTTP client for the REAL Booster Pack Ticket mint flow (Metaplex Core).
 //
-// NOTE: backend currently returns MOCK data — there's no on-chain mint yet.
-// See plan.md (session-state) for the full booster pipeline plan. The shape
-// of these calls is locked so when Phase 3/4 lands (Anchor program + treasury
-// service) the wire-up only needs server-side changes.
+// Flow:
+//   1. getBoosterSupply()                 → price + treasury pubkey + remaining
+//   2. buildBuyIntent(wallet)             → unsigned tx (SOL transfer to treasury)
+//   3. confirmPayment(wallet, signature)  → server mints NFT ticket to wallet
+//   4. getMyTickets(wallet)               → list owned tickets + redemption status
+//   5. redeemDigital / redeemPhysical / redeemMerch
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
 
@@ -21,67 +23,104 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// ── Supply / config ────────────────────────────────────────────────────────
+
 export type BoosterSupply = {
   minted: number;
   cap: number;
   remaining: number;
   priceSol: number;
-  priceMaster: number;
-  /** 'preview' = mock backend, 'live' = on-chain mints active. */
-  mode: 'preview' | 'live';
-};
-
-export type SealedPack = {
-  packId: string;
-  mintedAt: number;
-  /** ISO mint address once on-chain; null in preview mode. */
-  nftMint: string | null;
-};
-
-export type OwnedCard = {
-  cardId: string;
-  qty: number;
-  /** Per-copy mint addresses; empty in preview mode. */
-  nftMints: string[];
-};
-
-export type BoosterInventory = {
-  sealed: SealedPack[];
-  owned: OwnedCard[];
+  priceLamports: number;
+  treasury: string | null;
+  mode: 'live' | 'preview';
 };
 
 export async function getBoosterSupply(): Promise<BoosterSupply> {
   return http<BoosterSupply>('/api/boosters/supply');
 }
 
-export async function getBoosterInventory(wallet: string): Promise<BoosterInventory> {
-  return http<BoosterInventory>(`/api/boosters/inventory/${encodeURIComponent(wallet)}`);
-}
+// ── Mint flow ──────────────────────────────────────────────────────────────
 
-export type BuyIntentResponse =
-  | { ok: true; packId: string; mode: 'preview' | 'live'; /** future fields: txBase64, mintAddress, etc. */ }
-  | { ok: false; error: string };
+export type BuyIntent = {
+  ok: true;
+  txBase64: string;
+  treasury: string;
+  lamports: number;
+  blockhash: string;
+  lastValidBlockHeight: number;
+};
 
-export async function buyBoosterIntent(
-  wallet: string,
-  currency: 'sol' | 'master',
-): Promise<BuyIntentResponse> {
-  return http<BuyIntentResponse>('/api/boosters/buy-intent', {
+export async function buildBuyIntent(wallet: string): Promise<BuyIntent> {
+  return http<BuyIntent>('/api/boosters/buy-intent', {
     method: 'POST',
-    body: JSON.stringify({ wallet, currency }),
+    body: JSON.stringify({ wallet }),
   });
 }
 
-export type OpenIntentResponse =
-  | { ok: true; cardIds: string[]; mode: 'preview' | 'live' }
-  | { ok: false; error: string };
+export type ShippingAddress = {
+  fullName: string;
+  line1: string;
+  line2?: string;
+  city: string;
+  region: string;
+  postalCode: string;
+  country: string;
+  email?: string;
+};
 
-export async function openBoosterPack(
-  wallet: string,
-  packId: string,
-): Promise<OpenIntentResponse> {
-  return http<OpenIntentResponse>('/api/boosters/open-intent', {
+export type TicketRow = {
+  mintAddress: string;
+  buyerWallet: string;
+  ticketNumber: number;
+  paymentSig: string;
+  priceSol: number;
+  mintedAt: number;
+  digitalRedeemedAt: number | null;
+  digitalCardIds: string[] | null;
+  physicalRedeemedAt: number | null;
+  physicalAddress: ShippingAddress | null;
+  physicalTracking: string | null;
+  merchRedeemedAt: number | null;
+  merchAddress: ShippingAddress | null;
+  merchTracking: string | null;
+};
+
+export type ConfirmResult = {
+  ok: true;
+  ticket: TicketRow;
+  mintSignature: string;
+};
+
+export async function confirmPayment(wallet: string, signature: string): Promise<ConfirmResult> {
+  return http<ConfirmResult>('/api/boosters/confirm', {
     method: 'POST',
-    body: JSON.stringify({ wallet, packId }),
+    body: JSON.stringify({ wallet, signature }),
+  });
+}
+
+// ── Inventory + redemption ─────────────────────────────────────────────────
+
+export async function getMyTickets(wallet: string): Promise<{ wallet: string; tickets: TicketRow[] }> {
+  return http(`/api/boosters/tickets/${encodeURIComponent(wallet)}`);
+}
+
+export async function redeemDigital(mintAddress: string, wallet: string): Promise<{ ok: true; cardIds: string[]; ticket: TicketRow }> {
+  return http('/api/boosters/redeem-digital', {
+    method: 'POST',
+    body: JSON.stringify({ mintAddress, wallet }),
+  });
+}
+
+export async function redeemPhysical(mintAddress: string, wallet: string, address: ShippingAddress): Promise<{ ok: true; ticket: TicketRow }> {
+  return http('/api/boosters/redeem-physical', {
+    method: 'POST',
+    body: JSON.stringify({ mintAddress, wallet, address }),
+  });
+}
+
+export async function redeemMerch(mintAddress: string, wallet: string, address: ShippingAddress): Promise<{ ok: true; ticket: TicketRow }> {
+  return http('/api/boosters/redeem-merch', {
+    method: 'POST',
+    body: JSON.stringify({ mintAddress, wallet, address }),
   });
 }

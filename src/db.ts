@@ -22,6 +22,27 @@ let pool: pg.Pool | null = null;
 const memProfiles: Map<string, Profile> = new Map();
 const recordedMatches: Set<string> = new Set(); // matchID dedupe for in-memory mode
 
+// ── Booster tickets (real NFT mints) ────────────────────────────────────────
+
+export type BoosterTicketRow = {
+  mintAddress: string;
+  buyerWallet: string;
+  ticketNumber: number;
+  paymentSig: string;
+  priceSol: number;
+  mintedAt: number;
+  digitalRedeemedAt: number | null;
+  digitalCardIds: string[] | null;
+  physicalRedeemedAt: number | null;
+  physicalAddress: Record<string, string> | null;
+  physicalTracking: string | null;
+  merchRedeemedAt: number | null;
+  merchAddress: Record<string, string> | null;
+  merchTracking: string | null;
+};
+const memBoosterTickets: BoosterTicketRow[] = [];
+const memBoosterPaymentSigs: Set<string> = new Set();
+
 /** Exposed for the ranked subsystem so it can share the same Pool. */
 export function getPool(): pg.Pool | null { return pool; }
 
@@ -116,7 +137,152 @@ export async function initDb() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS challenges_to_idx   ON challenges (to_key, status, expires_at);`);
   await pool.query(`CREATE INDEX IF NOT EXISTS challenges_from_idx ON challenges (from_key, status, expires_at);`);
+  // Booster Pack Ticket NFTs (real on-chain mints; one row per mint).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS booster_tickets (
+      mint_address          TEXT PRIMARY KEY,
+      buyer_wallet          TEXT NOT NULL,
+      ticket_number         INTEGER NOT NULL UNIQUE,
+      payment_sig           TEXT NOT NULL UNIQUE,
+      price_sol             NUMERIC NOT NULL,
+      minted_at             BIGINT NOT NULL,
+      digital_redeemed_at   BIGINT,
+      digital_card_ids      JSONB,
+      physical_redeemed_at  BIGINT,
+      physical_address      JSONB,
+      physical_tracking     TEXT,
+      merch_redeemed_at     BIGINT,
+      merch_address         JSONB,
+      merch_tracking        TEXT
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS booster_tickets_buyer_idx ON booster_tickets (LOWER(buyer_wallet));`);
   console.log('[db] Postgres ready.');
+}
+
+// ── Booster ticket helpers ──────────────────────────────────────────────────
+
+function rowToTicket(r: any): BoosterTicketRow {
+  return {
+    mintAddress: r.mint_address,
+    buyerWallet: r.buyer_wallet,
+    ticketNumber: Number(r.ticket_number),
+    paymentSig: r.payment_sig,
+    priceSol: Number(r.price_sol),
+    mintedAt: Number(r.minted_at),
+    digitalRedeemedAt: r.digital_redeemed_at == null ? null : Number(r.digital_redeemed_at),
+    digitalCardIds: r.digital_card_ids ?? null,
+    physicalRedeemedAt: r.physical_redeemed_at == null ? null : Number(r.physical_redeemed_at),
+    physicalAddress: r.physical_address ?? null,
+    physicalTracking: r.physical_tracking ?? null,
+    merchRedeemedAt: r.merch_redeemed_at == null ? null : Number(r.merch_redeemed_at),
+    merchAddress: r.merch_address ?? null,
+    merchTracking: r.merch_tracking ?? null,
+  };
+}
+
+export async function countBoosterTickets(): Promise<number> {
+  if (!pool) return memBoosterTickets.length;
+  const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM booster_tickets`);
+  return Number(rows[0]?.n ?? 0);
+}
+
+export async function nextBoosterTicketNumber(): Promise<number> {
+  if (!pool) return memBoosterTickets.length + 1;
+  const { rows } = await pool.query(`SELECT COALESCE(MAX(ticket_number), 0)::int AS n FROM booster_tickets`);
+  return Number(rows[0]?.n ?? 0) + 1;
+}
+
+export async function isBoosterPaymentSigUsed(sig: string): Promise<boolean> {
+  if (!pool) return memBoosterPaymentSigs.has(sig);
+  const { rows } = await pool.query(`SELECT 1 FROM booster_tickets WHERE payment_sig = $1`, [sig]);
+  return rows.length > 0;
+}
+
+export async function insertBoosterTicket(t: {
+  mintAddress: string; buyerWallet: string; ticketNumber: number;
+  paymentSig: string; priceSol: number;
+}): Promise<BoosterTicketRow> {
+  const now = Date.now();
+  if (!pool) {
+    const row: BoosterTicketRow = {
+      mintAddress: t.mintAddress, buyerWallet: t.buyerWallet,
+      ticketNumber: t.ticketNumber, paymentSig: t.paymentSig,
+      priceSol: t.priceSol, mintedAt: now,
+      digitalRedeemedAt: null, digitalCardIds: null,
+      physicalRedeemedAt: null, physicalAddress: null, physicalTracking: null,
+      merchRedeemedAt: null, merchAddress: null, merchTracking: null,
+    };
+    memBoosterTickets.push(row);
+    memBoosterPaymentSigs.add(t.paymentSig);
+    return row;
+  }
+  const { rows } = await pool.query(
+    `INSERT INTO booster_tickets (mint_address, buyer_wallet, ticket_number, payment_sig, price_sol, minted_at)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [t.mintAddress, t.buyerWallet, t.ticketNumber, t.paymentSig, t.priceSol, now],
+  );
+  return rowToTicket(rows[0]);
+}
+
+export async function getBoosterTicketsByWallet(wallet: string): Promise<BoosterTicketRow[]> {
+  if (!pool) return memBoosterTickets.filter(t => t.buyerWallet.toLowerCase() === wallet.toLowerCase());
+  const { rows } = await pool.query(
+    `SELECT * FROM booster_tickets WHERE LOWER(buyer_wallet) = LOWER($1) ORDER BY minted_at ASC`,
+    [wallet],
+  );
+  return rows.map(rowToTicket);
+}
+
+export async function getBoosterTicketByMint(mintAddress: string): Promise<BoosterTicketRow | null> {
+  if (!pool) return memBoosterTickets.find(t => t.mintAddress === mintAddress) ?? null;
+  const { rows } = await pool.query(`SELECT * FROM booster_tickets WHERE mint_address = $1`, [mintAddress]);
+  return rows[0] ? rowToTicket(rows[0]) : null;
+}
+
+export async function redeemTicketDigital(mintAddress: string, cardIds: string[]): Promise<BoosterTicketRow | null> {
+  const now = Date.now();
+  if (!pool) {
+    const t = memBoosterTickets.find(t => t.mintAddress === mintAddress);
+    if (!t || t.digitalRedeemedAt) return null;
+    t.digitalRedeemedAt = now; t.digitalCardIds = cardIds; return t;
+  }
+  const { rows } = await pool.query(
+    `UPDATE booster_tickets SET digital_redeemed_at = $2, digital_card_ids = $3::jsonb
+     WHERE mint_address = $1 AND digital_redeemed_at IS NULL RETURNING *`,
+    [mintAddress, now, JSON.stringify(cardIds)],
+  );
+  return rows[0] ? rowToTicket(rows[0]) : null;
+}
+
+export async function redeemTicketPhysical(mintAddress: string, address: Record<string, string>): Promise<BoosterTicketRow | null> {
+  const now = Date.now();
+  if (!pool) {
+    const t = memBoosterTickets.find(t => t.mintAddress === mintAddress);
+    if (!t || t.physicalRedeemedAt) return null;
+    t.physicalRedeemedAt = now; t.physicalAddress = address; return t;
+  }
+  const { rows } = await pool.query(
+    `UPDATE booster_tickets SET physical_redeemed_at = $2, physical_address = $3::jsonb
+     WHERE mint_address = $1 AND physical_redeemed_at IS NULL RETURNING *`,
+    [mintAddress, now, JSON.stringify(address)],
+  );
+  return rows[0] ? rowToTicket(rows[0]) : null;
+}
+
+export async function redeemTicketMerch(mintAddress: string, address: Record<string, string>): Promise<BoosterTicketRow | null> {
+  const now = Date.now();
+  if (!pool) {
+    const t = memBoosterTickets.find(t => t.mintAddress === mintAddress);
+    if (!t || t.merchRedeemedAt) return null;
+    t.merchRedeemedAt = now; t.merchAddress = address; return t;
+  }
+  const { rows } = await pool.query(
+    `UPDATE booster_tickets SET merch_redeemed_at = $2, merch_address = $3::jsonb
+     WHERE mint_address = $1 AND merch_redeemed_at IS NULL RETURNING *`,
+    [mintAddress, now, JSON.stringify(address)],
+  );
+  return rows[0] ? rowToTicket(rows[0]) : null;
 }
 
 function key(name: string) {

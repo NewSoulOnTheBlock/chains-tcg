@@ -7,9 +7,17 @@ import { ChainsTCG } from './Game';
 import { initDb, upsertProfile, updateProfile, getProfile, getProfileByWallet, listProfiles, recordMatch, getDeck, saveDeck,
   listDecks, createDeck, updateDeck, deleteDeck, activateDeck,
   createChallenge, listIncomingChallenges, listOutgoingChallenges, getChallenge, updateChallengeStatus,
+  countBoosterTickets, nextBoosterTicketNumber, isBoosterPaymentSigUsed,
+  insertBoosterTicket, getBoosterTicketsByWallet, getBoosterTicketByMint,
+  redeemTicketDigital, redeemTicketPhysical, redeemTicketMerch,
 } from './db';
-import { validateDeck } from './cards';
+import { validateDeck, CARDS } from './cards';
 import { bootRanked, routeRanked } from './ranked';
+import {
+  BOOSTER_PRICE_SOL, BOOSTER_PRICE_LAMPORTS, BOOSTER_SUPPLY_CAP,
+  treasuryPubkey, boosterMintEnabled,
+  buildPaymentTx, verifyPayment, mintTicketNft,
+} from './booster-mint';
 
 const distDir = path.resolve(__dirname, '..', 'dist');
 
@@ -119,81 +127,44 @@ async function fetchMemeticMastersLibrary(walletAddress: string): Promise<Librar
   }
 }
 
-// ── Boosters (PREVIEW / mock backend) ───────────────────────────────────────
-// In-memory mock state for the Boosters UI. Survives only for the lifetime
-// of the server process. Replace with on-chain state + Postgres rows in
-// Phase 3/4 (see plan.md). The shape of these functions matches what the
-// final implementation will return so the client doesn't have to change.
+// ── Boosters (REAL MINT — Metaplex Core) ────────────────────────────────────
+// See src/booster-mint.ts for the on-chain implementation. This section
+// supplies the REST surface only.
+//
+// Two-step purchase:
+//   1. POST /api/boosters/buy-intent  → server returns an unsigned tx
+//      (SystemProgram.transfer buyer→treasury for BOOSTER_PRICE_LAMPORTS).
+//   2. Client signs + broadcasts, then POST /api/boosters/confirm with the
+//      tx signature. Server verifies the payment landed, mints a Metaplex
+//      Core ticket NFT to the buyer, and persists a booster_tickets row.
+//
+// Each ticket is redeemable for: 3 digital boosters + 1 physical pack +
+// 1 special-edition merch piece (see /api/boosters/redeem-*).
 
-type MockSealed = { packId: string; mintedAt: number; opened: boolean; opener: string };
-type MockOwned  = Record<string, number>;
-type MockWallet = { sealed: MockSealed[]; owned: MockOwned };
-
-const BOOSTER_CAP       = Number(process.env.BOOSTER_SUPPLY_CAP ?? 2000);
-const BOOSTER_PRICE_SOL = Number(process.env.BOOSTER_PRICE_SOL  ?? 0.15);
-const BOOSTER_PRICE_MAS = Number(process.env.BOOSTER_PRICE_MAS  ?? 1_000_000);
-const BOOSTER_MODE: 'preview' | 'live' = (process.env.BOOSTER_MODE === 'live') ? 'live' : 'preview';
-
-let _boosterMinted = 0;
-const _boosterByWallet = new Map<string, MockWallet>();
-
-function _walletState(addr: string): MockWallet {
-  let w = _boosterByWallet.get(addr);
-  if (!w) { w = { sealed: [], owned: {} }; _boosterByWallet.set(addr, w); }
-  return w;
-}
-
-function boostersSupplySnapshot() {
+async function boostersSupplySnapshot() {
+  const minted = await countBoosterTickets();
   return {
-    minted: _boosterMinted,
-    cap: BOOSTER_CAP,
-    remaining: Math.max(0, BOOSTER_CAP - _boosterMinted),
+    minted,
+    cap: BOOSTER_SUPPLY_CAP,
+    remaining: Math.max(0, BOOSTER_SUPPLY_CAP - minted),
     priceSol: BOOSTER_PRICE_SOL,
-    priceMaster: BOOSTER_PRICE_MAS,
-    mode: BOOSTER_MODE,
+    priceLamports: BOOSTER_PRICE_LAMPORTS,
+    treasury: treasuryPubkey(),
+    mode: boosterMintEnabled() ? 'live' as const : 'preview' as const,
   };
 }
 
-function boostersInventorySnapshot(wallet: string) {
-  const w = _walletState(wallet);
-  return {
-    sealed: w.sealed.filter(p => !p.opened).map(p => ({
-      packId: p.packId,
-      mintedAt: p.mintedAt,
-      nftMint: null as string | null,
-    })),
-    owned: Object.entries(w.owned).map(([cardId, qty]) => ({
-      cardId, qty, nftMints: [] as string[],
-    })),
-  };
-}
-
-function boostersBuyMock(wallet: string, currency: 'sol' | 'master') {
-  if (_boosterMinted >= BOOSTER_CAP) {
-    return { ok: false as const, error: 'sold out' };
-  }
-  const w = _walletState(wallet);
-  const recent = w.sealed.filter(p => Date.now() - p.mintedAt < 60_000).length;
-  if (recent >= 10) return { ok: false as const, error: 'rate limited (preview)' };
-
-  _boosterMinted += 1;
-  const packId = `pk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  w.sealed.push({ packId, mintedAt: Date.now(), opened: false, opener: wallet });
-  void currency;
-  return { ok: true as const, packId, mode: BOOSTER_MODE };
-}
-
-function boostersOpenMock(wallet: string, packId: string) {
-  const w = _walletState(wallet);
-  const pack = w.sealed.find(p => p.packId === packId && !p.opened);
-  if (!pack) return { ok: false as const, error: 'pack not found or already opened' };
-  pack.opened = true;
-  const { CARDS } = require('./cards') as { CARDS: Record<string, unknown> };
+/**
+ * Random-pick 10 cards weighted toward Common>Uncommon>Rare>Mythic. Rarity
+ * data isn't on cards yet (Phase 1 of the booster plan) so for now we just
+ * draw uniformly across the pool. Trivial to swap to weighted draws once
+ * `rarity` lands on CARDS entries.
+ */
+function rollPackContents(): string[] {
   const ids = Object.keys(CARDS);
   const picks: string[] = [];
   for (let i = 0; i < 10; i++) picks.push(ids[Math.floor(Math.random() * ids.length)]);
-  for (const id of picks) w.owned[id] = (w.owned[id] ?? 0) + 1;
-  return { ok: true as const, cardIds: picks, mode: BOOSTER_MODE };
+  return picks;
 }
 
 app.use(async (ctx, next) => {
@@ -348,36 +319,127 @@ app.use(async (ctx, next) => {
       ctx.body = { cards: await fetchMemeticMastersLibrary(addr) };
       return;
     }
-    // ── Boosters (PREVIEW MODE) ───────────────────────────────────────────────
-    // Mock implementation. No on-chain mint yet — see plan.md for the full
-    // pipeline. Supply counter lives in-memory; resets on server restart.
+    // ── Boosters (REAL MINT — Metaplex Core) ─────────────────────────────────
     if (method === 'GET' && url === '/api/boosters/supply') {
-      ctx.body = boostersSupplySnapshot();
+      ctx.body = await boostersSupplySnapshot();
       return;
     }
+    if (method === 'GET' && url.startsWith('/api/boosters/tickets/')) {
+      const addr = decodeURIComponent(url.slice('/api/boosters/tickets/'.length));
+      const tickets = await getBoosterTicketsByWallet(addr);
+      ctx.body = { wallet: addr, tickets };
+      return;
+    }
+    // Legacy alias kept so older client builds don't 404 mid-deploy.
     if (method === 'GET' && url.startsWith('/api/boosters/inventory/')) {
       const addr = decodeURIComponent(url.slice('/api/boosters/inventory/'.length));
-      ctx.body = boostersInventorySnapshot(addr);
+      const tickets = await getBoosterTicketsByWallet(addr);
+      ctx.body = { sealed: tickets.filter(t => !t.digitalRedeemedAt).map(t => ({
+        packId: t.mintAddress, mintedAt: t.mintedAt, nftMint: t.mintAddress,
+      })), owned: [] };
       return;
     }
     if (method === 'POST' && url === '/api/boosters/buy-intent') {
       const body = await readJson(ctx);
       const wallet = String(body?.wallet ?? '').trim();
-      const currency = body?.currency === 'master' ? 'master' : 'sol';
       if (!wallet) { ctx.status = 400; ctx.body = { ok: false, error: 'wallet required' }; return; }
-      const r = boostersBuyMock(wallet, currency);
-      if (!r.ok) ctx.status = 400;
-      ctx.body = r;
+      if (!boosterMintEnabled()) {
+        ctx.status = 503; ctx.body = { ok: false, error: 'mint not configured on server (no treasury keypair)' }; return;
+      }
+      const supply = await countBoosterTickets();
+      if (supply >= BOOSTER_SUPPLY_CAP) {
+        ctx.status = 410; ctx.body = { ok: false, error: 'sold out' }; return;
+      }
+      try {
+        const intent = await buildPaymentTx(wallet);
+        ctx.body = { ok: true, ...intent };
+      } catch (e: any) {
+        ctx.status = 400; ctx.body = { ok: false, error: String(e?.message ?? e) };
+      }
       return;
     }
-    if (method === 'POST' && url === '/api/boosters/open-intent') {
+    if (method === 'POST' && url === '/api/boosters/confirm') {
       const body = await readJson(ctx);
       const wallet = String(body?.wallet ?? '').trim();
-      const packId = String(body?.packId ?? '').trim();
-      if (!wallet || !packId) { ctx.status = 400; ctx.body = { ok: false, error: 'wallet and packId required' }; return; }
-      const r = boostersOpenMock(wallet, packId);
-      if (!r.ok) ctx.status = 400;
-      ctx.body = r;
+      const signature = String(body?.signature ?? '').trim();
+      if (!wallet || !signature) { ctx.status = 400; ctx.body = { ok: false, error: 'wallet + signature required' }; return; }
+      if (!boosterMintEnabled()) {
+        ctx.status = 503; ctx.body = { ok: false, error: 'mint not configured on server' }; return;
+      }
+      if (await isBoosterPaymentSigUsed(signature)) {
+        ctx.status = 409; ctx.body = { ok: false, error: 'payment signature already used' }; return;
+      }
+      try {
+        const paid = await verifyPayment(signature, wallet);
+        const supply = await countBoosterTickets();
+        if (supply >= BOOSTER_SUPPLY_CAP) {
+          ctx.status = 410; ctx.body = { ok: false, error: 'sold out (payment received, contact support for refund)' }; return;
+        }
+        const ticketNumber = await nextBoosterTicketNumber();
+        const { mintAddress, signature: mintSig } = await mintTicketNft(wallet, ticketNumber);
+        const row = await insertBoosterTicket({
+          mintAddress, buyerWallet: wallet, ticketNumber,
+          paymentSig: signature, priceSol: paid.lamports / 1e9,
+        });
+        ctx.body = { ok: true, ticket: row, mintSignature: mintSig };
+      } catch (e: any) {
+        console.error('[boosters] confirm failed', e);
+        ctx.status = 400; ctx.body = { ok: false, error: String(e?.message ?? e) };
+      }
+      return;
+    }
+    if (method === 'POST' && url === '/api/boosters/redeem-digital') {
+      const body = await readJson(ctx);
+      const mint = String(body?.mintAddress ?? '').trim();
+      const wallet = String(body?.wallet ?? '').trim();
+      if (!mint || !wallet) { ctx.status = 400; ctx.body = { ok: false, error: 'mintAddress + wallet required' }; return; }
+      const t = await getBoosterTicketByMint(mint);
+      if (!t) { ctx.status = 404; ctx.body = { ok: false, error: 'ticket not found' }; return; }
+      if (t.buyerWallet.toLowerCase() !== wallet.toLowerCase()) {
+        ctx.status = 403; ctx.body = { ok: false, error: 'not your ticket' }; return;
+      }
+      if (t.digitalRedeemedAt) {
+        ctx.status = 409; ctx.body = { ok: false, error: 'digital boosters already redeemed', cardIds: t.digitalCardIds }; return;
+      }
+      // 3 boosters × 10 cards each.
+      const cards = [...rollPackContents(), ...rollPackContents(), ...rollPackContents()];
+      const updated = await redeemTicketDigital(mint, cards);
+      if (!updated) { ctx.status = 409; ctx.body = { ok: false, error: 'redemption race' }; return; }
+      ctx.body = { ok: true, cardIds: cards, ticket: updated };
+      return;
+    }
+    if (method === 'POST' && url === '/api/boosters/redeem-physical') {
+      const body = await readJson(ctx);
+      const mint = String(body?.mintAddress ?? '').trim();
+      const wallet = String(body?.wallet ?? '').trim();
+      const addr = body?.address as Record<string, string> | undefined;
+      if (!mint || !wallet || !addr) { ctx.status = 400; ctx.body = { ok: false, error: 'mintAddress + wallet + address required' }; return; }
+      const t = await getBoosterTicketByMint(mint);
+      if (!t) { ctx.status = 404; ctx.body = { ok: false, error: 'ticket not found' }; return; }
+      if (t.buyerWallet.toLowerCase() !== wallet.toLowerCase()) {
+        ctx.status = 403; ctx.body = { ok: false, error: 'not your ticket' }; return;
+      }
+      if (t.physicalRedeemedAt) { ctx.status = 409; ctx.body = { ok: false, error: 'physical already redeemed' }; return; }
+      const updated = await redeemTicketPhysical(mint, addr);
+      if (!updated) { ctx.status = 409; ctx.body = { ok: false, error: 'redemption race' }; return; }
+      ctx.body = { ok: true, ticket: updated };
+      return;
+    }
+    if (method === 'POST' && url === '/api/boosters/redeem-merch') {
+      const body = await readJson(ctx);
+      const mint = String(body?.mintAddress ?? '').trim();
+      const wallet = String(body?.wallet ?? '').trim();
+      const addr = body?.address as Record<string, string> | undefined;
+      if (!mint || !wallet || !addr) { ctx.status = 400; ctx.body = { ok: false, error: 'mintAddress + wallet + address required' }; return; }
+      const t = await getBoosterTicketByMint(mint);
+      if (!t) { ctx.status = 404; ctx.body = { ok: false, error: 'ticket not found' }; return; }
+      if (t.buyerWallet.toLowerCase() !== wallet.toLowerCase()) {
+        ctx.status = 403; ctx.body = { ok: false, error: 'not your ticket' }; return;
+      }
+      if (t.merchRedeemedAt) { ctx.status = 409; ctx.body = { ok: false, error: 'merch already redeemed' }; return; }
+      const updated = await redeemTicketMerch(mint, addr);
+      if (!updated) { ctx.status = 409; ctx.body = { ok: false, error: 'redemption race' }; return; }
+      ctx.body = { ok: true, ticket: updated };
       return;
     }
     // ── Challenges ────────────────────────────────────────────────────────────

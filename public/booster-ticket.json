@@ -1,0 +1,21 @@
+{
+  "name": "Memetic Masters Booster Pack Ticket",
+  "symbol": "MMBPT",
+  "description": "A redeemable Genesis ticket for Memetic Masters TCG. Burn or redeem this ticket to claim: 3 Digital Booster Packs (10 cards each), 1 Physical Booster Pack (shipped), and 1 Special Edition piece of Merch. OPEN. DISCOVER. POWER UP.",
+  "image": "https://www.masterstcg.com/booster-ticket.png",
+  "external_url": "https://www.masterstcg.com/boosters",
+  "attributes": [
+    { "trait_type": "Type", "value": "Booster Pack Ticket" },
+    { "trait_type": "Set", "value": "Genesis" },
+    { "trait_type": "Digital Boosters", "value": "3" },
+    { "trait_type": "Physical Boosters", "value": "1" },
+    { "trait_type": "Special Edition Merch", "value": "1" },
+    { "trait_type": "Status", "value": "Unredeemed" }
+  ],
+  "properties": {
+    "category": "image",
+    "files": [
+      { "uri": "https://www.masterstcg.com/booster-ticket.png", "type": "image/png" }
+    ]
+  }
+}

@@ -14,6 +14,9 @@
     "render:cards": "node scripts/render-cards.mjs"
   },
   "dependencies": {
+    "@metaplex-foundation/mpl-core": "^1.10.0",
+    "@metaplex-foundation/umi": "^1.5.1",
+    "@metaplex-foundation/umi-bundle-defaults": "^1.5.1",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.1",
     "@solana/spl-token": "^0.4.14",

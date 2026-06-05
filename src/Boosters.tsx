@@ -1,48 +1,53 @@
 // src/Boosters.tsx
-// "Boosters" page — buy + open + collection view for the Genesis Set.
+// Booster Pack Ticket NFT mint page.
 //
-// This is the Phase-5 UI scaffolding from plan.md. The backend is PREVIEW
-// mode: no on-chain minting yet. Buy/open buttons hit /api/boosters/* which
-// returns mock data and increments an in-memory supply counter.
-//
-// When Phase 3/4 lands (Anchor program + treasury service) only the buy /
-// open handlers in this file need to change — the layout, state shape, and
-// inventory polling stay the same.
+// Real on-chain flow:
+//   1. Buyer connects a Solana wallet (Phantom/Solflare/Backpack) and clicks
+//      BUY TICKET. Page asks server for an unsigned tx (SystemProgram.transfer
+//      0.4 SOL → treasury).
+//   2. Wallet signs + broadcasts. Once confirmed, page POSTs the signature
+//      back to the server, which verifies the payment and mints a Metaplex
+//      Core NFT ticket to the buyer.
+//   3. Each ticket is redeemable for: 3 digital boosters (10 cards each),
+//      1 physical booster (mailed), 1 special-edition merch piece (mailed).
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Connection, Transaction } from '@solana/web3.js';
 import { CARDS, COLOR_META, type Color } from './cards';
 import { getProfileApi } from './profiles';
+import {
+  detectSolanaWallets, getSolanaWallet, type SolanaWalletKind,
+} from './wallet';
 import Lightfall from './Lightfall';
 import {
-  getBoosterSupply, getBoosterInventory, buyBoosterIntent, openBoosterPack,
-  type BoosterSupply, type BoosterInventory,
+  getBoosterSupply, buildBuyIntent, confirmPayment, getMyTickets,
+  redeemDigital, redeemPhysical, redeemMerch,
+  type BoosterSupply, type TicketRow, type ShippingAddress,
 } from './boosters-api';
 import { ShinyBrand, ShinyButtonLabel } from './ShinyText';
 
-type Currency = 'sol' | 'master';
-
-// Brand-logo palette: 4 of the 5 chain colors (XRP's near-black is dropped —
-// black streaks would be invisible against the dark background). Used to tint
-// the Lightfall WebGL background behind the entire Boosters page.
+// Brand-logo palette for the WebGL background streaks.
 const BRAND_STREAK_COLORS = [
-  COLOR_META.bnb.hex, // #f3ba2f BnB orange-gold
-  COLOR_META.sol.hex, // #9945ff Solana purple
-  COLOR_META.hl.hex,  // #50d2c1 Hyperliquid teal
-  COLOR_META.eth.hex, // #f5f5f5 Ethereum white
+  COLOR_META.bnb.hex, COLOR_META.sol.hex, COLOR_META.hl.hex, COLOR_META.eth.hex,
 ];
-const BRAND_BG_GLOW = COLOR_META.sol.hex; // anchor ambient glow to Solana purple — matches existing radial gradient
+const BRAND_BG_GLOW = COLOR_META.sol.hex;
+
+// Public RPC for the *client*'s sendRawTransaction. Server-side has its own
+// failover pool (booster-mint.ts). Override via VITE_SOLANA_RPC.
+const SOL_RPC = (import.meta.env.VITE_SOLANA_RPC as string | undefined)
+  ?? 'https://solana-rpc.publicnode.com';
 
 export function BoostersPage({ myName, onBack }: { myName: string; onBack: () => void }) {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [supply, setSupply] = useState<BoosterSupply | null>(null);
-  const [inventory, setInventory] = useState<BoosterInventory | null>(null);
-  const [currency, setCurrency] = useState<Currency>('sol');
-  const [busy, setBusy] = useState<null | 'buy' | string /* opening packId */>(null);
+  const [tickets, setTickets] = useState<TicketRow[]>([]);
+  const [busy, setBusy] = useState<null | 'buy' | string>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [reveal, setReveal] = useState<{ packId: string; cardIds: string[] } | null>(null);
+  const [reveal, setReveal] = useState<{ ticketNumber: number; cardIds: string[] } | null>(null);
+  const [shipping, setShipping] = useState<{ ticket: TicketRow; kind: 'physical' | 'merch' } | null>(null);
+  const [justMinted, setJustMinted] = useState<TicketRow | null>(null);
 
-  // Load wallet address from the player's profile. Refetches when window
-  // regains focus in case the user just linked a wallet in another tab.
+  // Load Solana wallet from the player's profile.
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -50,7 +55,6 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
         const p = await getProfileApi(myName);
         if (cancelled) return;
         const addr = p?.walletAddress ?? null;
-        // Only Solana addresses are eligible — EVM addresses (0x…) get ignored.
         setWalletAddress(addr && !addr.startsWith('0x') ? addr : null);
       } catch { /* leave null */ }
     }
@@ -60,222 +64,556 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
     return () => { cancelled = true; window.removeEventListener('focus', onFocus); };
   }, [myName]);
 
-  // Supply ticks every 10s. Inventory refetched whenever wallet changes or
-  // after a buy/open.
   const refreshSupply = useCallback(async () => {
     try { setSupply(await getBoosterSupply()); } catch (e: any) { setErr(String(e?.message ?? e)); }
   }, []);
-  const refreshInventory = useCallback(async () => {
-    if (!walletAddress) { setInventory(null); return; }
-    try { setInventory(await getBoosterInventory(walletAddress)); }
+  const refreshTickets = useCallback(async () => {
+    if (!walletAddress) { setTickets([]); return; }
+    try { const r = await getMyTickets(walletAddress); setTickets(r.tickets); }
     catch (e: any) { setErr(String(e?.message ?? e)); }
   }, [walletAddress]);
 
-  useEffect(() => { refreshSupply(); const t = setInterval(refreshSupply, 10_000); return () => clearInterval(t); }, [refreshSupply]);
-  useEffect(() => { refreshInventory(); }, [refreshInventory]);
+  useEffect(() => { refreshSupply(); const t = setInterval(refreshSupply, 15_000); return () => clearInterval(t); }, [refreshSupply]);
+  useEffect(() => { refreshTickets(); }, [refreshTickets]);
 
+  // ── Buy flow: server-built tx → wallet sign → broadcast → confirm ────────
   async function onBuy() {
-    if (!walletAddress) { setErr('link a Solana wallet to your profile first'); return; }
+    if (!walletAddress) { setErr('Link a Solana wallet to your profile first.'); return; }
     setErr(null); setBusy('buy');
     try {
-      const r = await buyBoosterIntent(walletAddress, currency);
-      if (!r.ok) { setErr(r.error); return; }
-      await Promise.all([refreshSupply(), refreshInventory()]);
+      // 1. Locate an installed wallet.
+      const installed = detectSolanaWallets().filter(w => w.installed);
+      if (installed.length === 0) {
+        throw new Error('No Solana wallet detected. Install Phantom, Solflare, or Backpack.');
+      }
+      const kind: SolanaWalletKind = installed[0].kind;
+      const wallet = await getSolanaWallet(kind);
+      const connected = wallet.publicKey?.toBase58?.();
+      if (!connected) throw new Error(`${kind} wallet did not return a public key.`);
+      if (connected !== walletAddress) {
+        throw new Error(`Wallet ${connected.slice(0, 4)}… doesn't match your profile (${walletAddress.slice(0, 4)}…). Reconnect the right wallet.`);
+      }
+
+      // 2. Ask server for the unsigned payment tx.
+      const intent = await buildBuyIntent(walletAddress);
+
+      // 3. Deserialize, sign, broadcast.
+      const raw = Uint8Array.from(atob(intent.txBase64), c => c.charCodeAt(0));
+      const tx = Transaction.from(raw);
+      const signed: Transaction = await wallet.signTransaction(tx);
+      const conn = new Connection(SOL_RPC, 'confirmed');
+      const sig = await conn.sendRawTransaction(signed.serialize(), {
+        skipPreflight: false, maxRetries: 3,
+      });
+
+      // 4. Wait for on-chain confirmation. Use the blockhash window from the
+      //    intent so we don't time out on slow validators.
+      await conn.confirmTransaction({
+        signature: sig,
+        blockhash: intent.blockhash,
+        lastValidBlockHeight: intent.lastValidBlockHeight,
+      }, 'confirmed');
+
+      // 5. Server verifies + mints NFT.
+      const res = await confirmPayment(walletAddress, sig);
+      setJustMinted(res.ticket);
+      await Promise.all([refreshSupply(), refreshTickets()]);
     } catch (e: any) {
-      setErr(String(e?.message ?? e));
+      const msg = String(e?.message ?? e);
+      setErr(/user rejected|User rejected/.test(msg) ? 'Transaction cancelled.' : msg);
     } finally { setBusy(null); }
   }
 
-  async function onOpen(packId: string) {
+  async function onRedeemDigital(t: TicketRow) {
     if (!walletAddress) return;
-    setErr(null); setBusy(packId);
+    setErr(null); setBusy(`d:${t.mintAddress}`);
     try {
-      const r = await openBoosterPack(walletAddress, packId);
-      if (!r.ok) { setErr(r.error); return; }
-      setReveal({ packId, cardIds: r.cardIds });
-      await refreshInventory();
-    } catch (e: any) {
-      setErr(String(e?.message ?? e));
-    } finally { setBusy(null); }
+      const r = await redeemDigital(t.mintAddress, walletAddress);
+      setReveal({ ticketNumber: t.ticketNumber, cardIds: r.cardIds });
+      await refreshTickets();
+    } catch (e: any) { setErr(String(e?.message ?? e)); }
+    finally { setBusy(null); }
   }
 
-  const isLive = supply?.mode === 'live';
+  async function onSubmitShipping(addr: ShippingAddress) {
+    if (!shipping || !walletAddress) return;
+    setErr(null); setBusy(`s:${shipping.ticket.mintAddress}`);
+    try {
+      if (shipping.kind === 'physical') {
+        await redeemPhysical(shipping.ticket.mintAddress, walletAddress, addr);
+      } else {
+        await redeemMerch(shipping.ticket.mintAddress, walletAddress, addr);
+      }
+      setShipping(null);
+      await refreshTickets();
+    } catch (e: any) { setErr(String(e?.message ?? e)); }
+    finally { setBusy(null); }
+  }
+
   const soldOut = supply ? supply.remaining <= 0 : false;
+  const liveMode = supply?.mode === 'live';
 
   return (
     <div style={{
       position: 'fixed', inset: 0, overflow: 'auto',
-      background: '#050015',
-      color: '#fff', fontFamily: 'Inter, system-ui, sans-serif',
+      background: '#050015', color: '#fff',
+      fontFamily: 'Inter, system-ui, sans-serif',
     }}>
-      {/* WebGL brand-color light-streak background. Pointer-events disabled
-          so the canvas doesn't block clicks on the actual UI above it. */}
-      <div style={{
-        position: 'fixed', inset: 0, zIndex: 0,
-        pointerEvents: 'none',
-      }}>
+      <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
         <Lightfall
-          colors={BRAND_STREAK_COLORS}
-          backgroundColor={BRAND_BG_GLOW}
-          speed={0.8}
-          streakCount={6}
-          streakWidth={1.1}
-          streakLength={1.2}
-          glow={1.05}
-          density={0.8}
-          twinkle={1}
-          zoom={2.4}
-          backgroundGlow={0.55}
-          opacity={0.85}
-          mouseInteraction={false}
+          colors={BRAND_STREAK_COLORS} backgroundColor={BRAND_BG_GLOW}
+          speed={0.8} streakCount={6} streakWidth={1.1} streakLength={1.2}
+          glow={1.05} density={0.8} twinkle={1} zoom={2.4}
+          backgroundGlow={0.55} opacity={0.85} mouseInteraction={false}
         />
-        {/* Dark vignette so foreground content stays readable. */}
         <div style={{
           position: 'absolute', inset: 0,
           background: 'radial-gradient(ellipse at center, rgba(0,0,0,0) 30%, rgba(0,0,0,0.55) 100%)',
         }} />
       </div>
 
-      {/* All real content sits above the canvas. */}
       <div style={{ position: 'relative', zIndex: 1 }}>
-      {/* Top bar */}
-      <div style={{
-        position: 'sticky', top: 0, zIndex: 5,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '12px 18px',
-        background: 'rgba(6,3,18,0.85)', backdropFilter: 'blur(8px)',
-        borderBottom: '1px solid #2a1e54',
-      }}>
-        <button onClick={onBack} style={ghostBtn}><ShinyButtonLabel text="← Back" /></button>
-        <div style={{ fontWeight: 800, letterSpacing: 2, fontSize: 14 }}><ShinyBrand text="📦 BOOSTERS — GENESIS SET" /></div>
-        <div style={{ minWidth: 80, textAlign: 'right', fontSize: 11, opacity: 0.7 }}>
-          {walletAddress ? short(walletAddress) : 'no wallet linked'}
-        </div>
-      </div>
-
-      <div style={{ maxWidth: 1000, margin: '0 auto', padding: '18px 16px 80px' }}>
-        {!isLive && (
-          <PreviewBanner />
-        )}
-
-        {/* Hero / Buy panel */}
-        <section style={panel}>
-          <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
-            <PackArt />
-            <div style={{ flex: '1 1 280px', minWidth: 240 }}>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>
-                <ShinyBrand text="Genesis Booster Pack" />
-              </div>
-              <div style={{ fontSize: 13, opacity: 0.85, marginTop: 4, lineHeight: 1.5 }}>
-                10 cards per pack. Guaranteed split:
-                <b> 6 Common · 3 Uncommon · 1 Rare</b>
-                <span style={{ opacity: 0.75 }}> (Rare slot has a 1-in-8 chance to be Mythic).</span>
-              </div>
-
-              {/* Supply bar */}
-              <SupplyBar supply={supply} />
-
-              {/* Price toggle */}
-              <div style={{ marginTop: 14, fontSize: 11, opacity: 0.7, letterSpacing: 1 }}>PRICE</div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                <PriceBtn active={currency === 'sol'} onClick={() => setCurrency('sol')}
-                  label="SOL" value={supply ? fmt(supply.priceSol, 3) : '—'} />
-                <PriceBtn active={currency === 'master'} onClick={() => setCurrency('master')}
-                  label="$MASTER" value={supply ? fmtNum(supply.priceMaster) : '—'} />
-              </div>
-
-              {/* Buy CTA */}
-              <button
-                onClick={onBuy}
-                disabled={busy !== null || soldOut || !walletAddress}
-                style={{
-                  marginTop: 16, width: '100%',
-                  background: soldOut ? '#3a2030' : '#6c4bd8',
-                  color: '#fff', border: 'none', borderRadius: 10,
-                  padding: '14px 18px', fontWeight: 900, fontSize: 15, letterSpacing: 1,
-                  cursor: (busy !== null || soldOut || !walletAddress) ? 'not-allowed' : 'pointer',
-                  opacity: (busy !== null || soldOut || !walletAddress) ? 0.6 : 1,
-                  boxShadow: '0 8px 24px rgba(108,75,216,0.35)',
-                }}
-              >
-                <ShinyButtonLabel text={
-                  soldOut ? 'SOLD OUT' :
-                  !walletAddress ? 'LINK SOLANA WALLET IN PROFILE' :
-                  busy === 'buy' ? 'PROCESSING…' :
-                  `BUY 1 PACK${isLive ? '' : ' (PREVIEW)'}`
-                } />
-              </button>
-
-              {err && (
-                <div style={{ marginTop: 10, color: '#ff6a8a', fontSize: 12 }}>⚠ {err}</div>
-              )}
-            </div>
+        {/* Top bar */}
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 5,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 18px',
+          background: 'rgba(6,3,18,0.85)', backdropFilter: 'blur(8px)',
+          borderBottom: '1px solid #2a1e54',
+        }}>
+          <button onClick={onBack} style={ghostBtn}><ShinyButtonLabel text="← Back" /></button>
+          <div style={{ fontWeight: 800, letterSpacing: 2, fontSize: 14 }}>
+            <ShinyBrand text="📦 BOOSTERS — GENESIS SET" />
           </div>
-        </section>
+          <div style={{ minWidth: 80, textAlign: 'right', fontSize: 11, opacity: 0.7 }}>
+            {walletAddress ? short(walletAddress) : 'no wallet'}
+          </div>
+        </div>
 
-        {/* Sealed packs */}
-        <section style={panel}>
-          <SectionTitle>📦 My Sealed Packs ({inventory?.sealed.length ?? 0})</SectionTitle>
-          {!walletAddress && <Empty>Link a Solana wallet in your profile to see your packs.</Empty>}
-          {walletAddress && (inventory?.sealed.length ?? 0) === 0 && (
-            <Empty>No sealed packs yet. Buy one above to get started.</Empty>
-          )}
-          {(inventory?.sealed ?? []).length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, marginTop: 12 }}>
-              {inventory!.sealed.map(p => (
-                <SealedTile
-                  key={p.packId}
-                  packId={p.packId}
-                  mintedAt={p.mintedAt}
-                  opening={busy === p.packId}
-                  onOpen={() => onOpen(p.packId)}
-                />
-              ))}
+        <div style={{ maxWidth: 1000, margin: '0 auto', padding: '18px 16px 80px' }}>
+          {!liveMode && (
+            <div style={{
+              background: 'linear-gradient(90deg, #4a2010, #6a3010)',
+              border: '1px solid #c8732a', borderRadius: 10,
+              padding: '10px 14px', marginBottom: 14, fontSize: 12,
+            }}>
+              ⚠ <b>Mint not yet configured</b> on this server (missing
+              <code style={{ marginLeft: 4 }}>BOOSTER_TREASURY_KEYPAIR</code> /
+              <code style={{ marginLeft: 4 }}>CUSTODIAL_ESCROW_KEYPAIR</code>).
             </div>
           )}
-        </section>
 
-        {/* Collection */}
-        <section style={panel}>
-          <SectionTitle>🃏 My Collection ({inventory?.owned.reduce((s, c) => s + c.qty, 0) ?? 0})</SectionTitle>
-          {!walletAddress && <Empty>Link a Solana wallet in your profile to see your collection.</Empty>}
-          {walletAddress && (inventory?.owned.length ?? 0) === 0 && (
-            <Empty>Open packs to start your collection.</Empty>
-          )}
-          {(inventory?.owned ?? []).length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 10, marginTop: 12 }}>
-              {inventory!.owned
-                .slice()
-                .sort((a, b) => b.qty - a.qty)
-                .map(c => <OwnedTile key={c.cardId} cardId={c.cardId} qty={c.qty} />)}
+          {/* Hero / Buy panel */}
+          <section style={panel}>
+            <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
+              <TicketArt />
+              <div style={{ flex: '1 1 280px', minWidth: 240 }}>
+                <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>
+                  <ShinyBrand text="Booster Pack Ticket" />
+                </div>
+                <div style={{ fontSize: 13, opacity: 0.85, marginTop: 6, lineHeight: 1.55 }}>
+                  A Genesis NFT ticket on Solana. Each ticket is redeemable for:
+                  <ul style={{ margin: '8px 0 0 18px', padding: 0, lineHeight: 1.7 }}>
+                    <li>🎴 <b>3 Digital Booster Packs</b> — 10 cards each (30 total)</li>
+                    <li>📦 <b>1 Physical Booster Pack</b> — shipped to you</li>
+                    <li>👕 <b>1 Special Edition Merch</b> — shipped to you</li>
+                  </ul>
+                </div>
+
+                <SupplyBar supply={supply} />
+
+                <div style={{ marginTop: 14, fontSize: 11, opacity: 0.7, letterSpacing: 1 }}>PRICE</div>
+                <div style={{
+                  marginTop: 6, background: '#1a1240',
+                  border: '2px solid #b585ff', borderRadius: 8, padding: '12px 14px',
+                  display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                }}>
+                  <span style={{ fontSize: 24, fontWeight: 900 }}>
+                    {supply ? fmt(supply.priceSol, 3) : '—'} <span style={{ fontSize: 13, opacity: 0.85 }}>SOL</span>
+                  </span>
+                  <span style={{ fontSize: 11, opacity: 0.65 }}>per ticket</span>
+                </div>
+
+                <button
+                  onClick={onBuy}
+                  disabled={busy !== null || soldOut || !walletAddress || !liveMode}
+                  style={{
+                    marginTop: 16, width: '100%',
+                    background: soldOut ? '#3a2030' : '#6c4bd8',
+                    color: '#fff', border: 'none', borderRadius: 10,
+                    padding: '14px 18px', fontWeight: 900, fontSize: 15, letterSpacing: 1,
+                    cursor: (busy !== null || soldOut || !walletAddress || !liveMode) ? 'not-allowed' : 'pointer',
+                    opacity: (busy !== null || soldOut || !walletAddress || !liveMode) ? 0.6 : 1,
+                    boxShadow: '0 8px 24px rgba(108,75,216,0.35)',
+                  }}
+                >
+                  <ShinyButtonLabel text={
+                    !liveMode    ? 'MINT OFFLINE' :
+                    soldOut      ? 'SOLD OUT' :
+                    !walletAddress ? 'LINK SOLANA WALLET IN PROFILE' :
+                    busy === 'buy' ? 'WAITING FOR WALLET…' :
+                    `🎟  MINT TICKET — ${supply ? fmt(supply.priceSol, 3) : '0.4'} SOL`
+                  } />
+                </button>
+
+                {supply?.treasury && (
+                  <div style={{ marginTop: 8, fontSize: 10, opacity: 0.45, fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                    treasury: {supply.treasury}
+                  </div>
+                )}
+                {err && <div style={{ marginTop: 10, color: '#ff6a8a', fontSize: 12 }}>⚠ {err}</div>}
+              </div>
             </div>
-          )}
-        </section>
+          </section>
 
-        {/* Reveal modal */}
-        {reveal && (
-          <RevealModal cardIds={reveal.cardIds} onClose={() => setReveal(null)} />
-        )}
-      </div>
+          {/* My Tickets */}
+          <section style={panel}>
+            <SectionTitle>🎟  My Tickets ({tickets.length})</SectionTitle>
+            {!walletAddress && <Empty>Link a Solana wallet in your profile to see your tickets.</Empty>}
+            {walletAddress && tickets.length === 0 && <Empty>You don't own any Booster Pack Tickets yet. Mint one above.</Empty>}
+            {tickets.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12 }}>
+                {tickets.map(t => (
+                  <TicketRowView
+                    key={t.mintAddress}
+                    ticket={t}
+                    busyTag={busy}
+                    onRedeemDigital={() => onRedeemDigital(t)}
+                    onRedeemPhysical={() => setShipping({ ticket: t, kind: 'physical' })}
+                    onRedeemMerch={() => setShipping({ ticket: t, kind: 'merch' })}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {justMinted && (
+            <MintedModal ticket={justMinted} onClose={() => setJustMinted(null)} />
+          )}
+          {reveal && (
+            <RevealModal ticketNumber={reveal.ticketNumber} cardIds={reveal.cardIds} onClose={() => setReveal(null)} />
+          )}
+          {shipping && (
+            <ShippingModal
+              kind={shipping.kind}
+              onCancel={() => setShipping(null)}
+              onSubmit={onSubmitShipping}
+              busy={busy?.startsWith('s:') ?? false}
+            />
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-// ── Components ─────────────────────────────────────────────────────────────
+// ── Ticket card ─────────────────────────────────────────────────────────────
 
-function PreviewBanner() {
+function TicketRowView({
+  ticket, busyTag, onRedeemDigital, onRedeemPhysical, onRedeemMerch,
+}: {
+  ticket: TicketRow; busyTag: string | null;
+  onRedeemDigital: () => void; onRedeemPhysical: () => void; onRedeemMerch: () => void;
+}) {
+  const digBusy = busyTag === `d:${ticket.mintAddress}`;
+  const shipBusy = busyTag === `s:${ticket.mintAddress}`;
   return (
     <div style={{
-      background: 'linear-gradient(90deg, #4a2010, #6a3010)',
-      border: '1px solid #c8732a', borderRadius: 10,
-      padding: '10px 14px', marginBottom: 14,
-      fontSize: 12, letterSpacing: 0.5,
+      background: 'linear-gradient(160deg, #1a1240, #0a0420)',
+      border: '1px solid #4a3590', borderRadius: 12, padding: 14,
+      display: 'flex', gap: 14, alignItems: 'stretch', flexWrap: 'wrap',
     }}>
-      🚧 <b>PREVIEW MODE</b> — packs are not yet on-chain. Buys & opens are
-      simulated server-side to let us iterate on the page. No SOL or $MASTER
-      is transferred. Card pulls are uniformly random; rarity guarantees ship
-      with Phase 1.
+      <div style={{ flex: '0 0 120px' }}>
+        <img src="/booster-ticket.png" alt="Booster Pack Ticket"
+          style={{ width: 120, height: 'auto', borderRadius: 8, border: '1px solid #6c4bd8' }} />
+      </div>
+      <div style={{ flex: '1 1 280px', minWidth: 240 }}>
+        <div style={{ fontSize: 16, fontWeight: 900, letterSpacing: 1 }}>
+          <ShinyBrand text={`Ticket #${ticket.ticketNumber}`} />
+        </div>
+        <div style={{ fontSize: 10, opacity: 0.5, fontFamily: 'monospace', marginTop: 4, wordBreak: 'break-all' }}>
+          mint: {ticket.mintAddress}
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
+          minted {relTime(ticket.mintedAt)} · paid {ticket.priceSol.toFixed(3)} SOL
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8, marginTop: 12 }}>
+          <RedeemCell
+            title="🎴 3 Digital Boosters"
+            status={ticket.digitalRedeemedAt ? `Opened ${relTime(ticket.digitalRedeemedAt)}` : 'Ready to open'}
+            done={!!ticket.digitalRedeemedAt}
+            disabled={digBusy}
+            onClick={onRedeemDigital}
+            label={digBusy ? 'OPENING…' : ticket.digitalRedeemedAt ? '✓ OPENED' : '✂ OPEN NOW'}
+          />
+          <RedeemCell
+            title="📦 1 Physical Booster"
+            status={
+              ticket.physicalRedeemedAt
+                ? (ticket.physicalTracking ? `Shipped (${ticket.physicalTracking})` : `Submitted ${relTime(ticket.physicalRedeemedAt)} — awaiting ship`)
+                : 'Awaiting shipping address'
+            }
+            done={!!ticket.physicalRedeemedAt}
+            disabled={shipBusy}
+            onClick={onRedeemPhysical}
+            label={ticket.physicalRedeemedAt ? '✓ ADDRESS ON FILE' : 'CLAIM PHYSICAL'}
+          />
+          <RedeemCell
+            title="👕 1 Special Edition Merch"
+            status={
+              ticket.merchRedeemedAt
+                ? (ticket.merchTracking ? `Shipped (${ticket.merchTracking})` : `Submitted ${relTime(ticket.merchRedeemedAt)} — awaiting ship`)
+                : 'Awaiting shipping address'
+            }
+            done={!!ticket.merchRedeemedAt}
+            disabled={shipBusy}
+            onClick={onRedeemMerch}
+            label={ticket.merchRedeemedAt ? '✓ ADDRESS ON FILE' : 'CLAIM MERCH'}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RedeemCell({ title, status, done, disabled, onClick, label }: {
+  title: string; status: string; done: boolean; disabled: boolean; onClick: () => void; label: string;
+}) {
+  return (
+    <div style={{
+      background: done ? 'rgba(40,120,90,0.18)' : 'rgba(108,75,216,0.10)',
+      border: `1px solid ${done ? '#3aa66a' : '#4a3590'}`,
+      borderRadius: 8, padding: 10,
+      display: 'flex', flexDirection: 'column', gap: 6, minHeight: 96,
+    }}>
+      <div style={{ fontSize: 12, fontWeight: 800 }}>{title}</div>
+      <div style={{ fontSize: 10, opacity: 0.7, flex: 1 }}>{status}</div>
+      <button
+        onClick={onClick}
+        disabled={done || disabled}
+        style={{
+          background: done ? '#1f3a2a' : '#3aa66a',
+          color: '#fff', border: 'none', borderRadius: 6,
+          padding: '6px 8px', fontWeight: 800, fontSize: 10, letterSpacing: 1,
+          cursor: (done || disabled) ? 'not-allowed' : 'pointer',
+          opacity: (done || disabled) ? 0.7 : 1,
+        }}
+      ><ShinyButtonLabel text={label} /></button>
+    </div>
+  );
+}
+
+// ── Just-minted celebration modal ──────────────────────────────────────────
+
+function MintedModal({ ticket, onClose }: { ticket: TicketRow; onClose: () => void }) {
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(2,2,8,0.85)', backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: 'linear-gradient(160deg, #150f2a, #0a0716)',
+        border: '1px solid #6c4bd8', borderRadius: 14,
+        padding: 22, maxWidth: 460, width: '100%', textAlign: 'center',
+        boxShadow: '0 18px 50px rgba(0,0,0,0.6)',
+      }}>
+        <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1, marginBottom: 6 }}>
+          <ShinyBrand text="🎉 TICKET MINTED!" />
+        </div>
+        <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 14 }}>
+          Ticket #{ticket.ticketNumber} is now in your wallet.
+        </div>
+        <img src="/booster-ticket.png" alt="Booster Pack Ticket"
+          style={{ width: '70%', maxWidth: 260, borderRadius: 10, border: '1px solid #6c4bd8', boxShadow: '0 0 40px rgba(180,130,255,0.45)' }} />
+        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 14, fontFamily: 'monospace', wordBreak: 'break-all' }}>
+          {ticket.mintAddress}
+        </div>
+        <button onClick={onClose} style={{
+          marginTop: 18, width: '100%',
+          background: '#6c4bd8', color: '#fff',
+          border: 'none', borderRadius: 8, padding: '12px 16px',
+          fontWeight: 800, letterSpacing: 1, cursor: 'pointer', fontSize: 14,
+        }}><ShinyButtonLabel text="VIEW MY TICKETS" /></button>
+      </div>
+    </div>
+  );
+}
+
+// ── Digital reveal modal (30 cards) ─────────────────────────────────────────
+
+function RevealModal({ ticketNumber, cardIds, onClose }: { ticketNumber: number; cardIds: string[]; onClose: () => void }) {
+  const [revealed, setRevealed] = useState(0);
+  const timer = useRef<number | null>(null);
+  useEffect(() => {
+    timer.current = window.setInterval(() => {
+      setRevealed(r => {
+        if (r >= cardIds.length) { if (timer.current) window.clearInterval(timer.current); return r; }
+        return r + 1;
+      });
+    }, 120);
+    return () => { if (timer.current) window.clearInterval(timer.current); };
+  }, [cardIds.length]);
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(2,2,8,0.85)', backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, overflow: 'auto',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: 'linear-gradient(160deg, #150f2a, #0a0716)',
+        border: '1px solid #6c4bd8', borderRadius: 14,
+        padding: 22, maxWidth: 880, width: '100%',
+        boxShadow: '0 18px 50px rgba(0,0,0,0.6)',
+        maxHeight: '92vh', overflow: 'auto',
+      }}>
+        <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: 2, marginBottom: 14, textAlign: 'center' }}>
+          <ShinyBrand text={`✨ TICKET #${ticketNumber} — 30 CARDS ✨`} />
+        </div>
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 8,
+        }}>
+          {cardIds.map((id, i) => (
+            <div key={i} style={{
+              opacity: i < revealed ? 1 : 0.12,
+              transform: i < revealed ? 'scale(1)' : 'scale(0.92)',
+              transition: 'opacity 220ms ease, transform 220ms ease',
+            }}>
+              <OwnedTile cardId={id} />
+            </div>
+          ))}
+        </div>
+        <button onClick={onClose} style={{
+          marginTop: 18, width: '100%',
+          background: '#6c4bd8', color: '#fff',
+          border: 'none', borderRadius: 8, padding: '12px 16px',
+          fontWeight: 800, letterSpacing: 1, cursor: 'pointer', fontSize: 14,
+        }}><ShinyButtonLabel text="ADD TO LIBRARY" /></button>
+      </div>
+    </div>
+  );
+}
+
+function OwnedTile({ cardId }: { cardId: string }) {
+  const def = CARDS[cardId] as any;
+  const color: Color | undefined = def?.color;
+  const meta = color ? COLOR_META[color] : null;
+  return (
+    <div style={{
+      background: 'linear-gradient(160deg, #14112a, #07061a)',
+      border: `1px solid ${meta?.hex ?? '#2a1e54'}`,
+      borderRadius: 8, padding: 6,
+      display: 'flex', flexDirection: 'column', gap: 4,
+    }}>
+      <div style={{
+        height: 70, borderRadius: 6, overflow: 'hidden',
+        background: '#0a0420',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 24,
+      }}>
+        {def?.art && typeof def.art === 'string' && def.art.startsWith('/')
+          ? <img src={def.art} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          : <span>{(def?.art as string) ?? '🃏'}</span>}
+      </div>
+      <div style={{ fontSize: 10, fontWeight: 700, lineHeight: 1.2 }}>{def?.title ?? cardId}</div>
+    </div>
+  );
+}
+
+// ── Shipping address modal (physical / merch) ───────────────────────────────
+
+function ShippingModal({ kind, onCancel, onSubmit, busy }: {
+  kind: 'physical' | 'merch';
+  onCancel: () => void;
+  onSubmit: (a: ShippingAddress) => void;
+  busy: boolean;
+}) {
+  const [form, setForm] = useState<ShippingAddress>({
+    fullName: '', line1: '', line2: '', city: '', region: '',
+    postalCode: '', country: '', email: '',
+  });
+  const set = <K extends keyof ShippingAddress>(k: K) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }));
+  const valid = form.fullName.trim() && form.line1.trim() && form.city.trim()
+    && form.postalCode.trim() && form.country.trim() && form.email?.includes('@');
+
+  const title = kind === 'physical' ? '📦 Ship My Physical Booster' : '👕 Ship My Special Edition Merch';
+
+  return (
+    <div onClick={onCancel} style={{
+      position: 'fixed', inset: 0, zIndex: 220,
+      background: 'rgba(2,2,8,0.85)', backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: 'linear-gradient(160deg, #150f2a, #0a0716)',
+        border: '1px solid #6c4bd8', borderRadius: 14,
+        padding: 22, maxWidth: 500, width: '100%',
+        maxHeight: '92vh', overflow: 'auto',
+      }}>
+        <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: 1, marginBottom: 12 }}>
+          <ShinyBrand text={title} />
+        </div>
+        <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 14 }}>
+          We'll only use this address to ship your item. You'll get tracking via email once it's on the way.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <Field label="Full name"  value={form.fullName}  onChange={set('fullName')}  full />
+          <Field label="Email"      value={form.email ?? ''} onChange={set('email')}    full />
+          <Field label="Address line 1" value={form.line1} onChange={set('line1')} full />
+          <Field label="Address line 2 (optional)" value={form.line2 ?? ''} onChange={set('line2')} full />
+          <Field label="City"        value={form.city}       onChange={set('city')} />
+          <Field label="State/Region" value={form.region}    onChange={set('region')} />
+          <Field label="Postal code" value={form.postalCode} onChange={set('postalCode')} />
+          <Field label="Country"     value={form.country}    onChange={set('country')} />
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          <button onClick={onCancel} disabled={busy} style={{
+            flex: 1, background: 'transparent', color: '#ccc',
+            border: '1px solid #3a3050', borderRadius: 8, padding: '12px 16px',
+            fontWeight: 700, cursor: 'pointer', fontSize: 13,
+          }}>Cancel</button>
+          <button onClick={() => valid && onSubmit(form)} disabled={!valid || busy} style={{
+            flex: 2, background: valid ? '#3aa66a' : '#234032',
+            color: '#fff', border: 'none', borderRadius: 8, padding: '12px 16px',
+            fontWeight: 900, letterSpacing: 1, fontSize: 13,
+            cursor: (valid && !busy) ? 'pointer' : 'not-allowed',
+            opacity: (valid && !busy) ? 1 : 0.6,
+          }}><ShinyButtonLabel text={busy ? 'SUBMITTING…' : 'SUBMIT SHIPPING ADDRESS'} /></button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, value, onChange, full }: {
+  label: string; value: string; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; full?: boolean;
+}) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4, gridColumn: full ? '1 / -1' : undefined }}>
+      <span style={{ fontSize: 10, opacity: 0.7, letterSpacing: 1 }}>{label.toUpperCase()}</span>
+      <input value={value} onChange={onChange} style={{
+        background: '#0a0420', color: '#fff',
+        border: '1px solid #2a1e54', borderRadius: 6,
+        padding: '8px 10px', fontSize: 13,
+      }} />
+    </label>
+  );
+}
+
+// ── Ticket art (uses the actual NFT image) ──────────────────────────────────
+
+function TicketArt() {
+  return (
+    <div style={{ flex: '0 0 220px', width: 220 }}>
+      <img src="/booster-ticket.png" alt="Booster Pack Ticket"
+        style={{
+          width: '100%', height: 'auto', borderRadius: 12,
+          border: '2px solid #6c4bd8',
+          boxShadow: '0 14px 40px rgba(108,75,216,0.45), 0 0 80px rgba(180,130,255,0.18)',
+        }} />
     </div>
   );
 }
@@ -308,159 +646,7 @@ function SupplyBar({ supply }: { supply: BoosterSupply | null }) {
   );
 }
 
-function PriceBtn({ active, onClick, label, value }: {
-  active: boolean; onClick: () => void; label: string; value: string;
-}) {
-  return (
-    <button onClick={onClick} style={{
-      flex: 1,
-      background: active ? '#6c4bd8' : '#1a1240',
-      color: '#fff',
-      border: `2px solid ${active ? '#b585ff' : '#2a1e54'}`,
-      borderRadius: 8, padding: '10px 12px',
-      fontWeight: 700, cursor: 'pointer', textAlign: 'left',
-    }}>
-      <div style={{ fontSize: 10, opacity: 0.75, letterSpacing: 1 }}>{label}</div>
-      <div style={{ fontSize: 16, fontWeight: 800 }}>{value}</div>
-    </button>
-  );
-}
-
-function PackArt() {
-  // Pure-CSS pack until a real asset is supplied.
-  return (
-    <div style={{
-      width: 200, height: 280, flex: '0 0 200px',
-      borderRadius: 12, position: 'relative', overflow: 'hidden',
-      background: 'linear-gradient(160deg, #2a1264 0%, #1a0a4a 60%, #050020 100%)',
-      border: '2px solid #6c4bd8',
-      boxShadow: '0 14px 40px rgba(108,75,216,0.45), inset 0 0 80px rgba(180,130,255,0.18)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      flexDirection: 'column', gap: 8, textAlign: 'center',
-    }}>
-      <div style={{ fontSize: 44 }}>📦</div>
-      <div style={{ fontWeight: 900, letterSpacing: 2, fontSize: 13 }}>MEMETIC</div>
-      <div style={{ fontWeight: 900, letterSpacing: 2, fontSize: 13 }}>MASTERS</div>
-      <div style={{ fontSize: 10, opacity: 0.7, letterSpacing: 3, marginTop: 4 }}>GENESIS</div>
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(45deg, transparent 40%, rgba(180,130,255,0.15) 50%, transparent 60%)' }} />
-    </div>
-  );
-}
-
-function SealedTile({ packId, mintedAt, opening, onOpen }: {
-  packId: string; mintedAt: number; opening: boolean; onOpen: () => void;
-}) {
-  return (
-    <div style={{
-      background: 'linear-gradient(160deg, #1a1240, #0a0420)',
-      border: '1px solid #4a3590', borderRadius: 10, padding: 12,
-      display: 'flex', flexDirection: 'column', gap: 8,
-    }}>
-      <div style={{
-        height: 100, borderRadius: 8,
-        background: 'linear-gradient(160deg, #2a1264, #1a0a4a)',
-        border: '1px solid #6c4bd8',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 36,
-      }}>📦</div>
-      <div style={{ fontSize: 11, opacity: 0.6 }}>{relTime(mintedAt)}</div>
-      <button onClick={onOpen} disabled={opening} style={{
-        background: opening ? '#3a3050' : '#3aa66a', color: '#fff',
-        border: 'none', borderRadius: 6, padding: '8px 10px',
-        fontWeight: 800, cursor: opening ? 'wait' : 'pointer', fontSize: 12, letterSpacing: 1,
-      }}><ShinyButtonLabel text={opening ? 'OPENING…' : '✂ OPEN'} /></button>
-      <div style={{ fontSize: 9, opacity: 0.4, fontFamily: 'monospace', textAlign: 'center' }}>{packId}</div>
-    </div>
-  );
-}
-
-function OwnedTile({ cardId, qty }: { cardId: string; qty: number }) {
-  const def = CARDS[cardId] as any;
-  const color: Color | undefined = def?.color;
-  const meta = color ? COLOR_META[color] : null;
-  return (
-    <div style={{
-      background: 'linear-gradient(160deg, #14112a, #07061a)',
-      border: `1px solid ${meta?.hex ?? '#2a1e54'}`,
-      borderRadius: 8, padding: 8,
-      display: 'flex', flexDirection: 'column', gap: 4, position: 'relative',
-    }}>
-      <div style={{
-        height: 80, borderRadius: 6, overflow: 'hidden',
-        background: '#0a0420',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 28,
-      }}>
-        {def?.art && typeof def.art === 'string' && def.art.startsWith('/')
-          ? <img src={def.art} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : <span>{(def?.art as string) ?? '🃏'}</span>}
-      </div>
-      <div style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>{def?.title ?? cardId}</div>
-      <div style={{
-        position: 'absolute', top: 4, right: 4,
-        background: '#000a', color: '#fff', padding: '2px 6px',
-        borderRadius: 10, fontSize: 10, fontWeight: 800,
-      }}>×{qty}</div>
-    </div>
-  );
-}
-
-function RevealModal({ cardIds, onClose }: { cardIds: string[]; onClose: () => void }) {
-  const [revealed, setRevealed] = useState(0);
-  const timer = useRef<number | null>(null);
-  useEffect(() => {
-    timer.current = window.setInterval(() => {
-      setRevealed(r => {
-        if (r >= cardIds.length) {
-          if (timer.current) window.clearInterval(timer.current);
-          return r;
-        }
-        return r + 1;
-      });
-    }, 350);
-    return () => { if (timer.current) window.clearInterval(timer.current); };
-  }, [cardIds.length]);
-
-  return (
-    <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, zIndex: 200,
-      background: 'rgba(2,2,8,0.85)', backdropFilter: 'blur(6px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
-    }}>
-      <div onClick={e => e.stopPropagation()} style={{
-        background: 'linear-gradient(160deg, #150f2a, #0a0716)',
-        border: '1px solid #6c4bd8', borderRadius: 14,
-        padding: 22, maxWidth: 640, width: '100%',
-        boxShadow: '0 18px 50px rgba(0,0,0,0.6)',
-      }}>
-        <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: 2, marginBottom: 14, textAlign: 'center' }}>
-          <ShinyBrand text="✨ PACK CONTENTS ✨" />
-        </div>
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8,
-        }}>
-          {cardIds.map((id, i) => (
-            <div key={i} style={{
-              opacity: i < revealed ? 1 : 0.15,
-              transform: i < revealed ? 'scale(1)' : 'scale(0.92)',
-              transition: 'opacity 250ms ease, transform 250ms ease',
-            }}>
-              <OwnedTile cardId={id} qty={1} />
-            </div>
-          ))}
-        </div>
-        <button onClick={onClose} style={{
-          marginTop: 18, width: '100%',
-          background: '#6c4bd8', color: '#fff',
-          border: 'none', borderRadius: 8, padding: '12px 16px',
-          fontWeight: 800, letterSpacing: 1, cursor: 'pointer', fontSize: 14,
-        }}><ShinyButtonLabel text="ADD TO LIBRARY" /></button>
-      </div>
-    </div>
-  );
-}
-
-// ── Small atoms ────────────────────────────────────────────────────────────
+// ── Atoms ───────────────────────────────────────────────────────────────────
 
 const panel: React.CSSProperties = {
   background: 'rgba(10,4,30,0.55)',
@@ -477,8 +663,6 @@ const ghostBtn: React.CSSProperties = {
 };
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
-  // Auto-shine plain-string section titles so every header on the page picks
-  // up the brand shimmer consistently.
   const inner = typeof children === 'string' ? <ShinyBrand text={children} /> : children;
   return <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: 1.5 }}>{inner}</div>;
 }
