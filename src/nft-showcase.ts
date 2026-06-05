@@ -41,11 +41,13 @@ export type OwnedNft = {
 function dasRpcPool(): string[] {
   const env = (import.meta as any)?.env?.VITE_SOLANA_RPC as string | undefined;
   const pool: string[] = [];
+  // Public mainnet-beta now serves DAS (`getAsset`, `getAssetsByOwner`) for
+  // Metaplex Core assets without an API key. Put it first — Helius/Ankr both
+  // return 401/403 without a key.
+  pool.push('https://api.mainnet-beta.solana.com');
   if (env && /^https?:\/\//.test(env)) pool.push(env);
-  // Known DAS endpoints that work without an API key in dev. These may rate-
-  // limit; we never throw if they fail.
+  pool.push('https://solana-mainnet.public.blastapi.io');
   pool.push('https://rpc.ankr.com/solana');
-  pool.push('https://mainnet.helius-rpc.com');
   return Array.from(new Set(pool));
 }
 
@@ -74,42 +76,46 @@ function parseEditionNumber(name: string): number | undefined {
 }
 
 /**
- * List Sproto Gremlin NFTs owned by `walletAddress`. Combines:
- *   1. DAS `getAssetsByOwner` filtered by collection grouping.
- *   2. Per-asset `getAsset` lookup of the 10 known mints (fallback).
+ * List Sproto Gremlin NFTs owned by `walletAddress`. Strategy:
+ *   1. One `getAssetsByOwner` call.
+ *   2. Pick out any item whose mint is in KNOWN_SPROTO_MINTS or whose
+ *      `grouping` contains the Sproto Gremlin collection.
+ *   3. As a paranoid fallback (for indexer gaps), per-mint `getAsset`
+ *      lookup of any KNOWN mints not seen in step 2.
  */
 export async function listOwnedSprotoGremlins(walletAddress: string): Promise<OwnedNft[]> {
   if (!walletAddress) return [];
 
   const found = new Map<string, OwnedNft>();
+  const knownSet = new Set(KNOWN_SPROTO_MINTS);
 
-  // ── 1. DAS by collection ────────────────────────────────────────────────
   const byOwner = await dasCall<{ items: any[] }>('getAssetsByOwner', {
     ownerAddress: walletAddress,
     page: 1,
-    limit: 200,
+    limit: 1000,
   });
   if (byOwner?.items?.length) {
     for (const it of byOwner.items) {
+      const mint = String(it?.id ?? '');
+      if (!mint) continue;
       const groups = it?.grouping ?? [];
       const inCollection = groups.some(
         (g: any) => g?.group_key === 'collection' && g?.group_value === SPROTO_COLLECTION_MINT,
       );
-      if (!inCollection) continue;
+      const isKnown = knownSet.has(mint);
+      if (!inCollection && !isKnown) continue;
       const name  = String(it?.content?.metadata?.name ?? 'Sproto Gremlin');
       const image = String(it?.content?.links?.image ?? it?.content?.files?.[0]?.uri
                             ?? '/sproto-gremlin.png');
-      found.set(it.id, { mint: it.id, name, image, number: parseEditionNumber(name) });
+      found.set(mint, { mint, name, image, number: parseEditionNumber(name) });
     }
   }
 
-  // ── 2. Fallback: known mints (Core assets minted standalone) ────────────
+  // Paranoid: per-mint check for any known mint the indexer missed.
   for (const mint of KNOWN_SPROTO_MINTS) {
     if (found.has(mint)) continue;
     const asset = await dasCall<any>('getAsset', { id: mint });
-    if (!asset) continue;
-    const owner = asset?.ownership?.owner;
-    if (owner !== walletAddress) continue;
+    if (!asset || asset?.ownership?.owner !== walletAddress) continue;
     const name  = String(asset?.content?.metadata?.name ?? 'Sproto Gremlin');
     const image = String(asset?.content?.links?.image ?? asset?.content?.files?.[0]?.uri
                           ?? '/sproto-gremlin.png');
