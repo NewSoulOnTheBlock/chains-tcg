@@ -1,0 +1,24 @@
+{
+  "name": "Sproto Gremlin",
+  "symbol": "SPROTO",
+  "description": "A mischievous gremlin of the Ethereum mainnet. When ~ enters the field, choose one target and deal 2 damage to them, then draw a card. \u201cChaos is only fun when everyone gets a little zap.\u201d One of 10 minted to the same wallet.",
+  "image": "https://www.masterstcg.com/sproto-gremlin.png",
+  "external_url": "https://www.masterstcg.com",
+  "attributes": [
+    { "trait_type": "Set",        "value": "Genesis" },
+    { "trait_type": "Chain",      "value": "Ethereum" },
+    { "trait_type": "Type",       "value": "Meme — Gremlin" },
+    { "trait_type": "Cost",       "value": "2 ETH" },
+    { "trait_type": "Power",      "value": 2 },
+    { "trait_type": "Toughness",  "value": 2 },
+    { "trait_type": "Rarity",     "value": "Mythic" },
+    { "trait_type": "Edition",    "value": "1 of 10" },
+    { "trait_type": "Illustrator","value": "Midjourney" }
+  ],
+  "properties": {
+    "category": "image",
+    "files": [
+      { "uri": "https://www.masterstcg.com/sproto-gremlin.png", "type": "image/png" }
+    ]
+  }
+}
