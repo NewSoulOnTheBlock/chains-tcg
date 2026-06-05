@@ -657,6 +657,25 @@ export function ChainsBoard(props: Props) {
       {/* Floating Rules drawer */}
       {showRules && <RulesDrawer onClose={() => setShowRules(false)} />}
 
+      {/* Floating END TURN button — bottom-right of the viewport for fast
+          thumb-reach on desktop. Mobile uses the dedicated MobileActionBar
+          along the bottom instead. */}
+      {!mobile && myTurn && !inBlockers && !ctx.gameover && !mulliganPhase && (
+        <button
+          onClick={() => { Haptics.turn(); moves.passTurn(); }}
+          title="End your turn (Space)"
+          style={{
+            position: 'fixed', right: 18, bottom: 18, zIndex: 90,
+            background: 'linear-gradient(180deg, #f0d27a, #c69533)',
+            color: '#1a1408', border: '2px solid #8a6d24',
+            borderRadius: 12, padding: '14px 22px',
+            cursor: 'pointer', fontWeight: 900, fontSize: 15, letterSpacing: 2,
+            boxShadow: '0 6px 24px rgba(217,184,95,0.55), 0 0 0 1px rgba(0,0,0,0.4)',
+            textShadow: '0 1px 0 rgba(255,255,255,0.3)',
+          }}
+        >END TURN ⏎</button>
+      )}
+
       {/* Pre-game mulligan overlay */}
       {mulliganPhase && !iMustPick && (
         <MulliganModal
