@@ -3047,8 +3047,15 @@ function Lobby({
   const [myColor, setMyColor] = useState<Color>('sol');
   const [seatChoice, setSeatChoice] = useState<'0' | '1'>('0');
   // Custom-deck state (creator and joiner each pick standard color OR custom).
+  // myDecks = all saved decks; selected* = which one is in play. The flat
+  // myDeck/joinDeck arrays below are derived from those, kept as state so
+  // the rest of the lobby code (validation, setupData payload, etc.) can
+  // read them synchronously.
+  const [myDecks, setMyDecks] = useState<DeckEntry[]>([]);
+  const [mySelectedDeckId, setMySelectedDeckId] = useState<number | null>(null);
   const [myDeck, setMyDeck] = useState<string[]>([]);
   const [useCustom, setUseCustom] = useState(false);
+  const [joinSelectedDeckId, setJoinSelectedDeckId] = useState<number | null>(null);
   const [joinDeck, setJoinDeck] = useState<string[]>([]);
   const [joinUseCustom, setJoinUseCustom] = useState(false);
   // Join modal state — second player picks their color when accepting.
@@ -3108,16 +3115,34 @@ function Lobby({
     return () => { alive = false; clearInterval(t); };
   }, [myName]);
 
-  // Load this player's saved custom deck on mount (if any).
+  // Load this player's full deck library on mount. Default both the create-
+  // and join-side selection to the active deck (or first deck if no active).
   useEffect(() => {
     (async () => {
       try {
-        const cards = await getDeckApi(myName);
-        setMyDeck(cards);
-        setJoinDeck(cards);
+        const decks = await listDecksApi(myName);
+        setMyDecks(decks);
+        const initial = decks.find(d => d.isActive) ?? decks[0] ?? null;
+        if (initial) {
+          setMySelectedDeckId(initial.id);
+          setJoinSelectedDeckId(initial.id);
+          setMyDeck(initial.cards);
+          setJoinDeck(initial.cards);
+        }
       } catch {}
     })();
   }, [myName]);
+
+  // Whenever the user picks a different deck from the dropdown, sync the
+  // flat cards array used by the rest of the lobby code.
+  useEffect(() => {
+    const d = myDecks.find(d => d.id === mySelectedDeckId);
+    if (d) setMyDeck(d.cards);
+  }, [myDecks, mySelectedDeckId]);
+  useEffect(() => {
+    const d = myDecks.find(d => d.id === joinSelectedDeckId);
+    if (d) setJoinDeck(d.cards);
+  }, [myDecks, joinSelectedDeckId]);
 
   const myDeckOk = useMemo(() => validateDeck(myDeck).ok, [myDeck]);
 
@@ -3501,6 +3526,7 @@ function Lobby({
               myColor={myColor} setMyColor={setMyColor}
               useCustom={useCustom} setUseCustom={setUseCustom}
               myDeck={myDeck} myDeckOk={myDeckOk}
+              myDecks={myDecks} selectedDeckId={mySelectedDeckId} onSelectDeck={setMySelectedDeckId}
               seatChoice={seatChoice} setSeatChoice={setSeatChoice}
               matchName={matchName} setMatchName={setMatchName}
               wagerKind={wagerKind} setWagerKind={setWagerKind}
@@ -3600,6 +3626,11 @@ function Lobby({
                   <span>🛠️ Use Custom Deck</span>
                   <span style={{ fontSize: 10, opacity: 0.85 }}>{joinUseCustom ? 'ON' : 'OFF'}</span>
                 </button>
+                {joinUseCustom && myDecks.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <DeckPicker decks={myDecks} selectedId={joinSelectedDeckId} onSelect={setJoinSelectedDeckId} />
+                  </div>
+                )}
               </div>
             )}
             <div style={{ marginTop: 18, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -3866,6 +3897,7 @@ function CreateMatchPanel(props: {
   myColor: Color; setMyColor: (c: Color) => void;
   useCustom: boolean; setUseCustom: (b: boolean | ((p: boolean) => boolean)) => void;
   myDeck: string[]; myDeckOk: boolean;
+  myDecks: DeckEntry[]; selectedDeckId: number | null; onSelectDeck: (id: number) => void;
   seatChoice: '0' | '1'; setSeatChoice: (s: '0' | '1') => void;
   matchName: string; setMatchName: (s: string) => void;
   wagerKind: 'free' | 'master'; setWagerKind: (k: 'free' | 'master') => void;
@@ -3873,6 +3905,7 @@ function CreateMatchPanel(props: {
   onCreate: () => void;
 }) {
   const { myColor, setMyColor, useCustom, setUseCustom, myDeck, myDeckOk,
+          myDecks, selectedDeckId, onSelectDeck,
           seatChoice, setSeatChoice, matchName, setMatchName,
           wagerKind, setWagerKind, wagerAmount, setWagerAmount, onCreate } = props;
   const [isPrivate, setIsPrivate] = useState(false);
@@ -3892,6 +3925,9 @@ function CreateMatchPanel(props: {
             onPickColor={c => { setUseCustom(false); setMyColor(c); }}
             onPickCustom={() => setUseCustom(true)}
           />
+          {useCustom && myDecks.length > 0 && (
+            <DeckPicker decks={myDecks} selectedId={selectedDeckId} onSelect={onSelectDeck} />
+          )}
           <DeckPreview color={useCustom ? null : myColor} useCustom={useCustom} myDeck={myDeck} />
         </CreateStep>
 
@@ -4008,6 +4044,36 @@ function CreateStep({ n, title, children }: { n: number; title: string; children
         <span style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${LOBBY_TOKENS.border}, transparent)` }} />
       </div>
       {children}
+    </div>
+  );
+}
+
+function DeckPicker({ decks, selectedId, onSelect }: {
+  decks: DeckEntry[]; selectedId: number | null; onSelect: (id: number) => void;
+}) {
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{
+        fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.5,
+        fontWeight: 700, marginBottom: 4, textTransform: 'uppercase',
+      }}>Which deck?</div>
+      <select
+        value={selectedId ?? ''}
+        onChange={e => onSelect(Number(e.target.value))}
+        style={{
+          width: '100%', padding: '10px 12px',
+          background: '#0a0f1c', color: '#fff',
+          border: `1px solid ${LOBBY_TOKENS.borderHi}`,
+          borderRadius: 8, fontSize: 13, fontWeight: 700,
+          fontFamily: PROFILE_FONT, cursor: 'pointer',
+        }}
+      >
+        {decks.map(d => (
+          <option key={d.id} value={d.id}>
+            {d.isActive ? '★ ' : ''}{d.name} ({d.cards.length} cards)
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
