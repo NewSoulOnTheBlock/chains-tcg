@@ -33,25 +33,22 @@ const BRAND_STREAK_COLORS = [
 const BRAND_BG_GLOW = COLOR_META.sol.hex;
 
 // Client-side RPC pool for the buyer's sendRawTransaction + confirmTransaction.
-// Public nodes go first so a stale / wrong VITE_SOLANA_RPC (e.g. Helius URL
-// with an invalid api key returning -32401) can't gate the mint flow.
-const CLIENT_RPC_POOL: string[] = (() => {
-  const env = (import.meta.env.VITE_SOLANA_RPC as string | undefined) ?? '';
-  const PUBLIC: string[] = [
-    'https://solana-rpc.publicnode.com',
-    'https://solana-mainnet.public.blastapi.io',
-    'https://solana.drpc.org',
-    'https://api.mainnet-beta.solana.com',
-  ];
-  // De-dupe; user RPC last (still tried if all public nodes fail).
-  const pool = [...PUBLIC];
-  if (env && !pool.includes(env)) pool.push(env);
-  return pool;
-})();
+// We deliberately do NOT include VITE_SOLANA_RPC here — that env var has bitten
+// us with stale Helius keys returning -32401, and the booster mint should never
+// depend on a user-configured private RPC. The server-side mint flow has its
+// own pool (booster-mint.ts) that does honor VITE_SOLANA_RPC.
+const CLIENT_RPC_POOL: string[] = [
+  'https://solana-rpc.publicnode.com',
+  'https://solana-mainnet.public.blastapi.io',
+  'https://solana.drpc.org',
+  'https://rpc.ankr.com/solana',
+  'https://api.mainnet-beta.solana.com',
+];
 
 /** Try every RPC in CLIENT_RPC_POOL until one accepts the broadcast. */
 async function broadcastWithFailover(rawTx: Uint8Array): Promise<{ sig: string; conn: Connection }> {
-  let lastErr: any = null;
+  const errors: string[] = [];
+  // Pass 1: preflight ON (validates the tx — usually preferred).
   for (const url of CLIENT_RPC_POOL) {
     try {
       const c = new Connection(url, 'confirmed');
@@ -59,19 +56,32 @@ async function broadcastWithFailover(rawTx: Uint8Array): Promise<{ sig: string; 
       return { sig, conn: c };
     } catch (e: any) {
       const msg = String(e?.message ?? e);
-      console.warn(`[boosters] sendRawTransaction via ${url} failed:`, msg);
-      lastErr = e;
-      continue;
+      console.warn(`[boosters] sendRawTransaction (preflight) via ${url} failed:`, msg);
+      errors.push(`${new URL(url).host}: ${msg.slice(0, 120)}`);
     }
   }
-  throw new Error(`Broadcast failed on every RPC: ${String(lastErr?.message ?? lastErr)}`);
+  // Pass 2: preflight OFF — some public nodes 401/forbid simulate but still
+  // accept raw broadcasts. The tx is a vanilla SystemProgram.transfer that
+  // the wallet already showed + signed, so skipping preflight is safe here.
+  for (const url of CLIENT_RPC_POOL) {
+    try {
+      const c = new Connection(url, 'confirmed');
+      const sig = await c.sendRawTransaction(rawTx, { skipPreflight: true, maxRetries: 3 });
+      return { sig, conn: c };
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      console.warn(`[boosters] sendRawTransaction (no-preflight) via ${url} failed:`, msg);
+      errors.push(`${new URL(url).host} (np): ${msg.slice(0, 120)}`);
+    }
+  }
+  throw new Error(`Broadcast failed on every RPC:\n${errors.join('\n')}`);
 }
 
 /** Confirm a signature against the pool — first node that knows about it wins. */
 async function confirmWithFailover(
   sig: string, blockhash: string, lastValidBlockHeight: number,
 ): Promise<void> {
-  let lastErr: any = null;
+  const errors: string[] = [];
   for (const url of CLIENT_RPC_POOL) {
     try {
       const c = new Connection(url, 'confirmed');
@@ -80,11 +90,10 @@ async function confirmWithFailover(
     } catch (e: any) {
       const msg = String(e?.message ?? e);
       console.warn(`[boosters] confirmTransaction via ${url} failed:`, msg);
-      lastErr = e;
-      continue;
+      errors.push(`${new URL(url).host}: ${msg.slice(0, 120)}`);
     }
   }
-  throw new Error(`Confirm failed on every RPC: ${String(lastErr?.message ?? lastErr)}`);
+  throw new Error(`Confirm failed on every RPC:\n${errors.join('\n')}`);
 }
 
 export function BoostersPage({ myName, onBack }: { myName: string; onBack: () => void }) {
