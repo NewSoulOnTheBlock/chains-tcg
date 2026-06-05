@@ -54,11 +54,15 @@ const RPC_URL =
   'https://solana-rpc.publicnode.com';
 
 const RPC_POOL: string[] = Array.from(new Set([
-  RPC_URL,
+  // Public nodes first — they're reliable, free, and immune to the
+  // "invalid api key" failure mode we hit when HELIUS_API_KEY drifts.
   'https://solana-rpc.publicnode.com',
   'https://solana-mainnet.public.blastapi.io',
   'https://solana.drpc.org',
   'https://api.mainnet-beta.solana.com',
+  // User-configured RPC last — it can still take over if env is set + valid,
+  // but we don't gate the booster mint on it.
+  RPC_URL,
 ]));
 
 // ── Connection w/ failover ─────────────────────────────────────────────────
@@ -234,17 +238,38 @@ export async function verifyPayment(
 
 // ── Step 3: mint the Booster Pack Ticket NFT (Metaplex Core) ───────────────
 
-let _umi: ReturnType<typeof createUmi> | null = null;
-function umi() {
-  if (_umi) return _umi;
+/**
+ * Build an Umi client against a specific RPC URL. We don't cache a single
+ * Umi instance anymore because `mintTicketNft` walks the RPC pool when a
+ * mint fails (e.g. dead Helius key, rate-limited public node) and needs to
+ * be able to spin up a fresh Umi on the next URL.
+ */
+function umiFor(rpcUrl: string) {
   const t = treasury();
   if (!t) throw new Error('Booster treasury is not configured');
-  const u = createUmi(RPC_URL).use(mplCore());
-  // Convert web3.js Keypair → Umi keypair via secret key bytes.
+  const u = createUmi(rpcUrl).use(mplCore());
   const kp = u.eddsa.createKeypairFromSecretKey(t.secretKey);
   u.use(keypairIdentity(kp));
-  _umi = u;
   return u;
+}
+
+/**
+ * Order the RPC pool for mint attempts. We deliberately demote Helius-with-
+ * a-suspect-key to the back so a misconfigured HELIUS_API_KEY env (which we
+ * have seen return -32401 "invalid api key") doesn't gate the whole mint.
+ * Public nodes go first because Metaplex Core mint is a single small tx
+ * that any healthy mainnet RPC will land cheaply.
+ */
+function mintRpcOrder(): string[] {
+  const PUBLIC_FIRST = [
+    'https://solana-rpc.publicnode.com',
+    'https://solana-mainnet.public.blastapi.io',
+    'https://solana.drpc.org',
+    'https://api.mainnet-beta.solana.com',
+  ];
+  const others = RPC_POOL.filter(u => !PUBLIC_FIRST.includes(u));
+  // De-dupe while preserving order.
+  return Array.from(new Set([...PUBLIC_FIRST, ...others]));
 }
 
 export type MintedTicket = {
@@ -260,16 +285,32 @@ export type MintedTicket = {
 export async function mintTicketNft(
   ownerAddress: string, ticketNumber: number,
 ): Promise<MintedTicket> {
-  const u = umi();
-  const asset = generateSigner(u);
-  const res = await create(u, {
-    asset,
-    name: `Booster Pack Ticket #${ticketNumber}`,
-    uri: METADATA_URI,
-    owner: umiPublicKey(ownerAddress),
-  }).sendAndConfirm(u, { confirm: { commitment: 'confirmed' } });
-  return {
-    mintAddress: asset.publicKey.toString(),
-    signature: Buffer.from(res.signature).toString('base64'),
-  };
+  const urls = mintRpcOrder();
+  let lastErr: any = null;
+  for (const url of urls) {
+    try {
+      const u = umiFor(url);
+      const asset = generateSigner(u);
+      const res = await create(u, {
+        asset,
+        name: `Booster Pack Ticket #${ticketNumber}`,
+        uri: METADATA_URI,
+        owner: umiPublicKey(ownerAddress),
+      }).sendAndConfirm(u, { confirm: { commitment: 'confirmed' } });
+      console.log(`[booster-mint] minted #${ticketNumber} via ${url}`);
+      return {
+        mintAddress: asset.publicKey.toString(),
+        signature: Buffer.from(res.signature).toString('base64'),
+      };
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      // Helpful diagnostics for the most common failure modes.
+      const looksLikeAuth = /401|invalid api key|unauthor/i.test(msg);
+      const looksLikeRate = /429|rate limit|too many/i.test(msg);
+      console.warn(`[booster-mint] mint via ${url} failed${looksLikeAuth ? ' (auth)' : looksLikeRate ? ' (rate-limit)' : ''}: ${msg}`);
+      lastErr = e;
+      continue;
+    }
+  }
+  throw new Error(`mint failed on every RPC in pool: ${String(lastErr?.message ?? lastErr)}`);
 }
