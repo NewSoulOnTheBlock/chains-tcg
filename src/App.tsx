@@ -1291,6 +1291,7 @@ function CardTypesGrid({ hl }: { hl: (s: string) => React.ReactNode }) {
     { name: 'NODE',    icon: '⛓️', color: RULES_TOKENS.gold,   short: 'Produces Gas',        details: 'Your "land". Free to play, but only 1 per turn. Tap on a later turn to add 1 Gas of its color to your pool.' },
     { name: 'MEME',    icon: '🐸', color: RULES_TOKENS.purple, short: 'Creature Card',       details: 'Your fighters. Each has Power / Toughness. Attack to deal damage to the opponent. Summoning sick the turn they enter.' },
     { name: 'MACHINE', icon: '⚙️', color: RULES_TOKENS.blue,   short: 'Permanent Effect',    details: 'Artifact / enchantment. Stays in play with an ongoing effect until destroyed.' },
+    { name: 'AURA',    icon: '🔮', color: RULES_TOKENS.purple, short: 'Enchant a Meme',      details: 'A spell that attaches to a single Meme. Buffs its stats or grants a keyword (haste, lifelink, etc). If the enchanted Meme dies or is bounced, the Aura is destroyed too.' },
     { name: 'MOVE',    icon: '⚡', color: RULES_TOKENS.red,    short: 'Instant Action',      details: 'A one-shot spell. Resolves immediately, then goes to the graveyard.' },
   ];
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -2346,7 +2347,7 @@ function PublicProfile({ name, onBack }: { name: string; onBack: () => void }) {
       .filter(r => !!r.def);
     rows.sort((a, b) => {
       if (a.def.color !== b.def.color) return COLORS.indexOf(a.def.color) - COLORS.indexOf(b.def.color);
-      const typeOrder = ['node', 'meme', 'machine', 'move'];
+      const typeOrder = ['node', 'meme', 'machine', 'aura', 'move'];
       const ta = typeOrder.indexOf(a.def.type), tb = typeOrder.indexOf(b.def.type);
       if (ta !== tb) return ta - tb;
       return a.def.name.localeCompare(b.def.name);
@@ -2596,7 +2597,7 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
   const [filter, setFilter] = useState<Color | 'all'>('all');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'node' | 'meme' | 'machine' | 'move'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'node' | 'meme' | 'machine' | 'aura' | 'move'>('all');
 
   // ── Deck Library state ─────────────────────────────────────────────────────
   const [decks, setDecks] = useState<DeckEntry[]>([]);
@@ -2880,7 +2881,7 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
         ))}
       </div>
       <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-        {(['all', 'node', 'meme', 'machine', 'move'] as const).map(t => (
+        {(['all', 'node', 'meme', 'machine', 'aura', 'move'] as const).map(t => (
           <FilterChip key={t} selected={typeFilter === t}
             onClick={() => setTypeFilter(t)}
             label={t === 'all' ? 'All Types' : t.charAt(0).toUpperCase() + t.slice(1)} />

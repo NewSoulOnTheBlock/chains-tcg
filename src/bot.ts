@@ -96,6 +96,12 @@ export function enumerateMoves(G: AnyState, ctx: any, playerID: string): BotActi
       out.push(makeMove('playCard', [i], playerID));
       continue;
     }
+    if (def.type === 'aura') {
+      // Buffs land on own memes; shield-style auras also fine on our own.
+      // Skip if we have no memes to attach to.
+      for (const m of p.memes ?? []) out.push(makeMove('playCard', [i, m.uid], playerID));
+      continue;
+    }
     if (def.type === 'move') {
       const e = def.effect;
       if (e === 'drawTwo' || e === 'gainLife4' || e === 'damageAll_1' || e === 'mill3' || e === 'discardRandom') {

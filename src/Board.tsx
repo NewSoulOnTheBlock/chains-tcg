@@ -528,6 +528,13 @@ export function ChainsBoard(props: Props) {
     const defId = me.hand[idx];
     const def = CARDS[defId];
     if (!def) return;
+    if (def.type === 'aura') {
+      // Auras always target a meme.
+      Haptics.tap();
+      setSelectedHand(idx);
+      setTargetMode({ kind: 'meme' });
+      return;
+    }
     if (def.type === 'move') {
       const needsTarget =
         def.effect === 'destroyMeme' || def.effect === 'bounceMeme' ||
@@ -1682,6 +1689,34 @@ function renderNodes(
   return out;
 }
 
+function collectAurasOn(
+  me: GState['players'][string],
+  opp: GState['players'][string],
+  memeUid: string,
+): Array<{ defId: string; effect?: string }> {
+  const out: Array<{ defId: string; effect?: string }> = [];
+  for (const m of me.machines) {
+    if (m.attachedTo === memeUid) out.push({ defId: m.defId, effect: CARDS[m.defId]?.effect });
+  }
+  for (const m of opp.machines) {
+    if (m.attachedTo === memeUid) out.push({ defId: m.defId, effect: CARDS[m.defId]?.effect });
+  }
+  return out;
+}
+/**
+ * UI-side pump bonus from auras (cosmetic; the server is the source of truth).
+ * Only the symmetric +2/+2 aura tweaks the displayed P/T — asymmetric sword /
+ * shield auras still apply on the backend, but are signaled in the UI via the
+ * 🔮 chip count rather than tweaking one stat.
+ */
+function auraPowerForUI(auras: Array<{ effect?: string }>): number {
+  let n = 0;
+  for (const a of auras) {
+    if (a.effect === 'aura_+2+2') n += 2;
+  }
+  return n;
+}
+
 function Playmat(props: {
   me: GState['players'][string];
   opp: GState['players'][string];
@@ -1707,8 +1742,8 @@ function Playmat(props: {
     myName, oppName,
   } = props;
 
-  const mePump  = me.machines.filter(m => CARDS[m.defId]?.effect === 'pump_all_+1+1').length;
-  const oppPump = opp.machines.filter(m => CARDS[m.defId]?.effect === 'pump_all_+1+1').length;
+  const mePump  = me.machines.filter(m => CARDS[m.defId]?.effect === 'pump_all_+1+1' && !m.attachedTo).length;
+  const oppPump = opp.machines.filter(m => CARDS[m.defId]?.effect === 'pump_all_+1+1' && !m.attachedTo).length;
 
   // Zone rectangles in percentage of the mat (left, top, width, height).
   // Tuned to match the labels on /playmat.png.
@@ -1771,8 +1806,8 @@ function Playmat(props: {
           </div>
         )}
       </ZoneSlot>
-      <ZoneSlot rect={Z.oppMachines} icon="⚙️" label={`Machines (${opp.machines.length})`} compactLabel={`⚙️ ${opp.machines.length}`} rotated>
-        {opp.machines.map(inst => (
+      <ZoneSlot rect={Z.oppMachines} icon="⚙️" label={`Machines (${opp.machines.filter(m => !m.attachedTo).length})`} compactLabel={`⚙️ ${opp.machines.filter(m => !m.attachedTo).length}`} rotated>
+        {opp.machines.filter(m => !m.attachedTo).map(inst => (
           <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp
             onClick={machineTargetable ? () => onMachineClick(inst.uid) : undefined}
             targetable={machineTargetable} />
@@ -1785,14 +1820,15 @@ function Playmat(props: {
           const blockerSelected = !!selectedBlocker;
           const isAttacker = attackerSide === 'opp' && attackers.includes(inst.uid);
           const blockable = blockerSelected && isAttacker;
+          const auras = collectAurasOn(me, opp, inst.uid);
           return (
             <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp
-              pumpBonus={oppPump}
+              pumpBonus={oppPump + auraPowerForUI(auras)}
               onClick={(memeTargetable || blockable) ? () => onOppMemeClick(inst.uid) : undefined}
               targetable={memeTargetable || blockable}
               selected={attacking}
               footer={
-                <>{attacking && '⚔️'}{blockedBy.length > 0 && ` 🛡${blockedBy.length}`}</>
+                <>{attacking && '⚔️'}{blockedBy.length > 0 && ` 🛡${blockedBy.length}`}{auras.length > 0 && ` 🔮${auras.length}`}</>
               } />
           );
         })}
@@ -1814,20 +1850,21 @@ function Playmat(props: {
         {me.memes.map(inst => {
           const attacking = attackerSide === 'me' && attackers.includes(inst.uid);
           const blockedBy = blocks[inst.uid] ?? [];
+          const auras = collectAurasOn(me, opp, inst.uid);
           return (
             <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp
-              pumpBonus={mePump}
+              pumpBonus={mePump + auraPowerForUI(auras)}
               onClick={() => onMyMemeClick(inst.uid)}
               targetable={memeTargetable}
               selected={inst.uid === selectedBlocker || attacking}
               footer={
-                <>{attacking && '⚔️'}{blockedBy.length > 0 && ` 🛡${blockedBy.length}`}</>
+                <>{attacking && '⚔️'}{blockedBy.length > 0 && ` 🛡${blockedBy.length}`}{auras.length > 0 && ` 🔮${auras.length}`}</>
               } />
           );
         })}
       </ZoneSlot>
-      <ZoneSlot rect={Z.myMachines} icon="⚙️" label={`Machines (${me.machines.length})`} compactLabel={`⚙️ ${me.machines.length}`}>
-        {me.machines.map(inst => (
+      <ZoneSlot rect={Z.myMachines} icon="⚙️" label={`Machines (${me.machines.filter(m => !m.attachedTo).length})`} compactLabel={`⚙️ ${me.machines.filter(m => !m.attachedTo).length}`}>
+        {me.machines.filter(m => !m.attachedTo).map(inst => (
           <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp
             onClick={machineTargetable ? () => onMachineClick(inst.uid) : undefined}
             targetable={machineTargetable} />

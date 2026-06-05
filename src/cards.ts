@@ -13,7 +13,7 @@ export const COLOR_META: Record<Color, { name: string; hex: string; ink: string;
   xrp: { name: 'XRP',         hex: '#1a1a1a', ink: '#fff', template: '/template-xrp.png', glyph: 'XRP' },
 };
 
-export type CardType = 'node' | 'meme' | 'machine' | 'move';
+export type CardType = 'node' | 'meme' | 'machine' | 'aura' | 'move';
 
 export type GasCost = Partial<Record<Color | 'any', number>>;
 
@@ -39,6 +39,12 @@ export type EffectId =
   | 'gas_discount_color'   // your moves cost 1 less of own color (min 0)
   | 'lifelink_all'         // damage your memes deal heals you for the same amount
   | 'on_meme_etb_draw'     // when a meme enters under you, draw a card (cooldown 1/turn)
+  // auras (attach to a single Meme)
+  | 'aura_+2+2'            // attached meme: +2/+2
+  | 'aura_+3+0'            // attached meme: +3/+0 (sword)
+  | 'aura_+0+3'            // attached meme: +0/+3 (shield)
+  | 'aura_haste'           // attached meme: clear summoning sickness on attach
+  | 'aura_lifelink'        // attached meme: damage it deals heals its controller
   ;
 
 export interface CardDef {
@@ -168,7 +174,12 @@ const IMAGES: Record<string, string> = {
   xrp_algo:     emo('1f9ee'), // 🧮 abacus (Trading Algorithm)
   xrp_assassin: emo('1f50d'), // 🔍 magnifying glass (Doxx)
   xrp_strike:   emo('1f40b'), // 🐋 whale (Whale Dump)
-  xrp_subpoena: '/cards/xrp_subpoena.jpg?v=1',
+  // ── Auras (Genesis set) — emoji-art for now ──
+  bnb_liquidity:  emo('1f4a7'),   // 💧 droplet (Liquidity Injection)
+  sol_validator:  emo('26a1'),    // ⚡ high voltage (Validator Boost)
+  hl_funding:     emo('1f512'),   // 🔒 lock (Funding Lock)
+  eth_shield:     emo('1f6e1'),   // 🛡 shield (Smart Contract Shield)
+  xrp_edge:       emo('2694'),    // ⚔ swords (Validator Edge)
 };
 
 /**
@@ -179,6 +190,11 @@ const IMAGES: Record<string, string> = {
 export function templateFor(def: CardDef): { url: string; glyph?: string } | undefined {
   if (def.type === 'machine') {
     return { url: '/template-machine.jpg', glyph: 'MACHINE' };
+  }
+  if (def.type === 'aura') {
+    // Reuse the machine frame for now — auras share the steel/silver look
+    // with a unique badge in the UI marking them as "attached".
+    return { url: '/template-machine.jpg', glyph: 'AURA' };
   }
   const meta = COLOR_META[def.color];
   if (meta.template) return { url: meta.template, glyph: meta.glyph };
@@ -253,6 +269,15 @@ const X = (
   text, effect,
 });
 
+/** Aura: enchantment that attaches to a single Meme. */
+const U = (
+  id: string, color: Color, name: string, cost: number, effect: EffectId, text: string
+): CardDef => ({
+  id, name, type: 'aura', color,
+  cost: makeCost(color, cost),
+  text, effect,
+});
+
 // ── Catalogue ────────────────────────────────────────────────────────────────
 
 export const CARDS: Record<string, CardDef> = {};
@@ -285,6 +310,8 @@ reg(
   X('bnb_rugpull',  'bnb', 'Rug Pull',          2, 'destroyMeme',           'Dev pulls the liquidity. Destroy target Meme.'),
   X('bnb_airdrop',  'bnb', 'Airdrop Farm',      3, 'drawTwo',               'Farm wallets for the snapshot. Draw two cards.'),
   X('bnb_honeypot', 'bnb', 'Honeypot',          3, 'damageAll_1',           'Every Meme on the field takes 1 damage.'),
+  // Aura
+  U('bnb_liquidity','bnb', 'Liquidity Injection', 2, 'aura_+2+2',           'Enchant Meme. Attached Meme gets +2/+2.'),
 );
 
 // Solana — burst, draw, fast turns
@@ -306,6 +333,8 @@ reg(
   X('sol_zap',     'sol', 'Snipe',             1, 'damage3',               'Bot snipes the mint. Deal 3 damage to any target.'),
   X('sol_bounce',  'sol', 'Frontrun',          2, 'bounceMeme',            'MEV reorder. Return target Meme to its owner\'s hand.'),
   X('sol_tgpump',  'sol', 'Telegram Pump',     1, 'damage2',               'KOL signal in the group chat. Deal 2 damage anywhere.'),
+  // Aura
+  U('sol_validator','sol', 'Validator Boost',  2, 'aura_haste',            'Enchant Meme. Attached Meme has no summoning sickness.'),
 );
 
 // Hyperliquid — big bodies, ramp
@@ -327,6 +356,8 @@ reg(
   X('hl_squeeze',  'hl', 'Short Squeeze',      3, 'destroyMeme',           'Stop hunted into oblivion. Destroy target Meme.'),
   X('hl_heal',     'hl', 'Take Profit',        2, 'gainLife4',             'Secure the bag. Gain 4 life.'),
   X('hl_margin',   'hl', 'Margin Call',        2, 'discardRandom',         'Opponent\'s position is liquidated — they discard a random card.'),
+  // Aura
+  U('hl_funding',  'hl', 'Funding Lock',       2, 'aura_lifelink',         'Enchant Meme. Damage attached Meme deals heals its controller.'),
 );
 
 // Ethereum — control, removal, big finishers
@@ -348,6 +379,8 @@ reg(
   X('eth_smite',   'eth', 'FUD Tweet',         3, 'damage5',               'KOL drops a thread. Deal 5 damage to any target.'),
   X('eth_heal',    'eth', 'DCA In',            2, 'gainLife4',             'Stack the dip. Gain 4 life.'),
   X('eth_exploit', 'eth', 'Exploit Disclosure',2, 'destroyMachine',        'White-hat dev kills the contract. Destroy target Machine.'),
+  // Aura
+  U('eth_shield',  'eth', 'Smart Contract Shield', 2, 'aura_+0+3',         'Enchant Meme. Attached Meme gets +0/+3.'),
 );
 
 // XRP — discard, sneak, finishers
@@ -369,6 +402,8 @@ reg(
   X('xrp_assassin','xrp', 'Doxx',              2, 'destroyMeme',           'KOL outs the founder. Destroy target Meme.'),
   X('xrp_strike',  'xrp', 'Whale Dump',        3, 'damage5',               'Whale unloads at market. Deal 5 damage to any target.'),
   X('xrp_subpoena','xrp', 'SEC Subpoena',      1, 'mill3',                 'Regulator subpoenas the dev. Opponent mills 3 cards.'),
+  // Aura
+  U('xrp_edge',    'xrp', 'Validator Edge',    2, 'aura_+3+0',             'Enchant Meme. Attached Meme gets +3/+0.'),
 );
 
 // ── Starter decks ────────────────────────────────────────────────────────────

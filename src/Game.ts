@@ -17,6 +17,8 @@ export interface Instance {
   damage: number;
   summoningSick: boolean;     // memes can't attack the turn they enter
   onEtbDrawUsed?: boolean;    // for 'on_meme_etb_draw' machine (per-turn cooldown)
+  /** Aura attachment: set on aura instances (stored in machines[]), points at the meme uid. */
+  attachedTo?: string;
 }
 
 export type Zone = 'nodes' | 'memes' | 'machines';
@@ -188,18 +190,51 @@ function findOnBattlefield(G: GState, uid: string):
 }
 
 function pumpBonus(p: PlayerState): number {
-  return p.machines.filter(m => CARDS[m.defId].effect === 'pump_all_+1+1').length;
+  return p.machines.filter(m => CARDS[m.defId].effect === 'pump_all_+1+1' && !m.attachedTo).length;
 }
 function attackerBonus(p: PlayerState): number {
-  return p.machines.filter(m => CARDS[m.defId].effect === 'pump_attackers_+1+0').length;
+  return p.machines.filter(m => CARDS[m.defId].effect === 'pump_attackers_+1+0' && !m.attachedTo).length;
 }
-function memePower(p: PlayerState, m: Instance): number {
-  const d = CARDS[m.defId];
-  return (d.power ?? 0) + pumpBonus(p);
+
+/** Find every aura currently attached to the given meme uid (regardless of owner). */
+function aurasOn(G: GState, memeUid: string): Array<{ ownerId: string; inst: Instance; def: CardDef }> {
+  const out: Array<{ ownerId: string; inst: Instance; def: CardDef }> = [];
+  for (const pid of Object.keys(G.players)) {
+    for (const m of G.players[pid].machines) {
+      if (m.attachedTo === memeUid) out.push({ ownerId: pid, inst: m, def: CARDS[m.defId] });
+    }
+  }
+  return out;
 }
-function memeToughness(p: PlayerState, m: Instance): number {
+function auraPowerBonus(G: GState, memeUid: string): number {
+  let n = 0;
+  for (const a of aurasOn(G, memeUid)) {
+    if (a.def.effect === 'aura_+2+2') n += 2;
+    if (a.def.effect === 'aura_+3+0') n += 3;
+  }
+  return n;
+}
+function auraToughnessBonus(G: GState, memeUid: string): number {
+  let n = 0;
+  for (const a of aurasOn(G, memeUid)) {
+    if (a.def.effect === 'aura_+2+2') n += 2;
+    if (a.def.effect === 'aura_+0+3') n += 3;
+  }
+  return n;
+}
+function memeHasAuraLifelink(G: GState, memeUid: string): boolean {
+  return aurasOn(G, memeUid).some(a => a.def.effect === 'aura_lifelink');
+}
+
+function memePower(p: PlayerState, m: Instance, G?: GState): number {
   const d = CARDS[m.defId];
-  return (d.toughness ?? 1) + pumpBonus(p);
+  const auraP = G ? auraPowerBonus(G, m.uid) : 0;
+  return (d.power ?? 0) + pumpBonus(p) + auraP;
+}
+function memeToughness(p: PlayerState, m: Instance, G?: GState): number {
+  const d = CARDS[m.defId];
+  const auraT = G ? auraToughnessBonus(G, m.uid) : 0;
+  return (d.toughness ?? 1) + pumpBonus(p) + auraT;
 }
 
 function destroyMeme(G: GState, ownerId: string, uid: string) {
@@ -208,7 +243,24 @@ function destroyMeme(G: GState, ownerId: string, uid: string) {
   if (idx === -1) return;
   const [removed] = p.memes.splice(idx, 1);
   p.graveyard.push(removed.defId);
+  detachAurasFrom(G, uid);
   G.log.push(`Meme ${CARDS[removed.defId].name} dies.`);
+}
+
+/** Send every aura attached to `memeUid` to its controller's graveyard. */
+function detachAurasFrom(G: GState, memeUid: string) {
+  for (const pid of Object.keys(G.players)) {
+    const pp = G.players[pid];
+    // splice while iterating: walk from end to start.
+    for (let i = pp.machines.length - 1; i >= 0; i--) {
+      const a = pp.machines[i];
+      if (a.attachedTo === memeUid) {
+        pp.machines.splice(i, 1);
+        pp.graveyard.push(a.defId);
+        G.log.push(`Aura ${CARDS[a.defId].name} falls off.`);
+      }
+    }
+  }
 }
 
 function destroyMachine(G: GState, ownerId: string, uid: string) {
@@ -226,6 +278,7 @@ function returnMemeToHand(G: GState, ownerId: string, uid: string) {
   if (idx === -1) return;
   const [removed] = p.memes.splice(idx, 1);
   p.hand.push(removed.defId);
+  detachAurasFrom(G, uid);
   G.log.push(`${CARDS[removed.defId].name} returned to hand.`);
 }
 
@@ -239,7 +292,7 @@ function dealDamageToMeme(G: GState, ownerId: string, uid: string, amount: numbe
   const m = p.memes.find(x => x.uid === uid);
   if (!m) return;
   m.damage += amount;
-  if (m.damage >= memeToughness(p, m)) destroyMeme(G, ownerId, uid);
+  if (m.damage >= memeToughness(p, m, G)) destroyMeme(G, ownerId, uid);
 }
 
 function pickingPending(G: GState): boolean {
@@ -299,6 +352,23 @@ const playCard: Move<GState> = ({ G, ctx, playerID, random }, handIndex: number,
     p.hand.splice(handIndex, 1);
     p.machines.push(mkInstance(defId));
     G.log.push(`Player ${playerID} deploys Machine ${def.name}.`);
+    return;
+  }
+
+  if (def.type === 'aura') {
+    // Must target a Meme on the battlefield (yours or opponent's).
+    if (!targetUid) return INVALID_MOVE;
+    const found = findOnBattlefield(G, targetUid);
+    if (!found || found.zone !== 'memes') return INVALID_MOVE;
+    pay(p, cost);
+    p.hand.splice(handIndex, 1);
+    p.machines.push(mkInstance(defId, { attachedTo: targetUid }));
+    // aura_haste: clear summoning sick on attach so it's actually useful.
+    if (def.effect === 'aura_haste') {
+      const meme = G.players[found.ownerId].memes.find(m => m.uid === targetUid);
+      if (meme) meme.summoningSick = false;
+    }
+    G.log.push(`Player ${playerID} enchants ${CARDS[found.inst.defId].name} with ${def.name}.`);
     return;
   }
 
@@ -481,13 +551,13 @@ function resolveCombat(G: GState, ctx: { currentPlayer: string; playOrder: strin
   for (const a of G.combat.attackers) {
     const attacker = atk.memes.find(m => m.uid === a.memeUid);
     if (!attacker) continue;
-    const aPower = memePower(atk, attacker) + attackerBonus(atk);
+    const aPower = memePower(atk, attacker, G) + attackerBonus(atk);
     const blockerUids = G.combat.blocks[a.memeUid] ?? [];
 
     if (blockerUids.length === 0) {
       // Unblocked: damage defender.
       dealDamageToPlayer(G, defPid, aPower);
-      applyLifelink(G, atkPid, aPower);
+      applyLifelink(G, atkPid, aPower, attacker.uid);
       continue;
     }
 
@@ -497,19 +567,24 @@ function resolveCombat(G: GState, ctx: { currentPlayer: string; playOrder: strin
     for (const buid of blockerUids) {
       const blocker = def.memes.find(m => m.uid === buid);
       if (!blocker) continue;
-      const bTough = memeToughness(def, blocker);
-      const bPower = memePower(def, blocker);
+      const bTough = memeToughness(def, blocker, G);
+      const bPower = memePower(def, blocker, G);
       const assigned = Math.min(remaining, bTough);
       dealDamageToMeme(G, defPid, buid, assigned);
       remaining -= assigned;
       // Blocker damages attacker
       attacker.damage += bPower;
       totalDealtByBlockers += bPower;
+      // Per-blocker aura-lifelink heals defender for what this blocker dealt.
+      if (bPower > 0 && memeHasAuraLifelink(G, blocker.uid)) {
+        def.life += bPower;
+        G.log.push(`Player ${defPid} gains ${bPower} life (aura lifelink).`);
+      }
       if (remaining <= 0 && false) break; // continue to let other blockers deal damage
     }
-    applyLifelink(G, atkPid, aPower);                // attacker damage = full power
-    applyLifelink(G, defPid, totalDealtByBlockers);  // defender lifelink for retaliation
-    if (attacker.damage >= memeToughness(atk, attacker)) destroyMeme(G, atkPid, attacker.uid);
+    applyLifelink(G, atkPid, aPower, attacker.uid);  // attacker damage = full power
+    applyLifelink(G, defPid, totalDealtByBlockers);  // defender lifelink_all (machine) for retaliation
+    if (attacker.damage >= memeToughness(atk, attacker, G)) destroyMeme(G, atkPid, attacker.uid);
   }
   // Clear damage on surviving memes (per MTG, damage clears at end of turn — we do it now).
   for (const pid of Object.keys(G.players)) {
@@ -517,10 +592,12 @@ function resolveCombat(G: GState, ctx: { currentPlayer: string; playOrder: strin
   }
 }
 
-function applyLifelink(G: GState, pid: string, amount: number) {
+function applyLifelink(G: GState, pid: string, amount: number, memeUid?: string) {
   if (amount <= 0) return;
   const p = G.players[pid];
-  if (p.machines.some(m => CARDS[m.defId].effect === 'lifelink_all')) {
+  const hasMachineLifelink = p.machines.some(m => CARDS[m.defId].effect === 'lifelink_all' && !m.attachedTo);
+  const hasAuraLifelink = memeUid ? memeHasAuraLifelink(G, memeUid) : false;
+  if (hasMachineLifelink || hasAuraLifelink) {
     p.life += amount;
     G.log.push(`Player ${pid} gains ${amount} life (lifelink).`);
   }
