@@ -1,7 +1,12 @@
 // src/wallet.ts
 // Lightweight browser wallet connectors — no external SDKs.
 // EVM via window.ethereum (MetaMask, Rabby, Coinbase Wallet, OKX, ...)
-// Solana via window.solana (Phantom), window.solflare (Solflare), window.backpack (Backpack).
+// Solana via legacy window.<name> injection AND the Wallet Standard protocol
+// (https://github.com/wallet-standard/wallet-standard), which is how modern
+// Solana wallets — including Jupiter Mobile, Glow, Coinbase, OKX, etc. —
+// announce themselves to dApps.
+
+import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 
 export type WalletChain = 'evm' | 'solana';
 export type ConnectedWallet = { chain: WalletChain; address: string };
@@ -16,6 +21,139 @@ declare global {
     phantom?: any;
     jupiter?: any;
   }
+}
+
+// ─── Wallet Standard discovery ─────────────────────────────────────────────
+// The Wallet Standard handshake works in two directions:
+//   • Wallets dispatch  'wallet-standard:register-wallet' with detail = (api) => api.register(wallet)
+//   • Apps  dispatch  'wallet-standard:app-ready' with detail = { register } so already-loaded wallets can self-register
+// We do both as soon as this module loads in a browser.
+const _wsWallets: any[] = [];
+const _wsListeners: Array<() => void> = [];
+
+function _addWalletStandardWallet(w: any) {
+  if (!w || _wsWallets.includes(w)) return;
+  _wsWallets.push(w);
+  for (const fn of _wsListeners) { try { fn(); } catch { /* noop */ } }
+}
+
+if (typeof window !== 'undefined') {
+  const register = (...wallets: any[]) => {
+    for (const w of wallets) _addWalletStandardWallet(w);
+    return () => { /* unregister noop */ };
+  };
+  // Listen for wallets registering themselves.
+  window.addEventListener('wallet-standard:register-wallet', (ev: any) => {
+    try { ev?.detail?.({ register }); } catch { /* noop */ }
+  });
+  // Tell already-loaded wallets we're here.
+  try {
+    window.dispatchEvent(new CustomEvent('wallet-standard:app-ready', {
+      detail: { register },
+    }));
+  } catch { /* noop on very old browsers */ }
+}
+
+/** Find a Wallet Standard wallet whose `name` contains the given substring (case-insensitive). */
+function findWalletStandardWallet(nameNeedle: string): any | null {
+  const needle = nameNeedle.toLowerCase();
+  for (const w of _wsWallets) {
+    const name = String(w?.name ?? '').toLowerCase();
+    if (name.includes(needle)) return w;
+  }
+  return null;
+}
+
+/**
+ * Wrap a Wallet Standard wallet in the same `{ publicKey, signTransaction,
+ * connect, disconnect }` shape that the rest of the app expects. We keep a
+ * cache keyed on the underlying wallet so repeat lookups return the same
+ * adapter (so React state comparisons work).
+ */
+const _wsAdapterCache = new WeakMap<any, any>();
+function wrapWalletStandard(wallet: any, friendlyName: string): any {
+  const cached = _wsAdapterCache.get(wallet);
+  if (cached) return cached;
+
+  const adapter: any = {
+    _wsWallet: wallet,
+    _label: friendlyName,
+    publicKey: null as PublicKey | null,
+    isWalletStandard: true,
+    async connect(_opts?: { onlyIfTrusted?: boolean }) {
+      const connectFeature = wallet?.features?.['standard:connect'];
+      if (!connectFeature?.connect) {
+        throw new Error(`${friendlyName} does not expose standard:connect.`);
+      }
+      const silent = !!_opts?.onlyIfTrusted;
+      const res = await connectFeature.connect(silent ? { silent: true } : undefined);
+      const accounts = res?.accounts ?? wallet?.accounts ?? [];
+      const acct = accounts[0];
+      if (!acct) throw new Error(`${friendlyName} returned no account.`);
+      adapter.publicKey = new PublicKey(acct.address);
+      adapter._account = acct;
+      return { publicKey: adapter.publicKey };
+    },
+    async disconnect() {
+      const f = wallet?.features?.['standard:disconnect'];
+      try { await f?.disconnect?.(); } catch { /* noop */ }
+      adapter.publicKey = null;
+      adapter._account = null;
+    },
+    async signTransaction(tx: Transaction | VersionedTransaction): Promise<any> {
+      const acct = adapter._account ?? wallet?.accounts?.[0];
+      if (!acct) throw new Error(`${friendlyName} is not connected.`);
+      const f = wallet?.features?.['solana:signTransaction'];
+      if (!f?.signTransaction) {
+        // Some wallets only expose signAndSendTransaction; we can't satisfy
+        // the wager flow with that because we co-sign with the escrow keypair.
+        throw new Error(`${friendlyName} does not support signTransaction. Use a different wallet for $MASTER wagers.`);
+      }
+      // Wallet Standard's signTransaction takes serialized bytes for the
+      // 'solana:signTransaction' feature.
+      const isVersioned = typeof (tx as VersionedTransaction).version === 'number';
+      const txBytes = isVersioned
+        ? (tx as VersionedTransaction).serialize()
+        : (tx as Transaction).serialize({ requireAllSignatures: false, verifySignatures: false });
+      const out = await f.signTransaction({
+        account: acct,
+        transaction: txBytes,
+        chain: 'solana:mainnet',
+      });
+      const arr = Array.isArray(out) ? out : [out];
+      const signedBytes: Uint8Array = arr[0]?.signedTransaction ?? arr[0];
+      if (!signedBytes) throw new Error(`${friendlyName} returned no signed transaction.`);
+      return isVersioned
+        ? VersionedTransaction.deserialize(signedBytes)
+        : Transaction.from(signedBytes);
+    },
+  };
+  _wsAdapterCache.set(wallet, adapter);
+  // Pre-populate publicKey + account from any already-authorized session.
+  try {
+    const acct = wallet?.accounts?.[0];
+    if (acct?.address) {
+      adapter.publicKey = new PublicKey(acct.address);
+      adapter._account = acct;
+    }
+  } catch { /* noop */ }
+  // Subscribe to wallet account changes so .publicKey stays current.
+  try {
+    const ev = wallet?.features?.['standard:events'];
+    ev?.on?.('change', (props: any) => {
+      if (props && 'accounts' in props) {
+        const acct = props.accounts?.[0];
+        if (acct?.address) {
+          adapter.publicKey = new PublicKey(acct.address);
+          adapter._account = acct;
+        } else {
+          adapter.publicKey = null;
+          adapter._account = null;
+        }
+      }
+    });
+  } catch { /* noop */ }
+  return adapter;
 }
 
 export function shortAddr(a: string | null | undefined): string {
@@ -122,28 +260,35 @@ async function robustSolanaConnect(provider: any, kind: SolanaWalletKind): Promi
 
 function getSolanaProviderRaw(kind: SolanaWalletKind): any {
   if (kind === 'phantom') {
-    // Phantom may inject as window.phantom.solana OR window.solana with isPhantom.
     if (window.phantom?.solana?.isPhantom) return window.phantom.solana;
     if (window.solana?.isPhantom) return window.solana;
+    const ws = findWalletStandardWallet('phantom');
+    if (ws) return wrapWalletStandard(ws, 'Phantom');
     return null;
   }
   if (kind === 'solflare') {
     if (window.solflare?.isSolflare) return window.solflare;
+    const ws = findWalletStandardWallet('solflare');
+    if (ws) return wrapWalletStandard(ws, 'Solflare');
     return null;
   }
   if (kind === 'backpack') {
-    // Backpack exposes window.backpack (Solana), and sometimes window.xnft.solana.
     if (window.backpack?.isBackpack) return window.backpack;
     if ((window as any).xnft?.solana) return (window as any).xnft.solana;
+    const ws = findWalletStandardWallet('backpack');
+    if (ws) return wrapWalletStandard(ws, 'Backpack');
     return null;
   }
   if (kind === 'jupiter') {
-    // Jupiter Mobile (JUP wallet) injects via window.jupiter when available.
-    // It also implements the Wallet Standard, but the extension/mobile bridges
-    // we've tested expose either window.jupiter.solana or window.jupiter directly.
+    // Jupiter Mobile (and the in-app browser) inject via the Wallet Standard.
+    // Some legacy builds expose window.jupiter — we check both.
     if ((window as any).jupiter?.solana?.isJupiter) return (window as any).jupiter.solana;
     if ((window as any).jupiter?.isJupiter) return (window as any).jupiter;
     if ((window as any).jupiter?.solana) return (window as any).jupiter.solana;
+    const ws =
+      findWalletStandardWallet('jupiter') ||
+      findWalletStandardWallet('jup');
+    if (ws) return wrapWalletStandard(ws, 'Jupiter');
     return null;
   }
   return null;

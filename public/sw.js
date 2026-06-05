@@ -5,7 +5,7 @@
 // - API, lobby, and socket.io:    bypass cache entirely (real-time).
 // Bump CACHE_VERSION when shipping a breaking change to evict old assets.
 
-const CACHE_VERSION = 'mmtcg-v19';
+const CACHE_VERSION = 'mmtcg-v20';
 const SHELL_URL = '/index.html';
 
 self.addEventListener('install', (event) => {
