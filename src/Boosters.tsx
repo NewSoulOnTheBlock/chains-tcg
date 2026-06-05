@@ -28,7 +28,7 @@ import { ShinyBrand, ShinyButtonLabel } from './ShinyText';
 
 // Brand-logo palette for the WebGL background streaks.
 const BRAND_STREAK_COLORS = [
-  COLOR_META.bnb.hex, COLOR_META.sol.hex, COLOR_META.hl.hex, COLOR_META.eth.hex,
+  COLOR_META.bnb.hex, COLOR_META.sol.hex, COLOR_META.avax.hex, COLOR_META.eth.hex,
 ];
 const BRAND_BG_GLOW = COLOR_META.sol.hex;
 

@@ -20,9 +20,13 @@
 
 import { Bot } from 'boardgame.io/ai';
 import type { BotAction } from 'boardgame.io/dist/types/src/ai/bot';
-import { CARDS, type CardDef, type Color } from './cards';
+import { CARDS, COLORS, type CardDef } from './cards';
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
+
+function totalGasCost(cost: CardDef['cost']): number {
+  return (cost?.any ?? 0) + COLORS.reduce((sum, c) => sum + (cost?.[c] ?? 0), 0);
+}
 
 type AnyState = any;
 
@@ -53,9 +57,8 @@ export function enumerateMoves(G: AnyState, ctx: any, playerID: string): BotActi
 
   // Pick phase — chooseColor (random starter from the 5 chains).
   if (phase === 'pick') {
-    const colors: Color[] = ['bnb', 'sol', 'hl', 'eth', 'xrp'];
     if (G.players?.[playerID]?.needsColorPick) {
-      for (const c of colors) out.push(makeMove('chooseColor', [c], playerID));
+      for (const c of COLORS) out.push(makeMove('chooseColor', [c], playerID));
     }
     return out;
   }
@@ -140,15 +143,13 @@ function canAffordHeuristic(p: any, def: CardDef): boolean {
   // Approximate: bot pays generic cost from any color when possible. We trust
   // the move reducer to reject if we get it wrong; this is just a quick filter
   // to avoid spamming illegal moves in the enumerator.
-  const cost = def.cost ?? { any: 0, bnb: 0, sol: 0, hl: 0, eth: 0, xrp: 0 };
-  const total =
-    (cost.any ?? 0) + (cost.bnb ?? 0) + (cost.sol ?? 0) +
-    (cost.hl ?? 0) + (cost.eth ?? 0) + (cost.xrp ?? 0);
+  const cost = def.cost ?? { any: 0 };
+  const total = totalGasCost(cost);
   const gas = p.gas ?? {};
-  const have = (gas.bnb ?? 0) + (gas.sol ?? 0) + (gas.hl ?? 0) + (gas.eth ?? 0) + (gas.xrp ?? 0);
+  const have = COLORS.reduce((sum, c) => sum + (gas[c] ?? 0), 0);
   if (have < total) return false;
   // Specific-color requirements.
-  for (const c of ['bnb', 'sol', 'hl', 'eth', 'xrp'] as Color[]) {
+  for (const c of COLORS) {
     if ((cost[c] ?? 0) > (gas[c] ?? 0)) return false;
   }
   return true;
@@ -157,9 +158,7 @@ function canAffordHeuristic(p: any, def: CardDef): boolean {
 // ── Heuristic policy ─────────────────────────────────────────────────────────
 // Card priority: bigger = better. Tweaked per difficulty.
 function cardPriority(def: CardDef, diff: Difficulty): number {
-  const totalCost =
-    (def.cost?.any ?? 0) + (def.cost?.bnb ?? 0) + (def.cost?.sol ?? 0) +
-    (def.cost?.hl ?? 0) + (def.cost?.eth ?? 0) + (def.cost?.xrp ?? 0);
+  const totalCost = totalGasCost(def.cost);
   let score = totalCost; // play bigger spells first
   if (def.type === 'machine') score += 2;        // engines first
   if (def.type === 'meme') score += (def.power ?? 0) * 0.5 + (def.toughness ?? 0) * 0.3;
@@ -237,8 +236,7 @@ export class MMTCGBot extends Bot {
 
     // ── Pick phase: random color (matches user request: "random choice from 5 starters")
     if (ctx.phase === 'pick' && G.players?.[playerID]?.needsColorPick) {
-      const colors: Color[] = ['bnb', 'sol', 'hl', 'eth', 'xrp'];
-      const c = colors[Math.floor(Math.random() * colors.length)];
+      const c = COLORS[Math.floor(Math.random() * COLORS.length)];
       return { action: makeMove('chooseColor', [c], playerID) };
     }
 
@@ -249,7 +247,7 @@ export class MMTCGBot extends Bot {
       const nodes = (p.hand ?? []).filter((id: string) => CARDS[id]?.type === 'node').length;
       const cheaps = (p.hand ?? []).filter((id: string) => {
         const c = CARDS[id]?.cost;
-        const total = (c?.any ?? 0) + (c?.bnb ?? 0) + (c?.sol ?? 0) + (c?.hl ?? 0) + (c?.eth ?? 0) + (c?.xrp ?? 0);
+        const total = totalGasCost(c);
         return CARDS[id]?.type !== 'node' && total <= 3;
       }).length;
       const minNodes = this.difficulty === 'hard' ? 3 : 2;

@@ -7,7 +7,7 @@
 //   { date: '2026-06-04', win: true, turns: 9, ms: 142_000, difficulty: 'normal' }
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { Color } from './cards';
+import { COLORS, type Color } from './cards';
 
 export function todayKey(now: Date = new Date()): string {
   // YYYY-MM-DD in UTC so the day rolls over at the same moment for everyone.
@@ -21,10 +21,9 @@ export function dailySeed(date: string): string {
 // Deterministic colour pick for the bot per day: hash the date string into one
 // of the 5 chains. The player still picks their own deck before the match.
 export function dailyBotColor(date: string): Color {
-  const colors: Color[] = ['bnb', 'sol', 'hl', 'eth', 'xrp'];
   let h = 0;
   for (let i = 0; i < date.length; i++) h = (h * 31 + date.charCodeAt(i)) | 0;
-  return colors[Math.abs(h) % colors.length];
+  return COLORS[Math.abs(h) % COLORS.length];
 }
 
 export type DailyRecord = {

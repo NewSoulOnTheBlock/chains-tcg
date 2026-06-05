@@ -1454,7 +1454,7 @@ function RulesPanel({ side }: { side: 'left' | 'right' }) {
         },
         {
           heading: 'Gas (mana)',
-          body: 'Every non-Node card has a cost shown by colored pips: Orange\u00A0BnB, Purple\u00A0Solana, Green\u00A0Hyperliquid, White\u00A0Ethereum, Black\u00A0XRP. You pay that cost by tapping your Nodes.',
+          body: 'Every non-Node card has a cost shown by colored pips: Orange\u00A0BnB, Purple\u00A0Solana, Red\u00A0AVAX, White\u00A0Ethereum, Black\u00A0XRP. You pay that cost by tapping your Nodes.',
         },
         {
           heading: 'Nodes',

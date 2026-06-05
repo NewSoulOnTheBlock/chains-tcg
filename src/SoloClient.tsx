@@ -18,7 +18,7 @@ import { ChainsTCG } from './Game';
 import { ChainsBoard } from './Board';
 import { MMTCGBot, enumerateMoves, type Difficulty } from './bot';
 import { dailySeed, dailyBotColor, todayKey, saveDailyResult } from './dailyChallenge';
-import { STARTER_DECKS, type Color } from './cards';
+import { COLORS, STARTER_DECKS, type Color } from './cards';
 
 export type SoloMode = 'casual' | 'daily';
 
@@ -49,7 +49,7 @@ export function SoloClient({
     // a random one of the 5 starters per match.
     const botColor: Color = isDaily
       ? dailyBotColor(dateKey)
-      : (['bnb', 'sol', 'hl', 'eth', 'xrp'] as Color[])[Math.floor(Math.random() * 5)];
+      : COLORS[Math.floor(Math.random() * COLORS.length)];
 
     // Bake setupData into the wrapped setup() because the React Client doesn't
     // accept a setupData prop (Local mode has no lobby to forward it from).

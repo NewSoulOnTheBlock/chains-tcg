@@ -5,7 +5,7 @@
 // CSS custom properties on the card element.
 //
 // Brand-color defaults: gold glow (#f3ba2f-ish in HSL = "44 90 56") with the
-// 5-chain mesh palette (Solana purple, BnB gold, Hyperliquid teal). Use the
+// 5-chain mesh palette (Solana purple, BnB gold, Avalanche red). Use the
 // <BrandBorderGlow /> preset to skip having to remember the exact HSL.
 
 import React, { useRef, useCallback, useEffect } from 'react';
@@ -207,7 +207,7 @@ export const BrandBorderGlow: React.FC<BorderGlowProps> = (p) => (
     glowIntensity={p.glowIntensity ?? 0.9}
     edgeSensitivity={p.edgeSensitivity ?? 35}
     coneSpread={p.coneSpread ?? 22}
-    colors={p.colors ?? ['#9945ff', '#f3ba2f', '#50d2c1']}   /* sol / bnb / hl */
+    colors={p.colors ?? ['#9945ff', '#f3ba2f', '#e84142']}   /* sol / bnb / avax */
     {...p}
   />
 );

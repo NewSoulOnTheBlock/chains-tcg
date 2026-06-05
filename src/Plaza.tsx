@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-type Color = 'bnb' | 'sol' | 'hl' | 'eth' | 'xrp';
+type Color = 'bnb' | 'sol' | 'avax' | 'eth' | 'xrp';
 
 type Match = {
   matchID: string;
@@ -32,19 +32,19 @@ const W = COLS * TILE;
 const H = ROWS * TILE;
 
 const COLOR_HEX: Record<Color, string> = {
-  bnb: '#f0b90b', sol: '#9945ff', hl: '#22c55e', eth: '#e6e6e6', xrp: '#111111',
+  bnb: '#f0b90b', sol: '#9945ff', avax: '#e84142', eth: '#e6e6e6', xrp: '#111111',
 };
 
 const NPCS: NPC[] = [
   { x: 3,  y: 3,  color: 'bnb', name: 'BNB Bull',     blurb: 'Orange means fast gas. Flood the board with cheap memes — pressure wins before they stabilize.' },
   { x: 18, y: 3,  color: 'sol', name: 'Sol Degen',    blurb: 'Purple plays combos. Save Moves for one explosive turn — set up, then snap the table in half.' },
-  { x: 3,  y: 10, color: 'hl',  name: 'Hyper HQ',     blurb: 'Green is value. Lean into Machines, drag the game long, and let your engine grind them out.' },
+  { x: 3,  y: 10, color: 'avax', name: 'Avalanche Camp', blurb: 'Red is resilient. Build around Validators and Subnets, then let your snowballing engine bury them.' },
   { x: 18, y: 10, color: 'eth', name: 'Eth Cathedral',blurb: 'White is control. Bigger nodes, bigger memes. Trade evenly until your late-game crushes theirs.' },
   { x: 10, y: 12, color: 'xrp', name: 'XRP Vault',    blurb: 'Black is disruption. Force discards and removal. Make every card they draw feel like a tax.' },
 ];
 
 const COLOR_LABEL: Record<Color, string> = {
-  bnb: 'BNB', sol: 'Sol', hl: 'HL', eth: 'Eth', xrp: 'XRP',
+  bnb: 'BNB', sol: 'Sol', avax: 'AVAX', eth: 'Eth', xrp: 'XRP',
 };
 
 export function Plaza({
@@ -147,7 +147,7 @@ export function Plaza({
     ctx.fillStyle = 'rgba(255,255,255,0.35)';
     ctx.fillText('BNB BAZAAR',     TILE,           TILE * 1.5);
     ctx.fillText('SOLANA BEACH',   W - TILE * 7,   TILE * 1.5);
-    ctx.fillText('HYPER HQ',       TILE,           H - TILE * 0.5);
+    ctx.fillText('AVAX CAMP',      TILE,           H - TILE * 0.5);
     ctx.fillText('ETH CATHEDRAL',  W - TILE * 7,   H - TILE * 0.5);
     ctx.textAlign = 'center';
     ctx.fillText('XRP VAULT', W / 2, H - TILE * 0.3);

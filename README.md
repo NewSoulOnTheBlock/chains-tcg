@@ -8,7 +8,7 @@ A Magic-the-Gathering-inspired turn-based card game built on **boardgame.io**, t
 |---|---|---|
 | BnB | orange/gold | fast cheap memes, ramp |
 | Solana | purple | burst, draw, removal |
-| Hyperliquid | green/teal | big bodies, lifelink |
+| Avalanche / AVAX | red | big bodies, lifelink |
 | Ethereum | white | control, removal, finishers |
 | XRP | black | sneaky bodies, hard removal |
 

@@ -80,7 +80,7 @@ export function CardPreview({ def }: { def: CardDef }) {
 
 /**
  * Templated frame preview — renders content into the slots of a MTG-style
- * frame image (currently used by Hyperliquid and BnB). Selected via
+ * frame image (currently used by Avalanche and BnB). Selected via
  * COLOR_META[color].template.
  */
 export function TemplatedPreview({ def, tpl }: { def: CardDef; tpl: { url: string; glyph?: string } }) {
