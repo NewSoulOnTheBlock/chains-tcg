@@ -28,6 +28,7 @@ import type { Difficulty } from './bot';
 import type { SoloMode } from './SoloClient';
 import { saveDailyResult, todayKey, todayBest } from './dailyChallenge';
 import { BoostersPage } from './Boosters';
+import { listOwnedSprotoGremlins, SPROTO_COLLECTION_MINT, type OwnedNft } from './nft-showcase';
 import ShinyText, { ShinyBrand, ShinyButtonLabel } from './ShinyText';
 // PixelTrail is lazy-loaded — it pulls in three + r3f + drei (~240KB
 // gzipped), which we don't want in the in-game bundle. Loaded on demand
@@ -41,7 +42,7 @@ import Iridescence from './Iridescence';
 // In prod the React build is served by the same Node server, so use same origin.
 const SERVER_BASE = (import.meta.env.VITE_SERVER_BASE as string | undefined) ?? '';
 const GAME_NAME = ChainsTCG.name!;
-const COLOR_ORDER: Color[] = ['bnb', 'sol', 'hl', 'eth', 'xrp'];
+const COLOR_ORDER: Color[] = ['bnb', 'sol', 'avax', 'eth', 'xrp'];
 
 const lobby = new LobbyClient({ server: SERVER_BASE || undefined });
 
@@ -131,7 +132,7 @@ type Seat = { matchID: string; playerID: string; credentials: string; playerName
 // ── Login screen ────────────────────────────────────────────────────────────
 // ── Login screen (premium fantasy gateway) ──────────────────────────────────
 const LOGIN_NAMES = [
-  'MoonPepe', 'GasWizard', 'RuneKnight', 'ChainLord', 'HyperMage',
+  'MoonPepe', 'GasWizard', 'RuneKnight', 'ChainLord', 'SnowMage',
   'DegenPaladin', 'VoidPepe', 'CryptoWarden', 'ArcaneBull', 'MemeKing',
   'NodeShaman', 'AlphaSeer', 'PixelOracle', 'ShardSorcerer', 'FrogLord',
 ];
@@ -769,7 +770,7 @@ const RULES_NAV: { id: RulesSectionId; label: string; icon: string }[] = [
 
 const RULES_SEARCH_INDEX: { id: RulesSectionId; text: string }[] = [
   { id: 'goal',       text: 'goal life 20 reduce opponent zero win last player standing' },
-  { id: 'setup',      text: 'setup chain bnb solana hyperliquid ethereum xrp 60 card deck draw 7 hand 20 life mulligan first player no draw' },
+  { id: 'setup',      text: 'setup chain bnb solana avalanche avax ethereum xrp 60 card deck draw 7 hand 20 life mulligan first player no draw' },
   { id: 'cards',      text: 'card types node meme machine move land creature artifact enchantment spell instant power toughness permanent one-shot' },
   { id: 'gas',        text: 'gas mana cost tap node color pool drain end of turn empty mixed' },
   { id: 'turn',       text: 'turn phase untap draw main combat attack block damage end discard summoning sick haste' },
@@ -1179,12 +1180,12 @@ function RuleSection({
   );
 }
 
-function renderSectionBody(id: RulesSectionId, hl: (s: string) => React.ReactNode) {
+function renderSectionBody(id: RulesSectionId, highlight: (s: string) => React.ReactNode) {
   switch (id) {
     case 'goal':
       return (
         <div>
-          <p>{hl('Reduce your opponent\'s life from 20 to 0. Last player standing wins.')}</p>
+          <p>{highlight('Reduce your opponent\'s life from 20 to 0. Last player standing wins.')}</p>
           <div style={{
             marginTop: 14, display: 'flex', justifyContent: 'center', gap: 18, flexWrap: 'wrap',
           }}>
@@ -1200,12 +1201,12 @@ function renderSectionBody(id: RulesSectionId, hl: (s: string) => React.ReactNod
     case 'setup':
       return (
         <div>
-          <p>{hl('Each player picks one of 5 chains, shuffles their 60-card deck, draws 7 cards, and starts at 20 life.')}</p>
+          <p>{highlight('Each player picks one of 5 chains, shuffles their 60-card deck, draws 7 cards, and starts at 20 life.')}</p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '14px 0' }}>
             {[
               { n: 'BnB',        c: '#f3ba2f' },
               { n: 'Solana',     c: '#9945ff' },
-              { n: 'Hyperliquid',c: '#50d2c1' },
+              { n: 'Avalanche',  c: '#e84142' },
               { n: 'Ethereum',   c: '#cfd8dc' },
               { n: 'XRP',        c: '#8a8a8a' },
             ].map(x => (
@@ -1217,52 +1218,52 @@ function renderSectionBody(id: RulesSectionId, hl: (s: string) => React.ReactNod
             ))}
           </div>
           <ul style={{ marginLeft: 18 }}>
-            <li>{hl('60-card deck in your chain color.')}</li>
-            <li>{hl('Draw 7 cards. Start at 20 life.')}</li>
-            <li>{hl('Max hand size 7 — discard down at end of turn.')}</li>
-            <li>{hl('The first player skips their turn-1 draw.')}</li>
+            <li>{highlight('60-card deck in your chain color.')}</li>
+            <li>{highlight('Draw 7 cards. Start at 20 life.')}</li>
+            <li>{highlight('Max hand size 7 — discard down at end of turn.')}</li>
+            <li>{highlight('The first player skips their turn-1 draw.')}</li>
           </ul>
         </div>
       );
     case 'cards':
-      return <CardTypesGrid hl={hl} />;
+      return <CardTypesGrid highlight={highlight} />;
     case 'gas':
       return (
         <div>
-          <p>{hl('Nodes generate Gas. Cards cost Gas. Gas drains at end of your turn — spend it or lose it.')}</p>
+          <p>{highlight('Nodes generate Gas. Cards cost Gas. Gas drains at end of your turn — spend it or lose it.')}</p>
           <GasFlowViz />
           <ul style={{ marginLeft: 18, marginTop: 10 }}>
-            <li>{hl('Tap a Node → +1 Gas of its color.')}</li>
-            <li>{hl('A cost can be one color or mixed.')}</li>
-            <li>{hl('Unspent Gas evaporates when your turn ends.')}</li>
+            <li>{highlight('Tap a Node → +1 Gas of its color.')}</li>
+            <li>{highlight('A cost can be one color or mixed.')}</li>
+            <li>{highlight('Unspent Gas evaporates when your turn ends.')}</li>
           </ul>
         </div>
       );
     case 'turn':
-      return <TurnTimeline hl={hl} />;
+      return <TurnTimeline highlight={highlight} />;
     case 'advanced':
       return (
         <div>
           <ul style={{ marginLeft: 18 }}>
-            <li><b style={{ color: RULES_TOKENS.gold }}>Summoning sickness</b> — {hl('Memes can\'t attack the turn they enter (unless they have haste).')}</li>
-            <li><b style={{ color: RULES_TOKENS.gold }}>Blocking</b> — {hl('Defender chooses blockers from untapped Memes. Unblocked attackers hit life directly.')}</li>
-            <li><b style={{ color: RULES_TOKENS.gold }}>Simultaneous damage</b> — {hl('Attacker and blocker deal Power to each other. Damage ≥ toughness destroys it.')}</li>
-            <li><b style={{ color: RULES_TOKENS.gold }}>Graveyard</b> — {hl('Destroyed Memes, used Moves go here. Some cards interact with the graveyard.')}</li>
-            <li><b style={{ color: RULES_TOKENS.gold }}>Max hand 7</b> — {hl('Discard down at end of turn.')}</li>
+            <li><b style={{ color: RULES_TOKENS.gold }}>Summoning sickness</b> — {highlight('Memes can\'t attack the turn they enter (unless they have haste).')}</li>
+            <li><b style={{ color: RULES_TOKENS.gold }}>Blocking</b> — {highlight('Defender chooses blockers from untapped Memes. Unblocked attackers hit life directly.')}</li>
+            <li><b style={{ color: RULES_TOKENS.gold }}>Simultaneous damage</b> — {highlight('Attacker and blocker deal Power to each other. Damage ≥ toughness destroys it.')}</li>
+            <li><b style={{ color: RULES_TOKENS.gold }}>Graveyard</b> — {highlight('Destroyed Memes, used Moves go here. Some cards interact with the graveyard.')}</li>
+            <li><b style={{ color: RULES_TOKENS.gold }}>Max hand 7</b> — {highlight('Discard down at end of turn.')}</li>
           </ul>
         </div>
       );
     case 'example':
-      return <ExampleTurn hl={hl} />;
+      return <ExampleTurn highlight={highlight} />;
     case 'cheatsheet':
       return (
         <div>
           <ul style={{ marginLeft: 18 }}>
-            <li>{hl('Click an untapped Node → tap for Gas.')}</li>
-            <li>{hl('Click a card in hand → play it (Moves then ask for a target).')}</li>
-            <li>{hl('Click your own untapped Meme → mark attacker. Press "Attack with N".')}</li>
-            <li>{hl('During declare blockers → click your Meme, then click the attacker to block.')}</li>
-            <li>{hl('Press End Turn to pass.')}</li>
+            <li>{highlight('Click an untapped Node → tap for Gas.')}</li>
+            <li>{highlight('Click a card in hand → play it (Moves then ask for a target).')}</li>
+            <li>{highlight('Click your own untapped Meme → mark attacker. Press "Attack with N".')}</li>
+            <li>{highlight('During declare blockers → click your Meme, then click the attacker to block.')}</li>
+            <li>{highlight('Press End Turn to pass.')}</li>
           </ul>
         </div>
       );
@@ -1286,7 +1287,7 @@ function LifeOrb({ label, value, color }: { label: string; value: number; color:
   );
 }
 
-function CardTypesGrid({ hl }: { hl: (s: string) => React.ReactNode }) {
+function CardTypesGrid({ highlight }: { highlight: (s: string) => React.ReactNode }) {
   const types = [
     { name: 'NODE',    icon: '⛓️', color: RULES_TOKENS.gold,   short: 'Produces Gas',        details: 'Your "land". Free to play, but only 1 per turn. Tap on a later turn to add 1 Gas of its color to your pool.' },
     { name: 'MEME',    icon: '🐸', color: RULES_TOKENS.purple, short: 'Creature Card',       details: 'Your fighters. Each has Power / Toughness. Attack to deal damage to the opponent. Summoning sick the turn they enter.' },
@@ -1328,7 +1329,7 @@ function CardTypesGrid({ hl }: { hl: (s: string) => React.ReactNode }) {
                 marginTop: 8, paddingTop: 10, fontSize: 13,
                 borderTop: `1px solid ${t.color}44`, lineHeight: 1.55,
                 animation: 'rulesFade 220ms ease both',
-              }}>{hl(t.details)}</div>
+              }}>{highlight(t.details)}</div>
             )}
           </button>
         );
@@ -1395,7 +1396,7 @@ function FlowArrow() {
   );
 }
 
-function TurnTimeline({ hl }: { hl: (s: string) => React.ReactNode }) {
+function TurnTimeline({ highlight }: { highlight: (s: string) => React.ReactNode }) {
   const phases = [
     { id: 'untap',  name: 'UNTAP',  icon: '🔄', color: RULES_TOKENS.blue,   desc: 'Untap your Nodes, Memes, and Machines. Summoning sickness wears off.' },
     { id: 'draw',   name: 'DRAW',   icon: '🃏', color: RULES_TOKENS.green,  desc: 'Draw 1 card (skipped on the very first turn of the game).' },
@@ -1450,13 +1451,13 @@ function TurnTimeline({ hl }: { hl: (s: string) => React.ReactNode }) {
         <div style={{
           fontFamily: RULES_HEAD, letterSpacing: 3, fontWeight: 800, color: cur.color, marginBottom: 4,
         }}>{cur.name} PHASE</div>
-        <div style={{ fontSize: 13.5, color: RULES_TOKENS.text }}>{hl(cur.desc)}</div>
+        <div style={{ fontSize: 13.5, color: RULES_TOKENS.text }}>{highlight(cur.desc)}</div>
       </div>
     </div>
   );
 }
 
-function ExampleTurn({ hl }: { hl: (s: string) => React.ReactNode }) {
+function ExampleTurn({ highlight }: { highlight: (s: string) => React.ReactNode }) {
   const steps = [
     { t: 'Play Purple Node',         d: 'You start your turn. You spend your free Node drop and play a Solana Node onto the battlefield.' },
     { t: 'Tap Node for 1 Purple Gas',d: 'Click your untapped Node. It rotates and adds 1 Purple Gas to your pool.' },
@@ -1492,7 +1493,7 @@ function ExampleTurn({ hl }: { hl: (s: string) => React.ReactNode }) {
           fontFamily: RULES_HEAD, fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 6,
         }}>{s.t}</div>
         <div style={{ fontSize: 13.5, color: RULES_TOKENS.text, lineHeight: 1.6, animation: 'rulesFade 220ms ease both' }}>
-          {hl(s.d)}
+          {highlight(s.d)}
         </div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 12 }}>
@@ -1756,6 +1757,7 @@ function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void })
           <FavoriteDeck deck={deck} myName={myName} />
 
           <SectionShell title="Collection" eyebrow="NFT Showcase" accent={PROFILE_TOKENS.accent}>
+            <SprotoGremlinShowcase walletAddress={prof?.walletAddress ?? null} />
             <LibrarySection prof={prof} />
           </SectionShell>
 
@@ -2477,6 +2479,106 @@ function PublicProfile({ name, onBack }: { name: string; onBack: () => void }) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// ── Sproto Gremlin NFT showcase (collection 5Vz7…6MSU) ──────────────────────
+function SprotoGremlinShowcase({ walletAddress }: { walletAddress: string | null }) {
+  const [items, setItems] = useState<OwnedNft[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const isSol = !!walletAddress && !walletAddress.startsWith('0x');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!walletAddress || !isSol) { setItems([]); return; }
+      setLoading(true);
+      try {
+        const owned = await listOwnedSprotoGremlins(walletAddress);
+        if (!cancelled) setItems(owned);
+      } catch {
+        if (!cancelled) setItems([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [walletAddress, isSol]);
+
+  if (!walletAddress) return null;
+  if (!isSol)         return null;
+  if (loading && !items) {
+    return (
+      <div style={{ padding: 18, color: '#9aa6c0', fontSize: 13 }}>
+        Scanning your wallet for Sproto Gremlins…
+      </div>
+    );
+  }
+  if (!items || items.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+        marginBottom: 10, padding: '0 4px',
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#e9eef7' }}>
+          🦎 Sproto Gremlins <span style={{ color: '#7d8aa3', fontWeight: 500 }}>· {items.length} owned</span>
+        </div>
+        <a
+          href={`https://solscan.io/token/${SPROTO_COLLECTION_MINT}`}
+          target="_blank" rel="noopener noreferrer"
+          style={{ fontSize: 11, color: '#7c5cff', textDecoration: 'none' }}
+        >
+          collection ↗
+        </a>
+      </div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+        gap: 12,
+      }}>
+        {items.map(it => (
+          <a
+            key={it.mint}
+            href={`https://solscan.io/token/${it.mint}`}
+            target="_blank" rel="noopener noreferrer"
+            title={it.name}
+            style={{
+              display: 'block',
+              border: '1px solid #232f45',
+              borderRadius: 12,
+              overflow: 'hidden',
+              background: '#0e1422',
+              textDecoration: 'none',
+              color: 'inherit',
+              transition: 'transform 120ms ease, border-color 120ms ease',
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-2px)';
+              (e.currentTarget as HTMLAnchorElement).style.borderColor = '#7c5cff';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(0)';
+              (e.currentTarget as HTMLAnchorElement).style.borderColor = '#232f45';
+            }}
+          >
+            <div style={{ aspectRatio: '5 / 7', background: '#000' }}>
+              <img
+                src={it.image}
+                alt={it.name}
+                loading="lazy"
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/sproto-gremlin.png'; }}
+              />
+            </div>
+            <div style={{ padding: '8px 10px', fontSize: 12, fontWeight: 600, color: '#e9eef7' }}>
+              {it.name}
+            </div>
+          </a>
+        ))}
+      </div>
     </div>
   );
 }
@@ -5039,7 +5141,7 @@ function SoloSetupModal({
           {/* Starter color picker — only meaningful when no custom deck is chosen. */}
           {selectedDeckId == null ? (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {(['bnb', 'sol', 'hl', 'eth', 'xrp'] as Color[]).map(c => {
+              {(['bnb', 'sol', 'avax', 'eth', 'xrp'] as Color[]).map(c => {
                 const meta = COLOR_META[c];
                 const active = color === c;
                 return (

@@ -94,7 +94,7 @@ function newUid(prefix = 'i'): string {
 }
 
 function emptyGas(): Record<Color, number> {
-  return { bnb: 0, sol: 0, hl: 0, eth: 0, xrp: 0 };
+  return { bnb: 0, sol: 0, avax: 0, eth: 0, xrp: 0 };
 }
 
 function mkInstance(defId: string, opts: Partial<Instance> = {}): Instance {
@@ -343,6 +343,13 @@ const playCard: Move<GState> = ({ G, ctx, playerID, random }, handIndex: number,
         G.log.push(`${CARDS[m.defId].name} draws a card.`);
         break;
       }
+    }
+    // Per-meme ETB triggers carried on the card definition itself.
+    if (def.effect === 'etb_zap_2_and_draw') {
+      const oppId = otherPlayer(ctx);
+      G.players[oppId].life -= 2;
+      drawCard(G, playerID, 1);
+      G.log.push(`${def.name} zaps Player ${oppId} for 2 and draws a card.`);
     }
     return;
   }

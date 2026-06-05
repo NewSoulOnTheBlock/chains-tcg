@@ -1,14 +1,14 @@
 // src/cards.ts
 // Card catalogue + starter decks for Chains TCG.
 
-export type Color = 'bnb' | 'sol' | 'hl' | 'eth' | 'xrp';
+export type Color = 'bnb' | 'sol' | 'avax' | 'eth' | 'xrp';
 
-export const COLORS: Color[] = ['bnb', 'sol', 'hl', 'eth', 'xrp'];
+export const COLORS: Color[] = ['bnb', 'sol', 'avax', 'eth', 'xrp'];
 
 export const COLOR_META: Record<Color, { name: string; hex: string; ink: string; template?: string; glyph?: string }> = {
   bnb: { name: 'BnB',         hex: '#f3ba2f', ink: '#000', template: '/template-bnb.jpg', glyph: 'BNB' },
   sol: { name: 'Solana',      hex: '#9945ff', ink: '#fff', template: '/template-sol.png', glyph: 'SOL' },
-  hl:  { name: 'Hyperliquid', hex: '#50d2c1', ink: '#022', template: '/template-hl.jpg',  glyph: 'HL' },
+  avax: { name: 'Avalanche',   hex: '#e84142', ink: '#fff', template: '/template-avax.svg', glyph: 'AVAX' },
   eth: { name: 'Ethereum',    hex: '#f5f5f5', ink: '#222', template: '/template-eth.png', glyph: 'ETH' },
   xrp: { name: 'XRP',         hex: '#1a1a1a', ink: '#fff', template: '/template-xrp.png', glyph: 'XRP' },
 };
@@ -45,6 +45,8 @@ export type EffectId =
   | 'aura_+0+3'            // attached meme: +0/+3 (shield)
   | 'aura_haste'           // attached meme: clear summoning sickness on attach
   | 'aura_lifelink'        // attached meme: damage it deals heals its controller
+  // meme ETB triggers
+  | 'etb_zap_2_and_draw'   // when this meme enters play, opponent loses 2 life and you draw 1 card
   ;
 
 export interface CardDef {
@@ -77,7 +79,7 @@ const IMAGES: Record<string, string> = {
   // Chain nodes — larger, more artistic official logos hosted locally.
   node_bnb: '/nodes/bnb.png',
   node_sol: '/nodes/sol.png',
-  node_hl:  '/nodes/hl.png',
+  node_avax: '/nodes/avax.svg',
   node_eth: '/nodes/eth.png',
   node_xrp: '/nodes/xrp.png',
 
@@ -101,15 +103,15 @@ const IMAGES: Record<string, string> = {
   sol_fartcoin: '/cards/fartcoin.png?v=1',
   sol_goat:     cmc(33440),
 
-  // Hyperliquid memes
-  hl_buddy:     cmc(33718),
-  hl_pip:       '/cards/pip.png?v=1',
-  hl_farm:      '/cards/farm.png?v=1',
-  hl_jeff:      '/cards/jeff.jpg?v=1',
-  hl_hpos:      cmc(26873),
-  hl_hfun:      cmc(34103),
-  hl_rage:      cmc(33952),
-  hl_purr:      '/cards/purr.jpg?v=1',
+  // Avalanche memes
+  avax_coq:     emo('1f413'), // rooster (COQ)
+  avax_kimbo:   emo('1f415'), // dog (KIMBO)
+  avax_nochill: emo('1f976'), // cold face (NOCHILL)
+  avax_husky:   emo('1f43a'), // wolf face (HUSKY)
+  avax_tech:    emo('1f4bb'), // laptop (TECH)
+  avax_gec:     emo('1f98e'), // lizard (Gecko)
+  avax_meat:    emo('1f969'), // cut of meat (MEAT)
+  avax_ket:     emo('1f408'), // cat (Yellow Ket)
 
   // Ethereum memes
   eth_andy:     '/cards/andy.png?v=1',
@@ -149,14 +151,14 @@ const IMAGES: Record<string, string> = {
   sol_bounce:   emo('1f3c3'), // 🏃 runner (Frontrun)
   sol_tgpump:   emo('1f4e2'), // 📢 loudspeaker (Telegram Pump)
 
-  // ── Hyperliquid machines/moves ──
-  hl_orderbook: emo('1f4c8'), // 📈 chart up (Market Maker Bot)
-  hl_lifelink:  emo('1f33e'), // 🌾 sheaf of rice (Funding Rate Farm)
-  hl_vault:     emo('1f3e6'), // 🏦 bank (Perps Vault)
-  hl_leverage:  emo('2696'),  // ⚖️ scales (Leverage Desk)
-  hl_squeeze:   emo('1f4a5'), // 💥 collision (Short Squeeze)
-  hl_heal:      emo('1f4b0'), // 💰 money bag (Take Profit)
-  hl_margin:    emo('1f4de'), // 📞 telephone (Margin Call)
+  // ── Avalanche machines/moves ──
+  avax_subnet:   emo('1f3d4'), // mountain (Subnet Factory)
+  avax_staking:  emo('2744'),  // snowflake (Validator Set)
+  avax_teleport: emo('1f309'), // bridge (Teleporter Bridge)
+  avax_router:   emo('1f9ed'), // compass (Trader Joe Router)
+  avax_snowball: emo('26c4'),  // snowman (Snowball)
+  avax_rush:     emo('1f3c2'), // snowboarder (Avalanche Rush)
+  avax_finality: emo('2705'),  // check mark (Finality)
 
   // ── Ethereum machines/moves ──
   eth_eip1559:  '/cards/smart_contract_suite.png?v=1',
@@ -177,9 +179,11 @@ const IMAGES: Record<string, string> = {
   // ── Auras (Genesis set) — emoji-art for now ──
   bnb_liquidity:  emo('1f4a7'),   // 💧 droplet (Liquidity Injection)
   sol_validator:  emo('26a1'),    // ⚡ high voltage (Validator Boost)
-  hl_funding:     emo('1f512'),   // 🔒 lock (Funding Lock)
+  avax_icebound:  emo('1f512'),   // 🔒 lock (Icebound Stake)
   eth_shield:     emo('1f6e1'),   // 🛡 shield (Smart Contract Shield)
   xrp_edge:       emo('2694'),    // ⚔ swords (Validator Edge)
+  // ── NFT-linked meme art ──
+  eth_sproto_gremlin: '/sproto-gremlin.png',
 };
 
 /**
@@ -253,6 +257,17 @@ const M = (
   text: text || `${power}/${toughness}`,
 });
 
+/** Meme with an ETB-triggered effect. */
+const ME = (
+  id: string, color: Color, name: string, cost: number, power: number, toughness: number,
+  effect: EffectId, text: string,
+): CardDef => ({
+  id, name, type: 'meme', color,
+  cost: makeCost(color, cost),
+  power, toughness,
+  effect, text,
+});
+
 const A = (
   id: string, color: Color, name: string, cost: number, effect: EffectId, text: string
 ): CardDef => ({
@@ -289,7 +304,7 @@ function reg(...cs: CardDef[]) {
 }
 
 // Nodes
-reg(N('bnb'), N('sol'), N('hl'), N('eth'), N('xrp'));
+reg(N('bnb'), N('sol'), N('avax'), N('eth'), N('xrp'));
 
 // BnB — fast, cheap, aggressive memes
 reg(
@@ -337,27 +352,27 @@ reg(
   U('sol_validator','sol', 'Validator Boost',  2, 'aura_haste',            'Enchant Meme. Attached Meme has no summoning sickness.'),
 );
 
-// Hyperliquid — big bodies, ramp
+// Avalanche — big bodies, lifelink
 reg(
-  M('hl_buddy',    'hl', 'BUDDY',              1, 1, 2, 'Buddy joined the leaderboard.'),
-  M('hl_pip',      'hl', 'PIP',                2, 1, 4, 'Tiny pip, big spread.'),
-  M('hl_farm',     'hl', 'FARM',               2, 2, 2, 'Points farmer. Endless airdrop.'),
-  M('hl_jeff',     'hl', 'JEFF',               3, 4, 3, 'Jeff opened the order book.'),
-  M('hl_hpos',     'hl', 'HPOS',               3, 3, 3, 'Harry Potter Obama Sonic 10 Inu.'),
-  M('hl_hfun',     'hl', 'HFUN',               4, 4, 5, 'HypurrFun and games.'),
-  M('hl_rage',     'hl', 'RAGE',               5, 5, 5, 'Stop-hunted one too many times.'),
-  M('hl_purr',     'hl', 'PURR',               6, 7, 7, 'The cat that ate the orderbook.'),
+  M('avax_coq',     'avax', 'COQ',              1, 1, 2, 'Coq Inu crows across the C-Chain.'),
+  M('avax_kimbo',   'avax', 'KIMBO',            2, 2, 2, 'A snow dog with a community bite.'),
+  M('avax_nochill', 'avax', 'NOCHILL',          2, 1, 4, 'AVAX has no chill, and neither does this Meme.'),
+  M('avax_husky',   'avax', 'HUSKY',            3, 4, 3, 'The old Avalanche sled dog still pulls.'),
+  M('avax_tech',    'avax', 'TECH',             3, 3, 3, 'Pure tech, pure meme, pure red-chain banter.'),
+  M('avax_gec',     'avax', 'GEC',              4, 4, 5, 'Gecko sticks to the wall through every dip.'),
+  M('avax_meat',    'avax', 'MEAT',             5, 5, 5, 'The grill is hot and liquidity is sizzling.'),
+  M('avax_ket',     'avax', 'KET',              6, 7, 7, 'Yellow Ket prowls the snowfields for the final pump.'),
   // Machines
-  A('hl_orderbook','hl', 'Market Maker Bot',   3, 'pump_all_+1+1',         'Spreads tight, your Memes get +1/+1.'),
-  A('hl_lifelink', 'hl', 'Funding Rate Farm',  2, 'lifelink_all',          'Damage your Memes deal also heals you.'),
-  A('hl_vault',    'hl', 'Perps Vault',        4, 'meme_haste',            'Your Memes have no summoning sickness.'),
-  A('hl_leverage', 'hl', 'Leverage Desk',      3, 'pump_attackers_+1+0',   'Your attacking Memes get +1/+0.'),
+  A('avax_subnet',  'avax', 'Subnet Factory',  3, 'pump_all_+1+1',         'Custom chains compound your Memes +1/+1.'),
+  A('avax_staking', 'avax', 'Validator Set',   2, 'lifelink_all',          'Staked security heals you when your Memes deal damage.'),
+  A('avax_teleport','avax', 'Teleporter Bridge',4, 'meme_haste',           'Cross-chain messages arrive fast; your Memes have no summoning sickness.'),
+  A('avax_router',  'avax', 'Trader Joe Router',3, 'pump_attackers_+1+0',  'Route through the deepest pools: attacking Memes get +1/+0.'),
   // Moves
-  X('hl_squeeze',  'hl', 'Short Squeeze',      3, 'destroyMeme',           'Stop hunted into oblivion. Destroy target Meme.'),
-  X('hl_heal',     'hl', 'Take Profit',        2, 'gainLife4',             'Secure the bag. Gain 4 life.'),
-  X('hl_margin',   'hl', 'Margin Call',        2, 'discardRandom',         'Opponent\'s position is liquidated — they discard a random card.'),
+  X('avax_snowball','avax', 'Snowball',         3, 'destroyMeme',           'A red-chain avalanche buries target Meme.'),
+  X('avax_rush',    'avax', 'Avalanche Rush',   2, 'gainLife4',             'Incentives hit the ecosystem. Gain 4 life.'),
+  X('avax_finality','avax', 'One-Block Finality',2, 'discardRandom',        'Their transaction is finalized out; they discard a random card.'),
   // Aura
-  U('hl_funding',  'hl', 'Funding Lock',       2, 'aura_lifelink',         'Enchant Meme. Damage attached Meme deals heals its controller.'),
+  U('avax_icebound','avax', 'Icebound Stake',   2, 'aura_lifelink',         'Enchant Meme. Damage attached Meme deals heals its controller.'),
 );
 
 // Ethereum — control, removal, big finishers
@@ -370,6 +385,9 @@ reg(
   M('eth_shib',    'eth', 'SHIB',              3, 4, 3, 'The Dogecoin killer that became a brand.'),
   M('eth_brett',   'eth', 'BRETT',             4, 4, 4, 'Pepe\'s blue friend.'),
   M('eth_pepe',    'eth', 'PEPE',              5, 5, 6, 'The king of ERC-20 memes.'),
+  // NFT-linked meme — ETB zaps opp + draws a card (Sproto Gremlin NFT mint)
+  ME('eth_sproto_gremlin', 'eth', 'Sproto Gremlin', 2, 2, 2, 'etb_zap_2_and_draw',
+     'When ~ enters the field, deal 2 damage to your opponent and draw a card.'),
   // Machines
   A('eth_eip1559', 'eth', 'Smart Contract Suite', 3, 'gas_discount_color', 'Optimized calldata — your Moves cost 1 less Ethereum gas (min 0).'),
   A('eth_temple',  'eth', 'Dapp Ecosystem',    4, 'pump_all_+1+1',         'Network effects: your Memes get +1/+1.'),
@@ -423,7 +441,7 @@ export function starterDeck(color: Color): string[] {
 export const STARTER_DECKS: Record<Color, string[]> = {
   bnb: starterDeck('bnb'),
   sol: starterDeck('sol'),
-  hl:  starterDeck('hl'),
+  avax: starterDeck('avax'),
   eth: starterDeck('eth'),
   xrp: starterDeck('xrp'),
 };
@@ -483,7 +501,7 @@ export function validateDeck(cards: string[], opts?: { requireSize?: boolean }):
  * color, then 'sol'.
  */
 export function derivePrimaryColor(cards: string[]): Color {
-  const counts: Record<Color, number> = { bnb: 0, sol: 0, hl: 0, eth: 0, xrp: 0 };
+  const counts: Record<Color, number> = { bnb: 0, sol: 0, avax: 0, eth: 0, xrp: 0 };
   let any = false;
   for (const id of cards) {
     const def = CARDS[id]; if (!def) continue;
