@@ -14,7 +14,7 @@ import { initDb, upsertProfile, updateProfile, getProfile, getProfileByWallet, l
 import { validateDeck, CARDS } from './cards';
 import { bootRanked, routeRanked } from './ranked';
 import {
-  BOOSTER_PRICE_SOL, BOOSTER_PRICE_LAMPORTS, BOOSTER_SUPPLY_CAP,
+  BOOSTER_PRICE_SOL, BOOSTER_PRICE_LAMPORTS, BOOSTER_SUPPLY_CAP, BOOSTER_MINTED_OFFSET,
   treasuryPubkey, boosterMintEnabled,
   buildPaymentTx, verifyPayment, mintTicketNft,
 } from './booster-mint';
@@ -142,11 +142,12 @@ async function fetchMemeticMastersLibrary(walletAddress: string): Promise<Librar
 // 1 special-edition merch piece (see /api/boosters/redeem-*).
 
 async function boostersSupplySnapshot() {
-  const minted = await countBoosterTickets();
+  const realMinted = await countBoosterTickets();
+  const displayMinted = Math.min(BOOSTER_SUPPLY_CAP, realMinted + BOOSTER_MINTED_OFFSET);
   return {
-    minted,
+    minted: displayMinted,
     cap: BOOSTER_SUPPLY_CAP,
-    remaining: Math.max(0, BOOSTER_SUPPLY_CAP - minted),
+    remaining: Math.max(0, BOOSTER_SUPPLY_CAP - displayMinted),
     priceSol: BOOSTER_PRICE_SOL,
     priceLamports: BOOSTER_PRICE_LAMPORTS,
     treasury: treasuryPubkey(),
@@ -347,7 +348,7 @@ app.use(async (ctx, next) => {
         ctx.status = 503; ctx.body = { ok: false, error: 'mint not configured on server (no treasury keypair)' }; return;
       }
       const supply = await countBoosterTickets();
-      if (supply >= BOOSTER_SUPPLY_CAP) {
+      if (supply + BOOSTER_MINTED_OFFSET >= BOOSTER_SUPPLY_CAP) {
         ctx.status = 410; ctx.body = { ok: false, error: 'sold out' }; return;
       }
       try {
@@ -372,7 +373,7 @@ app.use(async (ctx, next) => {
       try {
         const paid = await verifyPayment(signature, wallet);
         const supply = await countBoosterTickets();
-        if (supply >= BOOSTER_SUPPLY_CAP) {
+        if (supply + BOOSTER_MINTED_OFFSET >= BOOSTER_SUPPLY_CAP) {
           ctx.status = 410; ctx.body = { ok: false, error: 'sold out (payment received, contact support for refund)' }; return;
         }
         const ticketNumber = await nextBoosterTicketNumber();

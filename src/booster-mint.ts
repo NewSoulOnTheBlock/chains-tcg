@@ -39,7 +39,10 @@ import { create, mplCore } from '@metaplex-foundation/mpl-core';
 
 export const BOOSTER_PRICE_SOL = Number(process.env.BOOSTER_PRICE_SOL ?? 0.4);
 export const BOOSTER_PRICE_LAMPORTS = Math.round(BOOSTER_PRICE_SOL * 1e9);
-export const BOOSTER_SUPPLY_CAP = Number(process.env.BOOSTER_SUPPLY_CAP ?? 2000);
+export const BOOSTER_SUPPLY_CAP = Number(process.env.BOOSTER_SUPPLY_CAP ?? 100);
+// Display-only offset added to the on-chain mint count for marketing/scarcity.
+// Real mints still tick the count upward on top of this baseline.
+export const BOOSTER_MINTED_OFFSET = Number(process.env.BOOSTER_MINTED_OFFSET ?? 37);
 
 const METADATA_URI = process.env.BOOSTER_METADATA_URI
   ?? 'https://www.masterstcg.com/booster-ticket.json';
