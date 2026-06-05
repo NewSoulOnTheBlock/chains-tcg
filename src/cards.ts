@@ -104,7 +104,7 @@ const IMAGES: Record<string, string> = {
   sol_goat:     cmc(33440),
 
   // Avalanche memes
-  avax_coq:     emo('1f413'), // rooster (COQ)
+  avax_coq:     '/cards/coq.png?v=1', // armored warrior rooster (COQ Inu)
   avax_kimbo:   emo('1f415'), // dog (KIMBO)
   avax_nochill: emo('1f976'), // cold face (NOCHILL)
   avax_husky:   emo('1f43a'), // wolf face (HUSKY)
