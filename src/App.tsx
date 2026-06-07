@@ -1516,8 +1516,8 @@ function ExampleTurn({ highlight }: { highlight: (s: string) => React.ReactNode 
 
 // ── Landing screen (post-login hub) ─────────────────────────────────────────
 function Landing({
-  myName, onPlay, onRanked, onSolo, onMasterquest, onBoosters, onProfile, onRules, onLogout,
-}: { myName: string; onPlay: () => void; onRanked: () => void; onSolo: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
+  myName, onPlay, onRanked, onMasterquest, onBoosters, onProfile, onRules, onLogout,
+}: { myName: string; onPlay: () => void; onRanked: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
   const mobile = useIsMobile();
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#000', color: '#fff', fontFamily: 'system-ui' }}>
@@ -1565,7 +1565,6 @@ function Landing({
         <MenuBtn primary onClick={onPlay}>▶  PLAY</MenuBtn>
         <MenuBtn ranked onClick={onRanked}>🏆  RANKED</MenuBtn>
         <MenuBtn onClick={onMasterquest}>🗺  MASTERQUEST</MenuBtn>
-        <MenuBtn onClick={onSolo}>🤖  VS BOT</MenuBtn>
         <MenuBtn onClick={onBoosters}>📦  BOOSTERS</MenuBtn>
         <MenuBtn onClick={onProfile}>👤  PROFILE</MenuBtn>
         <MenuBtn onClick={onRules}>📖  RULES</MenuBtn>
@@ -3140,8 +3139,8 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
 
 // ── Lobby screen ────────────────────────────────────────────────────────────
 function Lobby({
-  myName, onJoined, onBack, onViewProfile,
-}: { myName: string; onJoined: (seat: Seat) => void; onBack: () => void; onViewProfile: (name: string) => void }) {
+  myName, onJoined, onBack, onViewProfile, onSolo,
+}: { myName: string; onJoined: (seat: Seat) => void; onBack: () => void; onViewProfile: (name: string) => void; onSolo: () => void }) {
   const mobile = useIsMobile();
   const [matches, setMatches] = useState<any[]>([]);
   const [leaderboard, setLeaderboard] = useState<Profile[]>([]);
@@ -3578,6 +3577,19 @@ function Lobby({
             boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
           }}
         >🏛️ Enter Plaza</button>
+
+        {/* VS BOT — single-player launcher lives here now (was a separate landing button). */}
+        <button
+          onClick={onSolo}
+          title="Play a single-player match against the bot"
+          style={{
+            position: 'fixed', right: 16, top: 60, zIndex: 50,
+            background: 'linear-gradient(135deg,#1f3a5a,#12203a)',
+            color: '#fff', border: '1px solid #4b8ad8', borderRadius: 8,
+            padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+            boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
+          }}
+        >🤖 VS Bot</button>
 
         {plazaOpen && (
           <Plaza
@@ -5452,8 +5464,9 @@ export default function App() {
                       onJoined={joinedSeat}
                       onBack={() => goto('landing')}
                       onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
+                      onSolo={() => setSoloSetup(true)}
                     />
-                  : <Landing myName={name} onPlay={() => goto('lobby')} onRanked={() => goto('ranked')} onSolo={() => setSoloSetup(true)} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
+                  : <Landing myName={name} onPlay={() => goto('lobby')} onRanked={() => goto('ranked')} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
     </>
   );
 }
