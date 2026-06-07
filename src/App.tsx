@@ -1516,8 +1516,8 @@ function ExampleTurn({ highlight }: { highlight: (s: string) => React.ReactNode 
 
 // ── Landing screen (post-login hub) ─────────────────────────────────────────
 function Landing({
-  myName, onPlay, onRanked, onMasterquest, onBoosters, onProfile, onRules, onLogout,
-}: { myName: string; onPlay: () => void; onRanked: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
+  myName, onPlay, onMasterquest, onBoosters, onProfile, onRules, onLogout,
+}: { myName: string; onPlay: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
   const mobile = useIsMobile();
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#000', color: '#fff', fontFamily: 'system-ui' }}>
@@ -1562,8 +1562,7 @@ function Landing({
         minWidth: mobile ? undefined : 220,
         maxWidth: mobile ? 360 : undefined,
       }}>
-        <MenuBtn primary onClick={onPlay}>▶  PLAY</MenuBtn>
-        <MenuBtn ranked onClick={onRanked}>🏆  RANKED</MenuBtn>
+        <MenuBtn primary onClick={onPlay}>▶  PLAY · RANKED</MenuBtn>
         <MenuBtn onClick={onMasterquest}>🗺  MASTERQUEST</MenuBtn>
         <MenuBtn onClick={onBoosters}>📦  BOOSTERS</MenuBtn>
         <MenuBtn onClick={onProfile}>👤  PROFILE</MenuBtn>
@@ -3639,6 +3638,16 @@ function Lobby({
           />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+            <RankedQueuePanel
+              myName={myName}
+              decks={myDecks}
+              selectedDeckId={mySelectedDeckId}
+              setSelectedDeckId={setMySelectedDeckId}
+              selectedDeckCards={myDeck}
+              deckOk={myDeckOk}
+              onJoined={onJoined}
+              setError={setError}
+            />
             <CreateMatchPanel
               myColor={myColor} setMyColor={setMyColor}
               useCustom={useCustom} setUseCustom={setUseCustom}
@@ -5457,7 +5466,13 @@ export default function App() {
             : view === 'view-profile' && viewedProfile
               ? <PublicProfile name={viewedProfile} onBack={() => goto('lobby')} />
               : view === 'ranked'
-                ? <RankedHub myName={name} onBack={() => goto('landing')} onJoined={joinedSeat} onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }} />
+                ? <Lobby
+                    myName={name}
+                    onJoined={joinedSeat}
+                    onBack={() => goto('landing')}
+                    onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
+                    onSolo={() => setSoloSetup(true)}
+                  />
                 : view === 'lobby'
                   ? <Lobby
                       myName={name}
@@ -5466,12 +5481,209 @@ export default function App() {
                       onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
                       onSolo={() => setSoloSetup(true)}
                     />
-                  : <Landing myName={name} onPlay={() => goto('lobby')} onRanked={() => goto('ranked')} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
+                  : <Landing myName={name} onPlay={() => goto('lobby')} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
     </>
   );
 }
 
-// ── Ranked Hub ─────────────────────────────────────────────────────────────
+// ── Ranked Queue Panel ─────────────────────────────────────────────────────
+// Embedded inside the Lobby so casual + ranked matchmaking live on one page.
+// Reuses the Lobby's loaded deck library + selection state.
+function RankedQueuePanel({
+  myName, decks, selectedDeckId, setSelectedDeckId, selectedDeckCards,
+  deckOk, onJoined, setError,
+}: {
+  myName: string;
+  decks: DeckEntry[];
+  selectedDeckId: number | null;
+  setSelectedDeckId: (id: number) => void;
+  selectedDeckCards: string[];
+  deckOk: boolean;
+  onJoined: (s: Seat) => void;
+  setError: (msg: string) => void;
+}) {
+  const [profile, setProfile] = useState<PublicRankedProfile | null>(null);
+  const [region, setRegion] = useState<string>(() => {
+    try { return localStorage.getItem('rankedRegion') || 'global'; } catch { return 'global'; }
+  });
+  const [queued, setQueued] = useState<{ queuedAt: number } | null>(null);
+  const [waitMs, setWaitMs] = useState(0);
+  const [busy, setBusy] = useState(false);
+
+  // Load profile once on mount (and again whenever the player name changes).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await RankedAPI.profile(myName);
+        if (!cancelled) setProfile(p);
+      } catch { /* leave profile null — the panel still renders the queue button */ }
+    })();
+    return () => { cancelled = true; };
+  }, [myName]);
+
+  // Poll queue status every 2s while queued. On match-found, auto-join the
+  // boardgame.io match and bubble the seat up to the Lobby via onJoined.
+  useEffect(() => {
+    if (!queued) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const s = await RankedAPI.queueStatus(myName);
+        if (cancelled) return;
+        setWaitMs(Date.now() - (s.queuedAt ?? Date.now()));
+        if (s.match) {
+          try {
+            const joined = await lobby.joinMatch(GAME_NAME, s.match.matchId, {
+              playerID: s.match.seat, playerName: myName,
+            });
+            setQueued(null);
+            onJoined({
+              matchID: s.match.matchId,
+              playerID: s.match.seat,
+              credentials: joined.playerCredentials,
+              playerName: myName,
+            });
+          } catch (e: any) {
+            setError(`Ranked match join failed: ${e?.message ?? e}`);
+            setQueued(null);
+          }
+        } else if (!s.queued) {
+          setQueued(null);
+        }
+      } catch (e: any) {
+        if (!cancelled) setError(String(e?.message ?? e));
+      }
+    };
+    const id = setInterval(tick, 2000);
+    void tick();
+    return () => { cancelled = true; clearInterval(id); };
+  }, [queued, myName, onJoined, setError]);
+
+  async function joinQueue() {
+    if (!deckOk) { setError('Pick a valid 60-card deck before entering the ranked queue.'); return; }
+    setBusy(true); setError('');
+    try {
+      const deckPayload = selectedDeckCards.length > 0 ? JSON.stringify(selectedDeckCards) : undefined;
+      const r = await RankedAPI.queueJoin(myName, region, deckPayload);
+      if (!('ok' in r) || !r.ok) {
+        setError((r as any).error || 'queue failed');
+      } else {
+        setQueued({ queuedAt: r.queuedAt ?? Date.now() });
+        try { localStorage.setItem('rankedRegion', region); } catch {}
+      }
+    } catch (e: any) { setError(String(e?.message ?? e)); }
+    finally { setBusy(false); }
+  }
+  async function leaveQueue() {
+    setBusy(true);
+    try { await RankedAPI.queueLeave(myName); } catch {}
+    setQueued(null); setBusy(false);
+  }
+
+  const placementRemaining = profile?.placementMatchesRemaining ?? 10;
+  const inPlacements = placementRemaining > 0;
+  const totalGames = (profile?.wins ?? 0) + (profile?.losses ?? 0);
+  const wr = totalGames > 0 ? Math.round(((profile?.wins ?? 0) / totalGames) * 100) : 0;
+
+  return (
+    <div style={{
+      padding: 16, borderRadius: 12,
+      background: 'linear-gradient(135deg, #161025 0%, #1a1238 100%)',
+      border: '1px solid rgba(192,132,252,0.45)',
+      boxShadow: '0 0 24px rgba(123,44,191,0.18)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{
+          fontFamily: '"Cinzel", "Times New Roman", serif',
+          fontSize: 16, fontWeight: 800, letterSpacing: 1.2, color: '#c084fc',
+        }}>🏆 RANKED LADDER</div>
+        {profile && <RankBadge p={profile} size="sm" />}
+      </div>
+
+      {profile ? (
+        <div style={{ marginBottom: 12, fontSize: 12, color: '#cfc4ff' }}>
+          {inPlacements
+            ? <span>Placement matches remaining: <b style={{ color: '#ffb347' }}>{placementRemaining}</b></span>
+            : <span><b>{rankLabel(profile)}</b> · {profile.wins}W / {profile.losses}L · {wr}% WR</span>}
+        </div>
+      ) : (
+        <div style={{ marginBottom: 12, fontSize: 12, color: '#888' }}>Loading rank…</div>
+      )}
+
+      {!queued ? (
+        <>
+          {decks.length > 0 && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <label style={{ fontSize: 11, color: '#aaa', minWidth: 50 }}>Deck:</label>
+              <select
+                value={selectedDeckId ?? ''}
+                onChange={e => setSelectedDeckId(Number(e.target.value))}
+                style={{ flex: 1, padding: '6px 10px', background: '#1a1a1a', color: '#eee', border: '1px solid #444', borderRadius: 4, fontSize: 12 }}
+              >
+                {decks.map(d => {
+                  const valid = validateDeck(d.cards).ok;
+                  return (
+                    <option key={d.id} value={d.id}>
+                      {d.name} ({d.cards.length}) {d.isActive ? '★' : ''} {valid ? '' : '⚠'}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+            <label style={{ fontSize: 11, color: '#aaa', minWidth: 50 }}>Region:</label>
+            <select value={region} onChange={e => setRegion(e.target.value)}
+              style={{ flex: 1, padding: '6px 10px', background: '#1a1a1a', color: '#eee', border: '1px solid #444', borderRadius: 4, fontSize: 12 }}>
+              <option value="global">Global</option>
+              <option value="na">North America</option>
+              <option value="eu">Europe</option>
+              <option value="ap">Asia Pacific</option>
+            </select>
+          </div>
+          <button
+            onClick={joinQueue}
+            disabled={busy || !deckOk}
+            style={{
+              width: '100%', padding: '12px 18px', fontSize: 14,
+              borderRadius: 8, border: 'none', fontWeight: 800, letterSpacing: 0.6,
+              background: deckOk ? 'linear-gradient(90deg, #7b2cbf, #c084fc)' : '#3a2f6a',
+              color: deckOk ? '#fff' : '#888',
+              cursor: deckOk ? 'pointer' : 'not-allowed',
+            }}
+          >🏆  ENTER RANKED QUEUE</button>
+          {!deckOk && (
+            <div style={{ marginTop: 8, fontSize: 11, color: '#f99', fontStyle: 'italic' }}>
+              Pick a valid 60-card deck above to queue.
+            </div>
+          )}
+        </>
+      ) : (
+        <div style={{ textAlign: 'center', padding: '6px 0' }}>
+          <div style={{ fontSize: 11, color: '#aaa', marginBottom: 4, fontFamily: 'serif', letterSpacing: 1.5, textTransform: 'uppercase' }}>Searching for opponent…</div>
+          <div style={{
+            fontSize: 28, fontWeight: 800, color: '#c084fc',
+            fontVariantNumeric: 'tabular-nums',
+            fontFamily: '"Cinzel", "Times New Roman", serif',
+            textShadow: '0 0 16px rgba(192,132,252,0.5)',
+          }}>
+            {Math.floor(waitMs / 60000)}:{String(Math.floor((waitMs / 1000) % 60)).padStart(2, '0')}
+          </div>
+          <div style={{ fontSize: 10, color: '#888', marginTop: 4, fontStyle: 'italic' }}>
+            MMR window expands ±50 every 10s
+          </div>
+          <button onClick={leaveQueue} disabled={busy}
+            style={{ marginTop: 10, padding: '6px 14px', background: '#222', color: '#ddd', border: '1px solid #444', borderRadius: 4, cursor: 'pointer', fontSize: 11 }}>
+            Leave Queue
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Ranked Hub (legacy, kept for /ranked deep-links) ──────────────────────
 function RankBadge({ p, size = 'md' }: { p: { visibleRank: PublicRankedProfile['visibleRank']; division: PublicRankedProfile['division'] }; size?: 'sm'|'md'|'lg' }) {
   const c = tierColors(p.visibleRank);
   const dim = size === 'lg' ? 80 : size === 'sm' ? 32 : 50;
