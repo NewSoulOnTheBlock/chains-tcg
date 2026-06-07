@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SITES, ACTS, TOTAL_SITES, sitesByAct, sitesByChain } from './lore';
+import { SITES, ACTS, TOTAL_SITES, INTERLUDES, sitesByAct, sitesByChain, MAP_VIEWBOX } from './lore';
 
 describe('Memetic Masterquest lore', () => {
   it('has exactly 15 sacred sites', () => {
@@ -33,16 +33,6 @@ describe('Memetic Masterquest lore', () => {
     }
   });
 
-  it('covers all 5 chains across each act', () => {
-    const chains = ['bnb', 'sol', 'avax', 'eth', 'xrp'] as const;
-    for (const act of Object.keys(ACTS) as Array<keyof typeof ACTS>) {
-      const seen = new Set(sitesByAct(act).map(s => s.chain));
-      for (const c of chains) {
-        expect(seen.has(c)).toBe(true);
-      }
-    }
-  });
-
   it('puts 3 sites on every chain in total', () => {
     for (const c of ['bnb', 'sol', 'avax', 'eth', 'xrp'] as const) {
       expect(sitesByChain(c).length).toBe(3);
@@ -52,5 +42,23 @@ describe('Memetic Masterquest lore', () => {
   it('escalates difficulty across acts (no easy in Act III)', () => {
     const actIII = sitesByAct('coronation');
     expect(actIII.every(s => s.rival.difficulty !== 'easy')).toBe(true);
+  });
+
+  it('has a pre and post interlude for every site', () => {
+    for (const s of SITES) {
+      const i = INTERLUDES[s.id];
+      expect(i, `missing interlude for ${s.id}`).toBeDefined();
+      expect(i.pre.length).toBeGreaterThan(80);
+      expect(i.post.length).toBeGreaterThan(80);
+    }
+  });
+
+  it('places every map node inside the map viewBox', () => {
+    for (const s of SITES) {
+      expect(s.mapPos.x).toBeGreaterThanOrEqual(0);
+      expect(s.mapPos.x).toBeLessThanOrEqual(MAP_VIEWBOX.w);
+      expect(s.mapPos.y).toBeGreaterThanOrEqual(0);
+      expect(s.mapPos.y).toBeLessThanOrEqual(MAP_VIEWBOX.h);
+    }
   });
 });

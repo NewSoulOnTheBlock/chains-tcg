@@ -17,7 +17,7 @@ import { SoloClient } from '../SoloClient';
 import type { Color } from '../cards';
 import {
   PROLOGUE, ACTS, SITES, EPILOGUE, INTERLUDES,
-  mapPosOf, type SacredSite, type SiteId, type Interlude,
+  mapPosOf, MAP_VIEWBOX, type SacredSite, type SiteId, type Interlude,
 } from './lore';
 import {
   loadProgress, recordClear, markEpilogueSeen,
@@ -91,7 +91,7 @@ export function MasterquestPage({
   const handleTravelOnward = useCallback(() => {
     const site = postFight?.site;
     setPostFight(null);
-    if (site && site.id === 'obsidian_mirror') {
+    if (site && site.id === 'cipher_peak') {
       markEpilogueSeen();
       setShowEpilogue(true);
     }
@@ -163,7 +163,7 @@ export function MasterquestPage({
 
       {/* Map */}
       <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 16px 32px' }}>
-        <div style={{ width: '100%', maxWidth: 760 }}>
+        <div style={{ width: '100%', maxWidth: 1280 }}>
           <MapSvg progress={progress} onSiteClick={handleSiteClick} />
           <ActLegend />
         </div>
@@ -199,95 +199,99 @@ function MapSvg({
 }: { progress: Progress; onSiteClick: (s: SacredSite) => void }) {
   const positioned = SITES.map(s => ({ s, p: mapPosOf(s) }));
   const cur = currentSiteId(progress);
+  const VW = MAP_VIEWBOX.w;
+  const VH = MAP_VIEWBOX.h;
 
   return (
     <svg
-      viewBox="0 0 100 100"
-      style={{ width: '100%', height: 'auto', maxHeight: '70vh', display: 'block' }}
+      viewBox={`0 0 ${VW} ${VH}`}
+      style={{
+        width: '100%', height: 'auto', display: 'block',
+        borderRadius: 10, border: '1px solid #3a2f6a',
+        boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
+      }}
       aria-label="Memetic Masterquest map"
     >
-      {/* Three concentric rings to suggest the three Acts */}
-      {[
-        { r: 40, op: 0.18, dash: '1,1' },
-        { r: 26, op: 0.14, dash: '1,1' },
-        { r: 13, op: 0.10, dash: '1,1' },
-      ].map((c, i) => (
-        <circle key={i} cx={50} cy={50} r={c.r}
-          fill="none" stroke="#a08bff" strokeOpacity={c.op}
-          strokeWidth={0.2} strokeDasharray={c.dash} />
-      ))}
+      {/* Painted Map of the Aetherweb (drawn first, everything else overlays) */}
+      <image href="/masterquest-map.png?v=1" x={0} y={0} width={VW} height={VH}
+        preserveAspectRatio="xMidYMid slice" />
 
-      {/* Travel path: lines between consecutive sites */}
+      {/* Travel path: faint dashed line connecting consecutive sites in clear-order */}
       {positioned.slice(1).map(({ s, p }, i) => {
         const prev = positioned[i].p;
         const traversed = isCleared(s.id, progress) || s.id === cur;
         return (
           <line key={`path-${s.id}`}
             x1={prev.x} y1={prev.y} x2={p.x} y2={p.y}
-            stroke={traversed ? '#9d7bff' : '#3a2f6a'}
-            strokeWidth={traversed ? 0.5 : 0.3}
-            strokeOpacity={traversed ? 0.85 : 0.4}
-            strokeDasharray={traversed ? '0' : '0.8,0.6'}
+            stroke={traversed ? '#ffe066' : '#cfc4ff'}
+            strokeWidth={traversed ? 5 : 3}
+            strokeOpacity={traversed ? 0.75 : 0.25}
+            strokeDasharray={traversed ? '0' : '12,10'}
           />
         );
       })}
 
-      {/* Site nodes */}
+      {/* Site nodes — large enough to be tappable over the painted map */}
       {positioned.map(({ s, p }) => {
         const cleared = isCleared(s.id, progress);
         const unlocked = s.id === cur;
         const dim = !cleared && !unlocked;
         const fill = CHAIN_HEX[s.chain];
-        const baseR = unlocked ? 3.2 : cleared ? 2.6 : 2.2;
+        const baseR = unlocked ? 36 : cleared ? 30 : 26;
         return (
           <g key={s.id}
             onClick={() => onSiteClick(s)}
             style={{ cursor: (cleared || unlocked) ? 'pointer' : 'not-allowed' }}>
-            {/* Glow for unlocked + pulse animation */}
+            {/* Pulsing halo around the current site */}
             {unlocked && (
-              <circle cx={p.x} cy={p.y} r={baseR + 2.5} fill={fill} opacity={0.18}>
-                <animate attributeName="r" values={`${baseR + 1.5};${baseR + 4};${baseR + 1.5}`} dur="2.4s" repeatCount="indefinite" />
-                <animate attributeName="opacity" values="0.10;0.32;0.10" dur="2.4s" repeatCount="indefinite" />
+              <circle cx={p.x} cy={p.y} r={baseR + 18} fill={fill} opacity={0.22}>
+                <animate attributeName="r"
+                  values={`${baseR + 8};${baseR + 28};${baseR + 8}`}
+                  dur="2.4s" repeatCount="indefinite" />
+                <animate attributeName="opacity"
+                  values="0.12;0.36;0.12"
+                  dur="2.4s" repeatCount="indefinite" />
               </circle>
             )}
             {cleared && (
-              <circle cx={p.x} cy={p.y} r={baseR + 1.4} fill={fill} opacity={0.25} />
+              <circle cx={p.x} cy={p.y} r={baseR + 10} fill={fill} opacity={0.28} />
             )}
+            {/* Outer ring */}
+            <circle cx={p.x} cy={p.y} r={baseR + 4}
+              fill="#0a0716" stroke="#000" strokeWidth={2}
+              opacity={dim ? 0.65 : 0.9} />
+            {/* Inner colour disc */}
             <circle cx={p.x} cy={p.y} r={baseR}
-              fill={dim ? '#221a40' : fill}
-              stroke={dim ? '#3a2f6a' : '#000'}
-              strokeWidth={0.4}
-              opacity={dim ? 0.55 : 1} />
+              fill={dim ? '#1a1230' : fill}
+              stroke={dim ? '#3a2f6a' : '#fff'}
+              strokeWidth={3}
+              opacity={dim ? 0.85 : 1} />
             {/* Numeric label */}
-            <text x={p.x} y={p.y + 0.7} textAnchor="middle"
-              fontSize={2.2} fontWeight={900}
+            <text x={p.x} y={p.y + 9} textAnchor="middle"
+              fontSize={28} fontWeight={900}
+              fontFamily="'Cinzel', serif"
               fill={dim ? '#7a6fa5' : (s.chain === 'eth' ? '#222' : '#fff')}
               pointerEvents="none">
-              {s.index}
-            </text>
-            {/* Site name tag */}
-            <text x={p.x} y={p.y + baseR + 3} textAnchor="middle"
-              fontSize={1.7} fill={dim ? '#5a4f80' : '#cfc4ff'}
-              pointerEvents="none">
-              {shortName(s.name)}
+              {toRoman(s.index)}
             </text>
             {/* Cleared checkmark */}
             {cleared && (
-              <text x={p.x + baseR - 0.2} y={p.y - baseR + 0.5}
-                fontSize={2.5} fill="#a5ffb0" fontWeight={900} pointerEvents="none">✓</text>
+              <text x={p.x + baseR + 4} y={p.y - baseR + 4}
+                fontSize={36} fill="#a5ffb0" fontWeight={900} pointerEvents="none">✓</text>
             )}
           </g>
         );
       })}
 
-      {/* Sorendo icon at current site */}
+      {/* Sorendo avatar floating above the current site */}
       {cur && (() => {
         const here = positioned.find(({ s }) => s.id === cur);
         if (!here) return null;
         return (
           <g pointerEvents="none">
-            <text x={here.p.x} y={here.p.y - 5.5} textAnchor="middle"
-              fontSize={3.6} fill="#fff">🧙</text>
+            <text x={here.p.x} y={here.p.y - 50} textAnchor="middle"
+              fontSize={56} fill="#fff"
+              style={{ filter: 'drop-shadow(0 0 6px rgba(255,255,255,0.8))' }}>🧙</text>
           </g>
         );
       })()}
@@ -295,21 +299,25 @@ function MapSvg({
   );
 }
 
-function shortName(name: string): string {
-  // Drop "The" prefix and any subtitle after a long-dash for the map label.
-  return name.replace(/^The\s+/, '').split(/[—–]/)[0].trim().slice(0, 22);
+function toRoman(n: number): string {
+  const r: Record<number, string> = {
+    1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V',
+    6: 'VI', 7: 'VII', 8: 'VIII', 9: 'IX', 10: 'X',
+    11: 'XI', 12: 'XII', 13: 'XIII', 14: 'XIV', 15: 'XV',
+  };
+  return r[n] ?? String(n);
 }
 
 function ActLegend() {
   return (
     <div style={{
-      display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap',
-      padding: '14px 8px 0', gap: 12,
+      display: 'flex', justifyContent: 'center', flexWrap: 'wrap',
+      padding: '14px 8px 0', gap: 18,
       fontSize: 11, opacity: 0.85, color: '#cfc4ff',
     }}>
-      <div>● Outer ring — {ACT_LABEL.awakening}</div>
-      <div>● Middle ring — {ACT_LABEL.pilgrimage}</div>
-      <div>● Inner ring — {ACT_LABEL.coronation}</div>
+      <div>{ACT_LABEL.awakening} — Sites I–V</div>
+      <div>{ACT_LABEL.pilgrimage} — Sites VI–X</div>
+      <div>{ACT_LABEL.coronation} — Sites XI–XV</div>
     </div>
   );
 }
@@ -441,7 +449,7 @@ function PostFightModal({
 
     <div style={{ marginTop: 22, textAlign: 'right' }}>
       <button onClick={onTravelOnward} style={btnPrimary}>
-        {site.id === 'obsidian_mirror' ? '✦  Reforge the Aetherweb' : 'Travel Onward →'}
+        {site.id === 'cipher_peak' ? '✦  Reforge the Aetherweb' : 'Travel Onward →'}
       </button>
     </div>
   </>);
