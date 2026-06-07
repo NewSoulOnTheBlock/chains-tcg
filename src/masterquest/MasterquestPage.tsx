@@ -12,9 +12,11 @@
 // After Site 15 → EPILOGUE.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { SoloClient } from '../SoloClient';
 import type { Color } from '../cards';
+import { validateDeck } from '../cards';
+import { listDecksApi, type DeckEntry } from '../profiles';
 import {
   PROLOGUE, ACTS, SITES, EPILOGUE, INTERLUDES,
   mapPosOf, MAP_VIEWBOX, type SacredSite, type SiteId, type Interlude,
@@ -55,10 +57,43 @@ export function MasterquestPage({
 }: { myName: string; onBack: () => void }) {
   const [progress, setProgress] = useState<Progress>(() => loadProgress());
   const [openSiteId, setOpenSiteId] = useState<SiteId | null>(null);
-  const [activeDuel, setActiveDuel] = useState<{ site: SacredSite } | null>(null);
+  const [activeDuel, setActiveDuel] = useState<{ site: SacredSite; deckCards: string[] } | null>(null);
   const [postFight, setPostFight] = useState<{ site: SacredSite } | null>(null);
   const [showPrologue, setShowPrologue] = useState<boolean>(() => loadProgress().cleared.length === 0);
   const [showEpilogue, setShowEpilogue] = useState<boolean>(false);
+
+  // ── Deck chooser ───────────────────────────────────────────────────────
+  // Masterquest requires a CUSTOM deck — no starters allowed. The player
+  // must have built and saved a legal deck in the Library first.
+  const [decks, setDecks] = useState<DeckEntry[]>([]);
+  const [decksLoading, setDecksLoading] = useState<boolean>(true);
+  const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setDecksLoading(true);
+      try {
+        const list = await listDecksApi(myName);
+        if (cancelled) return;
+        const legal = list.filter(d => validateDeck(d.cards).ok);
+        setDecks(legal);
+        // Auto-select the first legal deck for convenience.
+        if (legal.length > 0) setSelectedDeckId(legal[0].id);
+      } catch {
+        if (!cancelled) setDecks([]);
+      } finally {
+        if (!cancelled) setDecksLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [myName]);
+
+  const selectedDeck = useMemo(
+    () => decks.find(d => d.id === selectedDeckId) ?? null,
+    [decks, selectedDeckId],
+  );
+  const canDuel = !!selectedDeck;
 
   const cur = currentSiteId(progress);
   const complete = isQuestComplete(progress);
@@ -72,10 +107,10 @@ export function MasterquestPage({
   }, [progress]);
 
   const handleBeginDuel = useCallback(() => {
-    if (!openSite) return;
-    setActiveDuel({ site: openSite });
+    if (!openSite || !selectedDeck) return;
+    setActiveDuel({ site: openSite, deckCards: selectedDeck.cards });
     setOpenSiteId(null);
-  }, [openSite]);
+  }, [openSite, selectedDeck]);
 
   const handleDuelEnd = useCallback((info: { win: boolean; turns: number }) => {
     if (!activeDuel) return;
@@ -113,6 +148,7 @@ export function MasterquestPage({
         difficulty={activeDuel.site.rival.difficulty}
         mode="casual"
         playerDeckColor="sol"
+        customDeck={activeDuel.deckCards}
         botDeckColor={activeDuel.site.rival.botColor}
         matchLabel={`${activeDuel.site.rival.name} — ${activeDuel.site.rival.title}`}
         onExit={() => setActiveDuel(null)}
@@ -161,6 +197,14 @@ export function MasterquestPage({
         )}
       </div>
 
+      {/* Deck chooser — Masterquest requires a custom (saved) deck */}
+      <DeckChooser
+        decks={decks}
+        loading={decksLoading}
+        selectedDeckId={selectedDeckId}
+        onSelect={setSelectedDeckId}
+      />
+
       {/* Map */}
       <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 16px 32px' }}>
         <div style={{ width: '100%', maxWidth: 1280 }}>
@@ -177,6 +221,8 @@ export function MasterquestPage({
           site={openSite}
           cleared={isCleared(openSite.id, progress)}
           interlude={INTERLUDES[openSite.id]}
+          selectedDeck={selectedDeck}
+          canDuel={canDuel}
           onClose={() => setOpenSiteId(null)}
           onBeginDuel={handleBeginDuel}
         />
@@ -367,9 +413,10 @@ function EpilogueModal({ onClose }: { onClose: () => void }) {
 }
 
 function SiteModal({
-  site, cleared, interlude, onClose, onBeginDuel,
+  site, cleared, interlude, selectedDeck, canDuel, onClose, onBeginDuel,
 }: {
   site: SacredSite; cleared: boolean; interlude: Interlude;
+  selectedDeck: DeckEntry | null; canDuel: boolean;
   onClose: () => void; onBeginDuel: () => void;
 }) {
   return modalShell(<>
@@ -420,10 +467,47 @@ function SiteModal({
       <b>Reward:</b> {site.reward}
     </div>
 
+    {/* Selected-deck reminder + warning when no custom deck is selected */}
+    <div style={{
+      marginTop: 14, padding: 10,
+      background: canDuel ? 'rgba(165,255,176,0.06)' : 'rgba(255,107,107,0.10)',
+      border: `1px solid ${canDuel ? '#2c5d3a' : '#a83b3b'}`,
+      borderRadius: 8, fontSize: 12,
+    }}>
+      {canDuel ? (
+        <>
+          <b style={{ color: '#a5ffb0' }}>Your deck:</b>{' '}
+          {selectedDeck!.name || `Deck #${selectedDeck!.id}`}{' '}
+          <span style={{ opacity: 0.7 }}>({selectedDeck!.cards.length} cards)</span>
+        </>
+      ) : (
+        <>
+          <b style={{ color: '#ff9a9a' }}>⚠ No custom deck selected.</b>{' '}
+          Masterquest requires a deck you built yourself — open the Library on the
+          Profile page, build &amp; save a legal 60-card deck, then return here and
+          pick it from the chooser above the map.
+        </>
+      )}
+    </div>
+
     <div style={{ marginTop: 22, display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
       <button onClick={onClose} style={btnSecondary}>Withdraw</button>
-      {!cleared && <button onClick={onBeginDuel} style={btnPrimary}>⚔  Begin Duel</button>}
-      {cleared && <button onClick={onBeginDuel} style={btnPrimary}>↻  Re-Duel</button>}
+      {!cleared && (
+        <button onClick={onBeginDuel}
+          disabled={!canDuel}
+          style={canDuel ? btnPrimary : btnDisabled}
+          title={canDuel ? '' : 'Pick a custom deck first'}>
+          ⚔  Begin Duel
+        </button>
+      )}
+      {cleared && (
+        <button onClick={onBeginDuel}
+          disabled={!canDuel}
+          style={canDuel ? btnPrimary : btnDisabled}
+          title={canDuel ? '' : 'Pick a custom deck first'}>
+          ↻  Re-Duel
+        </button>
+      )}
     </div>
   </>, onClose);
 }
@@ -503,3 +587,83 @@ const btnSecondary: React.CSSProperties = {
   padding: '8px 14px', fontWeight: 700, fontSize: 12,
   cursor: 'pointer',
 };
+
+const btnDisabled: React.CSSProperties = {
+  background: '#1a1230', color: '#6b5e94',
+  border: '1px solid #2a2150', borderRadius: 8,
+  padding: '10px 18px', fontWeight: 800, fontSize: 13,
+  cursor: 'not-allowed', letterSpacing: 0.5,
+  opacity: 0.55,
+};
+
+// ─── Deck chooser strip ────────────────────────────────────────────────────
+
+function DeckChooser({
+  decks, loading, selectedDeckId, onSelect,
+}: {
+  decks: DeckEntry[];
+  loading: boolean;
+  selectedDeckId: number | null;
+  onSelect: (id: number | null) => void;
+}) {
+  return (
+    <div style={{
+      padding: '12px 20px',
+      background: 'rgba(108,75,216,0.06)',
+      borderBottom: '1px solid #2a1f55',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        flexWrap: 'wrap', maxWidth: 1280, margin: '0 auto',
+      }}>
+        <div style={{ fontSize: 11, letterSpacing: 1.5, opacity: 0.8, fontWeight: 700 }}>
+          🃏 YOUR DECK
+        </div>
+
+        {loading && (
+          <div style={{ fontSize: 12, opacity: 0.65 }}>loading saved decks…</div>
+        )}
+
+        {!loading && decks.length === 0 && (
+          <div style={{ fontSize: 12, color: '#ff9a9a' }}>
+            No legal custom decks found. Build a 60-card deck in the Library
+            (Profile → Library) first — Masterquest does <b>not</b> allow starter
+            decks.
+          </div>
+        )}
+
+        {!loading && decks.length > 0 && (
+          <>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {decks.map(d => {
+                const active = selectedDeckId === d.id;
+                return (
+                  <button key={d.id}
+                    onClick={() => onSelect(d.id)}
+                    style={{
+                      background: active ? '#6c4bd8' : '#1a1230',
+                      color: active ? '#fff' : '#cfc4ff',
+                      border: `2px solid ${active ? '#8a6bf0' : '#3a2f6a'}`,
+                      borderRadius: 8, padding: '8px 12px',
+                      fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                      letterSpacing: 0.3,
+                    }}>
+                    {d.name || `Deck #${d.id}`}{' '}
+                    <span style={{ opacity: 0.65, fontWeight: 400 }}>
+                      ({d.cards.length})
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {selectedDeckId == null && (
+              <div style={{ fontSize: 11, color: '#ff9a9a' }}>
+                ⚠ Select a deck above to unlock the duels.
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
