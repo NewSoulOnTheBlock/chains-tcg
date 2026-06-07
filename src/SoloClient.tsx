@@ -28,7 +28,10 @@ export function SoloClient({
   mode,
   playerDeckColor,
   customDeck,
+  botDeckColor,
+  matchLabel,
   onExit,
+  onMatchEnd,
 }: {
   playerName: string;
   difficulty: Difficulty;
@@ -36,7 +39,13 @@ export function SoloClient({
   playerDeckColor: Color;
   /** If provided (and length > 0), used instead of STARTER_DECKS[playerDeckColor]. */
   customDeck?: string[] | null;
+  /** If provided, overrides the daily/random bot color (used by Masterquest). */
+  botDeckColor?: Color | null;
+  /** Optional custom label shown beside the bot name (e.g. boss title). */
+  matchLabel?: string | null;
   onExit: () => void;
+  /** Called when the match resolves; useful for campaign mode unlocks. */
+  onMatchEnd?: (info: { win: boolean; turns: number }) => void;
 }) {
   // Build a per-mount Client. Includes the seed when mode='daily' so today's
   // shuffles are identical for everyone.
@@ -47,9 +56,11 @@ export function SoloClient({
 
     // Daily mode picks the bot's deck deterministically. Casual mode picks
     // a random one of the 5 starters per match.
-    const botColor: Color = isDaily
-      ? dailyBotColor(dateKey)
-      : COLORS[Math.floor(Math.random() * COLORS.length)];
+    const botColor: Color = botDeckColor
+      ? botDeckColor
+      : isDaily
+        ? dailyBotColor(dateKey)
+        : COLORS[Math.floor(Math.random() * COLORS.length)];
 
     // Bake setupData into the wrapped setup() because the React Client doesn't
     // accept a setupData prop (Local mode has no lobby to forward it from).
@@ -58,7 +69,7 @@ export function SoloClient({
       // When using a custom deck, leave the player color as null so Game.setup
       // derives the theme color from the deck contents.
       colors: [useCustom ? null : playerDeckColor, botColor] as Array<Color | null>,
-      names: [playerName, `Bot (${difficulty})`],
+      names: [playerName, matchLabel ? `${matchLabel}` : `Bot (${difficulty})`],
       decks: [useCustom ? customDeck! : STARTER_DECKS[playerDeckColor], STARTER_DECKS[botColor]],
     };
     const originalSetup = ChainsTCG.setup as any;
@@ -89,7 +100,19 @@ export function SoloClient({
       multiplayer: Local({ bots: { '1': BoundBot as any } }),
       debug: false,
     });
-  }, [difficulty, mode, playerDeckColor, playerName, customDeck]);
+  }, [difficulty, mode, playerDeckColor, playerName, customDeck, botDeckColor, matchLabel]);
+
+  // Forward `mmtcg:solo-end` to the optional onMatchEnd callback.
+  useEffect(() => {
+    const cb = onMatchEnd;
+    if (!cb) return;
+    function handler(e: any) {
+      const d = e?.detail ?? {};
+      cb!({ win: d.winnerSeat === '0', turns: Number(d.turns ?? 0) });
+    }
+    window.addEventListener('mmtcg:solo-end', handler);
+    return () => window.removeEventListener('mmtcg:solo-end', handler);
+  }, [onMatchEnd]);
 
   // Track match start time for daily-best recording.
   const startedAt = useRef<number>(Date.now());

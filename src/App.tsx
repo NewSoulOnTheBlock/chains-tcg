@@ -28,6 +28,7 @@ import type { Difficulty } from './bot';
 import type { SoloMode } from './SoloClient';
 import { saveDailyResult, todayKey, todayBest } from './dailyChallenge';
 import { BoostersPage } from './Boosters';
+import { MasterquestPage } from './masterquest/MasterquestPage';
 import { listOwnedSprotoGremlins, SPROTO_COLLECTION_MINT, type OwnedNft } from './nft-showcase';
 import ShinyText, { ShinyBrand, ShinyButtonLabel } from './ShinyText';
 // PixelTrail is lazy-loaded — it pulls in three + r3f + drei (~240KB
@@ -1515,8 +1516,8 @@ function ExampleTurn({ highlight }: { highlight: (s: string) => React.ReactNode 
 
 // ── Landing screen (post-login hub) ─────────────────────────────────────────
 function Landing({
-  myName, onPlay, onRanked, onSolo, onBoosters, onProfile, onRules, onLogout,
-}: { myName: string; onPlay: () => void; onRanked: () => void; onSolo: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
+  myName, onPlay, onRanked, onSolo, onMasterquest, onBoosters, onProfile, onRules, onLogout,
+}: { myName: string; onPlay: () => void; onRanked: () => void; onSolo: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
   const mobile = useIsMobile();
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#000', color: '#fff', fontFamily: 'system-ui' }}>
@@ -1563,6 +1564,7 @@ function Landing({
       }}>
         <MenuBtn primary onClick={onPlay}>▶  PLAY</MenuBtn>
         <MenuBtn ranked onClick={onRanked}>🏆  RANKED</MenuBtn>
+        <MenuBtn onClick={onMasterquest}>🗺  MASTERQUEST</MenuBtn>
         <MenuBtn onClick={onSolo}>🤖  VS BOT</MenuBtn>
         <MenuBtn onClick={onBoosters}>📦  BOOSTERS</MenuBtn>
         <MenuBtn onClick={onProfile}>👤  PROFILE</MenuBtn>
@@ -4966,7 +4968,7 @@ function WagerStatusBadge({ matchID, compact }: { matchID: string; compact?: boo
 }
 
 // ── Root ────────────────────────────────────────────────────────────────────
-type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile' | 'ranked' | 'solo' | 'boosters';
+type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile' | 'ranked' | 'solo' | 'boosters' | 'masterquest';
 
 /**
  * Print-mode renderer used by scripts/render-cards.mjs. Lays out every card in
@@ -5406,7 +5408,7 @@ export default function App() {
 
   // Landing + Profile share the same audio element so music keeps playing
   // (and the user's mute state is preserved) when switching between them.
-  const showMusic = view === 'landing' || view === 'profile' || view === 'rules' || view === 'lobby' || view === 'ranked' || view === 'boosters';
+  const showMusic = view === 'landing' || view === 'profile' || view === 'rules' || view === 'lobby' || view === 'ranked' || view === 'boosters' || view === 'masterquest';
   return (
     <>
       <InstallPrompt />
@@ -5438,6 +5440,8 @@ export default function App() {
           ? <RulesPage onBack={() => goto('landing')} />
           : view === 'boosters'
             ? <BoostersPage myName={name} onBack={() => goto('landing')} />
+            : view === 'masterquest'
+              ? <MasterquestPage myName={name} onBack={() => goto('landing')} />
             : view === 'view-profile' && viewedProfile
               ? <PublicProfile name={viewedProfile} onBack={() => goto('lobby')} />
               : view === 'ranked'
@@ -5449,7 +5453,7 @@ export default function App() {
                       onBack={() => goto('landing')}
                       onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
                     />
-                  : <Landing myName={name} onPlay={() => goto('lobby')} onRanked={() => goto('ranked')} onSolo={() => setSoloSetup(true)} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
+                  : <Landing myName={name} onPlay={() => goto('lobby')} onRanked={() => goto('ranked')} onSolo={() => setSoloSetup(true)} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
     </>
   );
 }

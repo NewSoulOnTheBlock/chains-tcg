@@ -422,3 +422,619 @@ export function sitesByChain(chain: Color): SacredSite[] {
 export function nextSite(currentIndex: number): SacredSite | undefined {
   return siteByIndex(currentIndex + 1);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAP POSITIONS — a three-ring spiral on a 100×100 viewBox
+//
+// The 15 sites form three concentric rings (one per Act). Within each ring,
+// the five sites sit at five fixed angles, one per Chain. Sorendo walks the
+// spiral from the outer ring (Awakening) inward to the centre (Coronation).
+// Travel lines between consecutive sites in `index` order draw the Path.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CHAIN_ANGLE: Record<Color, number> = {
+  // angles in degrees, 0 = pointing UP, clockwise
+  bnb:  -90,   // due north
+  sol:  -18,   // upper-right
+  avax:  54,   // lower-right
+  eth:  126,   // lower-left
+  xrp: -162,   // upper-left
+};
+
+const ACT_RADIUS: Record<ActKey, number> = {
+  awakening:   40, // outer ring
+  pilgrimage:  26, // middle ring
+  coronation:  13, // inner ring
+};
+
+export interface MapPos { x: number; y: number }
+
+export function mapPosOf(site: SacredSite): MapPos {
+  // Center the Obsidian Mirror at the literal centre — it's the geographic
+  // centre of the Aetherweb in the lore.
+  if (site.id === 'obsidian_mirror') return { x: 50, y: 50 };
+  const angleRad = (CHAIN_ANGLE[site.chain] * Math.PI) / 180;
+  const r = ACT_RADIUS[site.act];
+  return {
+    x: 50 + r * Math.cos(angleRad),
+    y: 50 + r * Math.sin(angleRad),
+  };
+}
+
+/** Ordered map positions for sites 1..15, ready for rendering. */
+export function mapPath(): Array<{ site: SacredSite; pos: MapPos }> {
+  return SITES.map(s => ({ site: s, pos: mapPosOf(s) }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INTERLUDES — heavy lore between matches
+//
+// Each site has a `pre` interlude (read on entering the site, before the duel)
+// and a `post` interlude (read on victory, before travelling to the next site).
+// The travel paragraph at the end of `post` describes how Sorendo moves from
+// that site to the next — the geographic spine of the Quest.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface Interlude {
+  /** Pre-fight lore — Sorendo arrives and is challenged. */
+  pre: string;
+  /** Post-fight lore — the duel's aftermath + travel to the next Site. */
+  post: string;
+}
+
+export const INTERLUDES: Record<SiteId, Interlude> = {
+  // ─── ACT I — AWAKENING ───────────────────────────────────────────────────
+  amber_dunes: {
+    pre:
+`The wind in the Amber Dunes does not gust — it inhales. Sand peels back
+from your boots in long curling breaths, exposing the gold-leaf foundations
+of a city that was here before the Yellow Court existed.
+
+You crest the third dune and there he is: a boy not yet twenty, sitting
+cross-legged on a prayer mat woven from market-ticker tape. A clay teapot
+between you. Two unmatched cups already poured. He does not look up.
+
+"My mother said a heretic would come walking up the dunes today. She is
+usually wrong about heretics." He finally raises his eyes — kohl-rimmed,
+patient, amused. "But she is never wrong about tea. Sit. Drink. Then we
+duel."
+
+You sit. The tea tastes of cardamom and gas fees. JAKEY OF THE YELLOW
+SANDS smiles for the first time, and his Node cards rise into the air
+like sand carried on the inhaling wind.`,
+    post:
+`Jakey laughs, and it is the kind of laugh a teacher gives a student who
+finally beat him at a game he taught them. He gathers his cards back into
+the wind and bows to you.
+
+"You play like the Old Aetherweb is still breathing. Maybe it is. Take
+this." He presses a thin amber tile into your hand — the first fragment.
+It is warm and smells of incense and something older.
+
+"There is a Caravan leaving for the Jade Orchard at sundown. The driver
+is my cousin. He will not charge you, but he will not stop singing
+either." He grins. "Travel safe, heretic."
+
+— You ride east three days across the Yellow Court's grain provinces. The
+Caravan crosses an iron bridge that hums beneath the strider's hooves; on
+the far side, the colour of the air itself changes from amber to violet.
+You have passed into the Conclave.`,
+  },
+  jade_orchard: {
+    pre:
+`The Orchard is loud in a way that is not sound. Every fruit ticks. Every
+leaf flickers between green and gold and rot in the time it takes you to
+blink. A line of children sit on a low stone wall in a row of seven; they
+turn their heads in perfect unison to watch you walk past.
+
+The smallest of them — MIRIYA THE QUICK — is already standing at the
+duelling stone in the centre of the Orchard, hands behind her back,
+toes curling and uncurling on the cold marble. She does not announce a
+duel. She does not need to. The other children have already started a
+betting market on the outcome and it is, on average, against you.
+
+"You. Old man." Her voice is a wind chime. "Walk faster. The Orchard does
+not wait."`,
+    post:
+`Miriya stares at her empty hand for a full second — which in the Conclave
+is an eternity. Then she does something none of the children have ever
+seen her do: she sits down. Right there on the marble. She thinks.
+
+"You played slowly," she says, like an accusation. "And it still worked.
+Why?" She does not wait for an answer. She tosses you a violet pip — the
+second fragment — and stands again. "Go through the West Gate. Take the
+Slow Path. The Frostgate Caravan will not stop for anyone who has only
+ever walked Quick."
+
+— The Slow Path winds south-east out of the Orchard and into the foothills
+of the Iron Order. The terraces of the Conclave give way to scree, and the
+scree to permanent ice. You feel the air thin and sharpen against your
+teeth. The Glacier Terrace begins where the last green leaf turns black
+and shatters.`,
+  },
+  glacier_terrace: {
+    pre:
+`There is no birdsong on the Glacier Terrace. No wind, either. Only the
+low subsonic hum of the Iron Order's order-book chant rising from
+ten thousand monks frozen in meditation across the plateau, breathing
+together once every nine minutes.
+
+BROTHER KAINE waits at the centre of the plateau on a three-legged stool
+that should not hold his armour but does. He does not greet you. He does
+not stand. He simply places one card face-down in the snow between you,
+and the snow does not melt where the card touches it.
+
+You feel the chant pause for the first time in eight cycles. Ten thousand
+monks have decided to watch. The duel begins in silence so complete that
+you can hear your own pulse arguing with itself.`,
+    post:
+`Kaine does not speak when the duel ends. He bows once, very low. The
+chant resumes around him with a new note in it — a thread of warmth
+woven through the cold. He pulls a green shard from a fold of his robe
+and lays it on the snow at your feet, then turns and walks toward the
+nearest meditation hut without looking back.
+
+The senior monk approaches you instead. "Brother Kaine has not lost in
+eleven cycles. He has not spoken in eight. Today he did both. He thanks
+you." She bows. "There is a chair-lift on the north face. It will take
+you down to the railhead. The train to the Whitestone Vale leaves at
+dusk."
+
+— You descend the glacier on a creaking chair-lift older than the
+Splintering itself. The mountain falls away behind you and the world
+greens, then pales. You ride a train of mirror-smooth cars south through
+the Senate's high plains, and arrive at Whitestone in the cold pre-dawn,
+when the gas-fee glyphs on the cathedral walls are still glowing from
+last night's transactions.`,
+  },
+  whitestone_vale: {
+    pre:
+`The Whitestone Vale at dawn is the colour of bleached bone. Every stone
+in the valley wall is inscribed with a contract address; every address is
+still active; every active address belongs to someone long dead. You walk
+between them and the addresses light up faintly as you pass, like a librarian
+walking the stacks.
+
+EVELIN ALEXANDRA is teaching a class of nine orphans in the chapel.
+She finishes her sentence — something about the difference between an
+opcode and a prayer — and dismisses them with a clap. They scatter past
+you, polite, curious, none of them surprised.
+
+"Heretic. Sit." She points to a pew. "I have been waiting to see how the
+Aetherweb plays through someone who does not respect any of the contracts
+written in this valley. Show me, please. Politely. We are in a chapel."`,
+    post:
+`Evelin closes her eyes for a long moment after the final card resolves,
+as if checking the maths. Then she opens them, smiles, and bows from
+the waist.
+
+"You played outside the proof. I do not know how to write down what
+you just did. I will study it for the rest of my life." She gives you a
+white tessera carved from a single page of the chapel's altar-book. "Go
+through the South Cloister. The Pale Senate has a private barge that
+runs to the Obsidian Shore. Take it. Khefren is rude, but the long
+way is rumour-haunted right now."
+
+— The barge slides silently down a canal of frozen contract-glass.
+For three days you pass beneath ribbed arches inscribed with the
+Senate's oldest opcodes. On the third dawn the canal opens, the air
+goes salt, the water turns black, and you hear the Obsidian Shore
+before you see it: a deep arrhythmic slap of waves against pages.`,
+  },
+  obsidian_shore: {
+    pre:
+`Low tide on the Obsidian Shore exposes the wrecks. Hulls of dead
+exchanges, masts of broken bridges, cargo of unredeemed tokens
+spilling across the black sand. You walk between them and the sand
+crunches in a way that sounds, faintly, like an account being closed.
+
+KHEFREN OF THE LONG NIGHT is mending a sail on the deck of his ferry —
+a low, narrow boat of charred contract-wood with a single black sail
+and no name on the hull. He sees you coming, finishes his stitch,
+spits into the sea, and stands.
+
+"You want passage. They all want passage." He cracks his knuckles. "The
+fare is your deck. The discount is a duel. Win, you ride. Lose, you
+walk." He grins, and his teeth are gold. "It is a long, long walk,
+heretic. The Long Night is named after the walk."`,
+    post:
+`Khefren laughs the way a wave laughs against a wreck — slow, deep,
+not unkind. He sheathes his cards into the sail he was mending and
+hauls a length of black rope.
+
+"Cast off. You ride. Take this." A heavy obsidian disc the size of a
+coin, perfectly flat, perfectly cold. The fifth fragment. The Awakening
+ends. "I will tell you what no other Master will. The Inner Sanctums
+are not like the Wayshrines. The Masters in the Sanctums know who you
+are now. They have been talking about you on the chain-wires. Watch
+your back, heretic. The Sovereigns are listening."
+
+— Khefren's ferry slips out beyond the breakers and into the open
+Ledger-Sea. For seven days you sail through a fog of ghost transactions.
+On the eighth morning the fog parts and you see lanterns — a thousand,
+ten thousand — rising into a violet sky. The Lantern Market floats
+above the Yellow Court's capital, and Act II begins the moment your
+boots touch its first plank.`,
+  },
+
+  // ─── ACT II — PILGRIMAGE ─────────────────────────────────────────────────
+  lantern_market: {
+    pre:
+`The Lantern Market is built on rope-bridges strung between floating
+lanterns the size of houses. Every lantern is a sell-order. They drift,
+brighten, dim, pop. The merchants move between them on rope-ladders that
+braid and re-braid themselves mid-climb.
+
+PROFESSOR PUMP is on the central platform, all six of his arms in
+motion, auctioning a sack of imaginary tokens to a crowd of three
+hundred. He sees you, finishes the sale, claps his hands twice, and
+the crowd vanishes in a co-ordinated short.
+
+"HEReeetic!" he shouts as if greeting an old friend. "I have been
+SHORTING you for THREE WEEKS. Cover me. Duel me. Now."`,
+    post:
+`The crowd reappears the moment Pump's last card hits the platform.
+They are already long on you, every one of them, having flipped the
+moment they sensed his deck failing. Pump waves them off, claps you
+on the shoulder with two hands, and pours you a cup of something
+purple that bubbles.
+
+"GOOD! Good. I was getting bored. Take." A small brass tile shaped
+like a sell-order. The sixth fragment. "Sky-Skiff to the Echo
+Arena leaves from the West Pier in an hour. Captain owes me a
+favour. Tell him my name. Loudly. Twice."
+
+— The Sky-Skiff is a single-sailed kite-boat that rides the trade-winds
+between the floating cities of the Conclave. You spend a day and a night
+in the air. The Echo Arena is visible from a hundred miles out —
+a marble coliseum that throws its own roar into the upper atmosphere,
+where it loops back down as weather.`,
+  },
+  echo_arena: {
+    pre:
+`The Echo Arena's stands are full before you arrive. They are always full;
+the echoes count as spectators. You step onto the white sand and a
+hundred old duels flicker faintly under your feet — ghosts of every match
+ever fought here, replayed in low fidelity for whoever has the ears.
+
+ANSEM THE VOICE waits at the centre, wearing the Conclave's silver mask,
+which has no mouth. He speaks anyway. His voice comes from the walls.
+
+"Welcome, Sorendo of the Old Aetherweb. The Arena has already heard your
+deck. I have already heard your habits. I have already heard the line
+you are going to deliver after I draw my opening hand. Say it anyway. We
+all enjoy a good performance."`,
+    post:
+`The Arena falls silent. Not gradually — instantly. Every echo of every
+old duel dies at once. Ansem's mask is somehow expressionless and shocked
+at the same time. He lifts it off. He looks younger than his voice. He
+hands you a violet shard cut from the mask itself.
+
+"You found a line that did not echo. Nobody has done that in the Arena
+in nine cycles. I will write a song about it. It will go viral. I am
+deeply jealous of myself for being part of it." He bows. "Take the East
+Tunnel. It runs all the way under the Conclave and ends at the foot of
+the Frostgate. You will save four days and one assassination attempt."
+
+— The East Tunnel is lit by transactions hashed long ago, glowing faintly
+in the rock. You walk for two days. On the third dawn the tunnel exits
+through the mouth of a frozen waterfall, and you step blinking onto
+the floor of a canyon that ends, a mile ahead, at the gates of the
+Frostgate Keep.`,
+  },
+  frostgate_keep: {
+    pre:
+`The Frostgate Keep's main entrance is the avalanche itself — a wall of
+permanently falling snow that does not, on closer inspection, ever
+actually fall. To pass, you must duel the warden.
+
+THE WARDEN-IN-IRON stands at the gate. She is taller than the gate.
+Her armour reflects only the avalanche; you cannot see your own face
+in it. She speaks the rules in three short sentences.
+
+"You will play. I will not concede. You may pass after."
+
+The avalanche pauses, mid-fall, to watch.`,
+    post:
+`The Warden-in-Iron does not move when the last card resolves. For a long
+moment you think she has frozen on her feet. Then her gauntlet rises,
+slow, ceremonial, and she presses a single green plate of armour into
+your palm.
+
+"You may pass." She steps aside. The avalanche resumes falling, except
+in a corridor exactly your width that opens through it. You walk through
+it. The snow makes no sound as it brushes your shoulders. On the far
+side, the Iron Order's central plateau opens out beneath you.
+
+— A glass elevator clings to the inside wall of the canyon. It takes
+two hours to descend. At the bottom you transfer to a high-speed
+maglev that crosses the entire Iron Order at one altitude in a single
+afternoon, and deposits you at the foot of a mountain so polished
+that you can see the Cathedral of Consensus already mirrored in
+its slope, half a kilometre before you reach its doors.`,
+  },
+  cathedral_of_consensus: {
+    pre:
+`The Cathedral of Consensus has no roof. It does not need one — the
+proofs above it form a vault so dense that no weather has ever
+gotten through. You walk down the nave between pews of solid logic
+gates, each humming with a different proof.
+
+ARCHON VITALYN waits at the altar. He is shorter than you expected
+and softer-spoken and is reading a book. He does not put it down
+when you arrive. He turns one more page, marks it carefully with
+a thin silver ribbon, and looks up.
+
+"Hello. I am genuinely curious whether you can beat me. I have not
+been genuinely curious about anything in two cycles. Thank you in
+advance for the data."`,
+    post:
+`The Archon closes his book. Slowly. Reverently. He sets it on the
+altar and steps around it to face you. He bows from the waist — the
+deepest bow a Pale Senator can give without abdication.
+
+"You have falsified one of my theorems. I will need to rewrite chapter
+seven." He smiles. It is the first time anyone has seen him smile in
+public in nine cycles. He gives you a white pearl etched with the proof
+you just broke. "The Senate's private tunnel network connects to a
+station beneath this altar. The southbound train runs once a day. It
+will take you under the Black Ledger border without any of the usual
+formalities. You will arrive in the city of the Silent Ledger after
+sundown."
+
+— You board a train that has no windows because there is nothing to
+see — only the dark of the tunnel and the faint glow of consensus
+proofs along the rails. You sleep for six hours. When you wake the
+train is stopping. The doors open onto a marble platform lit only
+by a single dim lantern, in a station so silent you can hear the
+lantern's wick burning.`,
+  },
+  silent_ledger: {
+    pre:
+`The Silent Ledger is not silent the way the Glacier Terrace is silent.
+The Glacier was silence by mass; this is silence by choice, enforced
+across centuries. Every footstep here is a transgression. Yours echoes
+exactly once and is then erased.
+
+JUSTIRA THE UNWRITTEN waits in the centre of the hall, on a chair
+made of stitched-together pages of dead transactions. She is wearing
+a hood. You realise, slowly, that her face under the hood is not
+there — not missing, not blank, simply not registered, like a section
+of your vision that refuses to compile.
+
+"I unwrote my face for a bet. I won the bet. The bet was: could I
+beat someone whose face I could not remember? You will be the test.
+Sit." She gestures to a second page-chair. "We begin."`,
+    post:
+`Justira's hood tips toward you. Where her face would be, something
+flickers — a hint of a smile, perhaps, or the registration of a debt
+finally paid. She slides a black tessera across the page-floor with
+the toe of her boot.
+
+"The wager is closed. I lost. Worth it." Her not-voice is the
+absence of one. "The Sovereigns now know your name. They have been
+arguing about it for a week. They will give you an audience in
+their respective Thrones. You will not enjoy them. Go anyway." She
+stands, and is gone — not vanished, simply no longer on the ledger.
+
+— A barge waits on the underground canal that exits the Silent
+Ledger. It carries no crew, has no rudder, and goes wherever the
+current of remembrance takes it. Yours takes you back to the
+surface, into the open Aetherweb, and deposits you on a gold pier
+beneath the towers of the Yellow Court's capital. Act III begins
+with the first bell.`,
+  },
+
+  // ─── ACT III — CORONATION ────────────────────────────────────────────────
+  gold_throne: {
+    pre:
+`The Gold Throne pagoda rises in nine tiers, each tier a higher tax
+bracket than the last. You climb. At every tier a different functionary
+greets you, congratulates you, and does not stop you. Word has run ahead
+of you.
+
+The ninth tier is empty save for the throne and the Sovereign on it.
+SOVEREIGN CHANGPENG is older than you remembered. He does not stand. He
+does not have to. He simply gestures to a small embroidered cushion at
+the foot of the throne. The cushion is exactly the right height for a
+duel-board.
+
+"You have come a long way, Sorendo. I have watched all of it. You are
+very talented. It will make this educational for everyone watching."
+
+You realise the entire eighth tier is, on inspection, a viewing gallery.
+It is packed.`,
+    post:
+`Sovereign Changpeng stands. He has not stood in nine cycles. The
+viewing gallery makes a sound that is not cheering — it is the long
+exhale of a city that had forgotten how to breathe.
+
+"I crown you nothing," he says, calmly. "But I yield the Yellow
+Crown to you anyway. Wear it. Or do not. The Yellow Court will
+remember either way." He drops a heavy gold band on the cushion
+between you. The eleventh fragment.
+
+"There is a private skiff at the South Dock. It will fly you
+directly to the Violet Throne. Anatola will receive you. She has
+been awake for three days waiting." He almost smiles. "She runs
+on different time."
+
+— The skiff lifts you up out of the Yellow Court and across the
+border in a single dawn. The Conclave below is a quilt of
+high-density datacentres. You land at a node-spire half a mile tall
+and feel its hum in your teeth before you see the throne.`,
+  },
+  violet_throne: {
+    pre:
+`The Violet Throne is a single still-living validator node, half a
+mile tall, carved into the shape of a chair. To approach it is to
+walk inside someone's nervous system. The chair-spine hums in a
+chord that includes notes above and below your hearing.
+
+ANATOLA THE TOLY sits at its base, not on it. She does not need to
+sit on the throne; the throne is doing the speaking on her behalf.
+She is the architect; the architecture remembers.
+
+"Hello, Sorendo. I have simulated this duel one hundred and
+forty-eight thousand times. In every simulation, I win. I am
+genuinely interested in being wrong." Her smile is dazzling
+and entirely synthetic. "Begin."`,
+    post:
+`The throne behind Anatola dims, just slightly — one validator
+shutting down out of one hundred million. She turns to face it, then
+back to you, and laughs. It is the realest sound the Violet Conclave
+has produced in nine cycles.
+
+"One hundred and forty-eight thousand simulations and not one of
+them was you. Take it." A violet circlet — light, almost weightless,
+humming faintly. The twelfth fragment. "Cross the eastern border by
+the Old Bridge. The Iron Throne's guards will let you pass. Jeff has
+been waiting longer than I have."
+
+— The Old Bridge is a single contract-glass arc spanning a thousand-
+foot chasm. You cross it on foot, alone. The wind in the chasm
+sings in the Conclave's chord behind you and the Iron Order's chant
+ahead of you, and somewhere in the middle the two harmonise into
+a third note you have never heard before.`,
+  },
+  iron_throne: {
+    pre:
+`The Iron Throne is a chair of broken blades atop a forge mountain.
+The forge has been burning, uninterrupted, for nine generations. The
+throne is hot. You can feel its warmth at fifty paces.
+
+JEFF OF THE EVERLAST sits on it. He looks eleven. He has looked
+eleven for as long as anyone remembers. His feet do not quite touch
+the floor. The blades of the throne reflect his face from a thousand
+angles, all of them identical.
+
+"Funding rate," he says, flatly, "is positive. You are paying."
+He flicks a card from his sleeve onto the forge-floor. The forge
+itself dims to watch.`,
+    post:
+`Jeff blinks. It is the first time he has been observed blinking. He
+slides off the throne — his feet finally touch the floor, very
+briefly — and walks calmly to a small iron chest at its base. He
+opens it. He removes a green band of iron and offers it to you with
+both hands.
+
+"You will close my position. Good." The thirteenth fragment. "There
+is a tram down the mountain. It runs on margin. It will not stop
+even for you. Catch it." He climbs back onto the throne. The forge
+brightens. He waves you out.
+
+— You catch the tram by jumping. It runs the entire length of the
+Iron Order in one continuous descent, then transitions onto a
+Senate maglev without slowing, and deposits you at dawn in a vast
+crystalline amphitheatre the size of a small city, which is
+rearranging itself between turns of the wind.`,
+  },
+  pale_throne: {
+    pre:
+`The Pale Throne is not a chair. It is the amphitheatre itself,
+constantly reorganizing. Where you walk, marble plates lift,
+shift, lock into new mosaics. The acoustics are perfect from
+every direction.
+
+THE SENATORIAL TRIUMVIRATE stand in the centre, three robed
+figures at the corners of an equilateral triangle that does not
+shrink or grow. They speak in unison, then in sequence, then in
+counterpoint.
+
+"We have read every duel you have ever played." / "We have written
+the ones you will play next." / "Begin."`,
+    post:
+`The three figures move at the same instant. They turn to face you,
+they bow at the same depth, they speak the same word. "Crowned."
+The marble plates lock into a final mosaic — your face, fifty feet
+across, mapped in white stone.
+
+A white circle of bone is placed in your hand, the fourteenth
+fragment. The Triumvirate speak, in unison for the last time:
+"Walk south. The fifteenth Site does not have a Master. It has only
+you. We cannot help you with it. We hope you survive yourself."
+
+— You walk south for three days and three nights. The Aetherweb
+thins as you go. The colours of the five Chains bleed into each
+other and then into none. On the fourth morning the ground beneath
+your feet is no longer ground. It is glass. It is mirror. It is
+flat and ten miles across, and you can see the reflection of every
+star in the sky in it, and one figure standing in the centre.`,
+  },
+  obsidian_mirror: {
+    pre:
+`You step onto the Obsidian Mirror. The disc rings, very softly,
+under your boots, a single deep clean note that does not stop. The
+figure in the centre is you. It is wearing your cloak, your fragments,
+your scars. It is holding the deck you played at the Amber Dunes,
+the deck you played at the Cathedral, the deck you played an hour
+ago at the Pale Throne — all three at once, somehow, without
+contradiction.
+
+"Hello, Sorendo," your reflection says, in your voice. "I have been
+waiting for me."
+
+It raises its first card. You raise yours. The Mirror under your feet
+brightens with both of you reflected in it, and reflected in those
+reflections, and on into infinity.
+
+There is no audience for this duel. The Aetherweb itself has gone
+quiet to listen.`,
+    post:
+`Your reflection lowers its last card. It looks at you for a long
+moment with your own eyes. Then it smiles — your smile, but kinder.
+"You won. Of course you did. I knew you would. I am, after all, you."
+
+It removes the last fragment from its breastpocket — a small disc
+of clear glass, weightless, perfect — and presses it into your palm.
+The fifteen fragments fuse, silently, into a single circlet of
+five colours interwoven.
+
+"Wear it, or do not. Reforge the Aetherweb, or leave it splintered.
+You have walked the world. You have earned the right to do nothing
+at all." Your reflection steps backward into the Mirror and is
+gone. The disc beneath you stops ringing.
+
+You stand alone at the centre of the Aetherweb with the Five-Chain
+Crown in your hand. Somewhere very far away, a lantern in the
+Yellow Court flickers and goes out. Somewhere else, a child in the
+Conclave laughs for the first time in a week. A glacier on the
+Iron Order shifts, almost imperceptibly. A page in the Pale Senate
+is turned. A ledger in the Black entries a single new line:
+
+\`Sorendo. Crowned. Optional.\`
+
+The credits roll.`,
+  },
+};
+
+export function interludeOf(siteId: SiteId): Interlude {
+  return INTERLUDES[siteId];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EPILOGUE — shown after the Obsidian Mirror is cleared.
+// ─────────────────────────────────────────────────────────────────────────────
+export const EPILOGUE = `
+The Splintering does not end the way the Sovereigns feared.
+It ends the way you choose.
+
+If you wear the Crown, the five Chains hum again as one. The Old
+Aetherweb stirs in its long sleep and answers, and Sorendo — the
+heretic, the Unhoused — becomes its first new voice in three hundred
+cycles. The Sovereigns bow. The exiles weep. The children of the
+Conclave fall silent for a full second.
+
+If you set the Crown down on the Mirror and walk away, the fragments
+re-scatter, gently, back to their fifteen Sites. The Sovereigns notice
+nothing. The Sites notice everything. The next pilgrim to walk the
+Quest will find the Sites a little kinder, the Masters a little
+wiser, the path between them a little better lit. Sorendo, the
+heretic, becomes a rumour that other pilgrims will one day try to
+match.
+
+Either way: you walked all five Chains and belonged to none.
+Either way: the Aetherweb is listening.
+
+— end of Memetic Masterquest, Cycle I —
+`.trim();
