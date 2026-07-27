@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Plus, RefreshCw, Swords, Users } from "lucide-react";
 import { GAME_NAME, GAME_SERVER } from "@/lib/config";
+import { SceneBackground } from "@/components/SceneBackground";
 import { getMatchCreds, setMatchCreds } from "@/lib/profile";
 import { registerProfile } from "@/lib/profileApi";
 import {
@@ -132,13 +133,14 @@ export default function LobbyPage() {
 
   return (
     <main className="flex-1 w-full max-w-lg mx-auto px-4 py-6 space-y-5">
+      <SceneBackground src="/lobby-bg.png" overlay="strong" />
       <header className="flex items-center gap-3">
         <Button asChild variant="ghost" size="icon" aria-label="Back">
           <Link href="/">
             <ArrowLeft className="size-5" />
           </Link>
         </Button>
-        <h1 className="text-xl font-bold tracking-wide">Multiplayer Lobby</h1>
+        <h1 className="font-heading text-xl font-bold tracking-wide">Multiplayer Lobby</h1>
         <Button
           variant="ghost"
           size="icon"
@@ -152,7 +154,7 @@ export default function LobbyPage() {
 
       <Button
         size="lg"
-        className="w-full h-12 font-bold"
+        className="w-full h-12 font-bold font-display"
         disabled={busy}
         onClick={createMatch}
       >
@@ -160,7 +162,7 @@ export default function LobbyPage() {
       </Button>
 
       <section className="space-y-2">
-        <h2 className="text-xs uppercase tracking-widest text-muted-foreground">
+        <h2 className="font-display text-xs uppercase tracking-widest text-muted-foreground">
           Open matches
         </h2>
 

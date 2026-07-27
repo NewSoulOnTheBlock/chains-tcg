@@ -19,6 +19,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ArrowLeft, Hammer } from "lucide-react";
 import { GameCard } from "@/components/game/GameCard";
 import { CostPips } from "@/components/game/GameCard";
+import { SceneBackground } from "@/components/SceneBackground";
 
 const TYPE_ORDER: CardType[] = ["node", "meme", "machine", "aura", "move"];
 const TYPE_LABEL: Record<CardType, string> = {
@@ -52,13 +53,14 @@ export default function DecksPage() {
 
   return (
     <main className="flex-1 w-full max-w-3xl mx-auto px-4 py-6 space-y-5">
+      <SceneBackground src="/hub-bg.png" blur overlay="strong" />
       <header className="flex items-center gap-3">
         <Button asChild variant="ghost" size="icon" aria-label="Back">
           <Link href="/">
             <ArrowLeft className="size-5" />
           </Link>
         </Button>
-        <h1 className="text-xl font-bold tracking-wide">Starter Decks</h1>
+        <h1 className="font-heading text-xl font-bold tracking-wide">Starter Decks</h1>
       </header>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

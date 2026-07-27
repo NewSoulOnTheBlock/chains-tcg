@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft } from "lucide-react";
 import { GameCard } from "@/components/game/GameCard";
+import { SceneBackground } from "@/components/SceneBackground";
 
 const TYPES: Array<CardType | "all"> = [
   "all",
@@ -46,21 +47,22 @@ export default function CardsPage() {
 
   return (
     <main className="flex-1 w-full max-w-5xl mx-auto px-4 py-6 space-y-4">
+      <SceneBackground src="/hub-bg.png" blur overlay="strong" />
       <header className="flex items-center gap-3">
         <Button asChild variant="ghost" size="icon" aria-label="Back">
           <Link href="/">
             <ArrowLeft className="size-5" />
           </Link>
         </Button>
-        <h1 className="text-xl font-bold tracking-wide">Card Gallery</h1>
-        <span className="ml-auto text-xs text-muted-foreground">
+        <h1 className="font-heading text-xl font-bold tracking-wide">Card Gallery</h1>
+        <span className="ml-auto font-display text-xs text-muted-foreground">
           {cards.length} cards
         </span>
       </header>
 
       {/* Chain filter */}
       <Tabs value={color} onValueChange={(v) => setColor(v as Color | "all")}>
-        <TabsList className="w-full overflow-x-auto justify-start">
+        <TabsList className="w-full overflow-x-auto justify-start font-display">
           <TabsTrigger value="all">All</TabsTrigger>
           {COLORS.map((c) => (
             <TabsTrigger key={c} value={c}>
@@ -76,7 +78,7 @@ export default function CardsPage() {
 
       {/* Type filter */}
       <Tabs value={type} onValueChange={(v) => setType(v as CardType | "all")}>
-        <TabsList className="w-full overflow-x-auto justify-start">
+        <TabsList className="w-full overflow-x-auto justify-start font-display">
           {TYPES.map((t) => (
             <TabsTrigger key={t} value={t} className="capitalize">
               {t === "all" ? "All types" : `${t}s`}

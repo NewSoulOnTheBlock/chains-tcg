@@ -7,9 +7,11 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-heading: var(--font-cinzel), serif;
+  --font-display: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-garamond), Georgia, serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -94,5 +96,16 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/* Direct font hooks (legacy stack): Cinzel for fantasy headings, EB Garamond
+   for card/flavor serif text. Tailwind equivalents: font-heading / font-serif. */
+@layer utilities {
+  .font-cinzel {
+    font-family: var(--font-cinzel), serif;
+  }
+  .font-garamond {
+    font-family: var(--font-garamond), Georgia, serif;
   }
 }

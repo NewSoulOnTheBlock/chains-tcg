@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 400" role="img" aria-labelledby="title desc">
+  <title id="title">Avalanche card frame</title>
+  <desc id="desc">Red and white trading-card frame for Avalanche cards.</desc>
+  <defs>
+    <linearGradient id="outer" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff2f2"/>
+      <stop offset="30%" stop-color="#e84142"/>
+      <stop offset="70%" stop-color="#8e121c"/>
+      <stop offset="100%" stop-color="#ffffff"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fffafa"/>
+      <stop offset="100%" stop-color="#ffd9d9"/>
+    </linearGradient>
+    <radialGradient id="artGlow" cx="50%" cy="40%" r="70%">
+      <stop offset="0%" stop-color="#ff9090"/>
+      <stop offset="100%" stop-color="#4d0509"/>
+    </radialGradient>
+    <filter id="lift" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect x="4" y="4" width="272" height="392" rx="14" fill="#170608"/>
+  <rect x="10" y="10" width="260" height="380" rx="11" fill="url(#outer)"/>
+  <rect x="18" y="18" width="244" height="364" rx="9" fill="#3b060b" opacity="0.9"/>
+  <rect x="24" y="22" width="232" height="22" rx="10" fill="url(#panel)" filter="url(#lift)"/>
+  <rect x="24" y="52" width="232" height="176" rx="8" fill="#0b0203"/>
+  <rect x="30" y="58" width="220" height="164" rx="4" fill="url(#artGlow)"/>
+  <path d="M137 79c3.6-6.2 12.5-6.2 16.1 0l53.4 92.5c3.6 6.2-.9 14-8.1 14h-34.2c-3.3 0-6.4-1.8-8.1-4.7l-21.4-37.1c-1.7-2.9-1.7-6.5 0-9.3l4.1-7.1c3.6-6.2 12.5-6.2 16.1 0l11.5 20h11.4L145.1 90.7 99.7 169.3h26.5l-14.1 24.4H82.8c-7.2 0-11.7-7.8-8.1-14L137 79Z" fill="#ffffff" opacity="0.22"/>
+  <rect x="24" y="234" width="232" height="20" rx="8" fill="url(#panel)" filter="url(#lift)"/>
+  <rect x="24" y="268" width="232" height="104" rx="8" fill="url(#panel)" filter="url(#lift)"/>
+  <rect x="198" y="344" width="36" height="24" rx="5" fill="#fff4cf" stroke="#80202a" stroke-width="1.5"/>
+  <circle cx="36" cy="360" r="8" fill="#e84142" stroke="#ffffff" stroke-width="2"/>
+  <circle cx="56" cy="360" r="8" fill="#ffffff" stroke="#e84142" stroke-width="2"/>
+</svg>

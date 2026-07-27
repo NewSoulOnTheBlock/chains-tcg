@@ -264,8 +264,16 @@ export function Board({ G, ctx, moves, playerID, matchData, onExit }: BoardProps
         }
       />
 
-      {/* Opponent battlefield */}
-      <div className="flex-1 min-h-0 flex flex-col justify-start overflow-y-auto">
+      {/* Opponent battlefield — legacy playmat surface, darkened for card contrast */}
+      <div
+        className="flex-1 min-h-0 flex flex-col justify-start overflow-y-auto"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(8,6,14,0.68), rgba(8,6,14,0.68)), url(/playmat.png)",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
+      >
         <BattlefieldRow
           items={supportItems(oppId)}
           size="xs"
@@ -278,7 +286,7 @@ export function Board({ G, ctx, moves, playerID, matchData, onExit }: BoardProps
         />
 
         {/* Center strip */}
-        <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-y border-border bg-secondary/40">
+        <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-y border-border bg-background/80 backdrop-blur-sm">
           <div className="flex items-center gap-1 min-w-0">
             <LogSheet log={G.log} />
             <span className="text-[11px] font-semibold truncate">

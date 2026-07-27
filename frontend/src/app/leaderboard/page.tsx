@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, RefreshCw, Trophy } from "lucide-react";
 import { fetchLeaderboard, type LeaderboardEntry } from "@/lib/profileApi";
+import { SceneBackground } from "@/components/SceneBackground";
 import { useProfileName } from "@/components/ProfileNameDialog";
 
 /** Rank accents for the podium (gold / silver / bronze). */
@@ -46,13 +47,14 @@ export default function LeaderboardPage() {
 
   return (
     <main className="flex-1 w-full max-w-lg mx-auto px-4 py-6 space-y-5">
+      <SceneBackground src="/hub-bg.png" blur overlay="strong" />
       <header className="flex items-center gap-3">
         <Button asChild variant="ghost" size="icon" aria-label="Back">
           <Link href="/">
             <ArrowLeft className="size-5" />
           </Link>
         </Button>
-        <h1 className="text-xl font-bold tracking-wide">Leaderboard</h1>
+        <h1 className="font-heading text-xl font-bold tracking-wide">Leaderboard</h1>
         <Button
           variant="ghost"
           size="icon"
