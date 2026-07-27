@@ -1852,6 +1852,7 @@ function Playmat(props: {
         life={opp.life} name={oppName ?? 'Opponent'} color={opp.color}
         position="topRight" targetable={playerTargetable}
         onClick={playerTargetable ? onOppPlayerClick : undefined}
+        side="opp" deckCount={oppDeckCount} handCount={opp.hand.length} seat={oppId}
       />
 
       {/* ─── ME ─── */}
@@ -1859,6 +1860,7 @@ function Playmat(props: {
         life={me.life} name={myName ?? 'You'} color={me.color}
         position="bottomLeft" targetable={playerTargetable}
         onClick={playerTargetable ? onMyPlayerClick : undefined}
+        side="me" deckCount={myDeckCount} handCount={me.hand.length} seat={myId}
       />
       <ZoneSlot rect={Z.myBattle} icon="⚔️" label={`Your Battlefield — ${COLOR_META[me.color].name}`} compactLabel={`⚔️ ${COLOR_META[me.color].name}`}>
         {me.memes.map(inst => {
@@ -1953,47 +1955,64 @@ function ZoneSlot({
 /** Large MTG-Arena style circular life badge anchored to a playmat corner. */
 function LifeBadge({
   life, name, color, position, onClick, targetable,
+  side, deckCount, handCount, seat,
 }: {
   life: number; name: string; color: Color;
   position: 'topRight' | 'bottomLeft';
   onClick?: () => void; targetable?: boolean;
+  side: 'me' | 'opp'; deckCount: number; handCount: number; seat: string;
 }) {
-  const meta = COLOR_META[color];
-  const pos: React.CSSProperties = position === 'topRight'
-    ? { top: 12, right: 14 }
-    : { bottom: 12, left: 14 };
-  const glow = targetable ? '0 0 22px rgba(255,235,59,0.85), 0 0 4px rgba(255,235,59,0.9)' : `0 0 24px ${meta.hex}aa, 0 4px 18px #000c`;
+  void color;
+  const A = side === 'me' ? '#298BFF' : '#E45F76';   // player blue / opponent red-violet
+  const A2 = side === 'me' ? '#8E4DFF' : '#C45CFF';  // violet highlight
+  const GOLD = '#E5B84B';
+  const isRight = position === 'topRight';
+  const pos: React.CSSProperties = isRight ? { top: 12, right: 14 } : { bottom: 12, left: 14 };
+  const orbGlow = targetable ? '0 0 22px rgba(255,235,59,0.85), 0 0 4px rgba(255,235,59,0.9)' : `0 0 22px ${A}88, 0 4px 16px #000c`;
+  const chip: React.CSSProperties = {
+    fontSize: 10, fontWeight: 700, color: '#cdd2e2', background: 'rgba(6,7,17,0.65)',
+    border: '1px solid #2a3350', borderRadius: 5, padding: '2px 7px', letterSpacing: 0.4,
+  };
   return (
     <div
       onClick={onClick}
-      title={`${name} — ${life} life`}
+      title={`${name} — ${life} life · Deck ${deckCount} · Hand ${handCount}`}
+      aria-label={`${name}, ${life} life, ${deckCount} in deck, ${handCount} in hand`}
       style={{
         position: 'absolute', ...pos, zIndex: 5,
-        display: 'flex', alignItems: 'center', gap: 8,
-        cursor: onClick ? 'pointer' : 'default',
-        pointerEvents: 'auto',
-        flexDirection: position === 'topRight' ? 'row-reverse' : 'row',
+        display: 'flex', alignItems: 'center', gap: 10,
+        cursor: onClick ? 'pointer' : 'default', pointerEvents: 'auto',
+        flexDirection: isRight ? 'row-reverse' : 'row',
       }}>
+      {/* crystal life orb */}
       <div style={{
-        width: 78, height: 78, borderRadius: '50%',
-        background: `radial-gradient(circle at 30% 30%, ${meta.hex}, #1a1a22 75%)`,
-        border: targetable ? '3px solid #ffeb3b' : `3px solid ${meta.hex}`,
-        boxShadow: glow,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: '#fff', textShadow: '0 2px 8px #000',
-        fontFamily: '"Cinzel", "Times New Roman", serif',
-        fontWeight: 900, fontSize: 36, lineHeight: 1,
+        position: 'relative', width: 76, height: 76, borderRadius: '50%', flex: '0 0 auto',
+        background: `radial-gradient(circle at 32% 28%, ${A2}, ${A} 46%, #10131f 82%)`,
+        border: `3px solid ${targetable ? '#ffeb3b' : GOLD}`, boxShadow: orbGlow,
+        display: 'grid', placeItems: 'center', color: '#fff', textShadow: '0 2px 8px #000',
+        fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 900, fontSize: 34, lineHeight: 1,
         transition: 'transform 0.15s ease',
-      }}>{life}</div>
-      <div style={{
-        background: 'rgba(0,0,0,0.55)',
-        backdropFilter: 'blur(4px)',
-        padding: '4px 10px', borderRadius: 6,
-        border: `1px solid ${meta.hex}66`,
-        color: '#fff', fontSize: 12, fontWeight: 700,
-        maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        letterSpacing: 0.4,
-      }}>{name}</div>
+      }}>
+        {life}
+        <span aria-hidden style={{ position: 'absolute', inset: 3, borderRadius: '50%', border: `1px solid ${A}55` }} />
+      </div>
+      {/* name + seat + counts */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: isRight ? 'flex-end' : 'flex-start' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexDirection: isRight ? 'row-reverse' : 'row' }}>
+          <span style={{
+            background: 'rgba(6,7,17,0.72)', backdropFilter: 'blur(4px)', padding: '3px 10px', borderRadius: 6,
+            border: `1px solid ${A}66`, color: '#F4F2EA', fontSize: 12, fontWeight: 800,
+            maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{name}</span>
+          {side === 'me' && (
+            <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1, color: '#0a0f1e', background: GOLD, borderRadius: 5, padding: '2px 6px' }}>YOU · P{seat}</span>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexDirection: isRight ? 'row-reverse' : 'row' }}>
+          <span style={chip}>DECK {deckCount}</span>
+          <span style={chip}>HAND {handCount}</span>
+        </div>
+      </div>
     </div>
   );
 }
