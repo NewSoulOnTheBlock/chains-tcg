@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { store } from '../bgio/store.js';
 import { ChainsTCG } from '../game/Game.js';
 import { invalidateLeaderboard } from '../lib/cache.js';
+import { applyRankedResult } from '../ranked/apply-result.js';
 import { isResultReason, signResult, type ResultReason, type SignedResult } from './sign.js';
 
 const log = createLogger({ service: 'game' }).child({ component: 'result-recorder' });
@@ -106,14 +107,22 @@ export async function recordFinishedMatch(matchId: string): Promise<RecordOutcom
   let recorded = false;
   try {
     recorded = await withTransaction(async (c) => {
-      // Lock the lobby row so the win/loss increments and the status flip are
-      // serialised against any concurrent sweeper or join.
+      // Lock the lobby row so the win/loss increments, the status flip and the
+      // ranked rating update are serialised against any concurrent sweeper or
+      // join.
+      //
+      // `mode` is selected here for the ranked gate below. It is read from the
+      // row this statement holds a lock on, so between the check and the rating
+      // write it cannot change — the same reasoning that makes `match.mode`
+      // trustworthy on the join path in routes/lobby.ts, and the reason no
+      // request body anywhere is allowed to name a mode for an existing match.
       const { rows } = await c.query<{
-        seat0_profile: number | null;
-        seat1_profile: number | null;
+        mode: string;
+        seat0_profile: string | null;
+        seat1_profile: string | null;
         status: string;
       }>(
-        `SELECT seat0_profile, seat1_profile, status
+        `SELECT mode, seat0_profile::text, seat1_profile::text, status
            FROM game.matches WHERE id = $1 FOR UPDATE`,
         [matchId],
       );
@@ -152,6 +161,32 @@ export async function recordFinishedMatch(matchId: string): Promise<RecordOutcom
       }
       // Draws touch neither counter: `core.profiles` has no `draws` column
       // (see ARCHITECTURE.md). Draws are still visible in match history.
+
+      // ── The ranked ladder ─────────────────────────────────────────────
+      // Same transaction, same client, immediately after the INSERT above
+      // reported a row. That `rowCount > 0` is exactly "this result is being
+      // recorded for the first time", so the rating update inherits the
+      // exactly-once property from the primary key rather than implementing a
+      // second, weaker version of it — which is what the legacy service did,
+      // across three separate transactions, with a window in which a crash lost
+      // a rated match permanently.
+      //
+      // `mode` decides. A casual or wager match reaches this line and returns
+      // without touching a rating table. Nothing here is reachable from an HTTP
+      // route: there is no request shape in this backend that names a winner.
+      await applyRankedResult(c, {
+        matchId,
+        mode: match.mode,
+        seat0Profile: match.seat0_profile,
+        seat1Profile: match.seat1_profile,
+        winnerSeat: parsed.winnerSeat,
+        reason: parsed.reason,
+        // The instant that was HMAC-signed into server_sig, not `now()` — so
+        // the season this match is rated into is decided by when the match
+        // ACTUALLY ended, not by when the sweeper happened to notice.
+        finishedAt,
+      });
+
       return true;
     });
   } catch (err) {

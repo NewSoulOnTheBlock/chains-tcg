@@ -3,9 +3,11 @@ import { Router } from 'express';
 import { createLogger, startService } from '@chains/shared';
 import { config } from './config.js';
 import { registerLobbyRoutes } from './routes/lobby.js';
+import { registerRankedRoutes } from './routes/ranked.js';
 import { connectStore, closeStore, store } from './bgio/store.js';
 import { createBgioServer, attachBgioTransport, stopBgioServer } from './bgio/server.js';
 import { resultRecorder } from './results/recorder.js';
+import { rankedMatchmaker } from './ranked/matchmaker.js';
 
 /**
  * game service (:4003) — boardgame.io match server, hardened lobby, and the
@@ -51,6 +53,10 @@ const running = await startService(
 
     const router = Router();
     registerLobbyRoutes(router);
+    // The ladder. Mounted on the same router because the gateway's
+    // `location /games/` prefix already reaches this service, so /games/ranked/*
+    // needs no nginx change. No route it registers accepts a match outcome.
+    registerRankedRoutes(router);
     app.use(router);
   },
 );
@@ -59,6 +65,11 @@ const running = await startService(
 // once startService has resolved.
 attachBgioTransport(running.server);
 resultRecorder.start();
+// The ranked pairer. Independent of the recorder: it creates matches, the
+// recorder ends them, and neither knows about the other. Both are idempotent and
+// both cooperate across containers through row locks rather than in-process
+// state, so running N of this service is safe.
+rankedMatchmaker.start();
 
 /**
  * `startService` handles SIGTERM/SIGINT for the HTTP server and the shared
@@ -78,7 +89,12 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
     void (async () => {
       stopBgioServer();
-      await resultRecorder.stop().catch(() => undefined);
+      await Promise.all([
+        resultRecorder.stop().catch(() => undefined),
+        // A pass cut short costs nothing: the queue rows are either committed
+        // as a pairing or rolled back into the queue, never half of each.
+        rankedMatchmaker.stop().catch(() => undefined),
+      ]);
       await delay(BGIO_DRAIN_MS);
       await closeStore().catch((err: unknown) =>
         log.warn('boardgame.io store close failed', { err: String(err) }),
