@@ -1379,12 +1379,12 @@ function Landing({
       />
       {/* "Built on Robinhood" mark, centered just below the main title. */}
       <img
-        src="/built-on-robinhood.png"
+        src="/built-on-robinhood.png?v=2"
         alt="Built on Robinhood"
         draggable={false}
         style={{
-          position: 'absolute', zIndex: 2, left: '50%', top: '54%', transform: 'translate(-50%,-50%)',
-          width: 'clamp(200px, 24vw, 340px)', height: 'auto', pointerEvents: 'none', userSelect: 'none',
+          position: 'absolute', zIndex: 2, left: '50%', top: '53%', transform: 'translate(-50%,-50%)',
+          width: 'clamp(150px, 17vw, 260px)', height: 'auto', pointerEvents: 'none', userSelect: 'none',
           filter: 'drop-shadow(0 2px 10px rgba(0,0,0,0.5))',
         }}
       />

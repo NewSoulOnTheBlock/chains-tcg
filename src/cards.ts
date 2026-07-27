@@ -103,8 +103,8 @@ const IMAGES: Record<string, string> = {
 
   // Robinhood memes (meme-stocks — emoji glyph art)
   robinhood_hood:    emo('1f3f9'), // bow and arrow (Robinhood)
-  robinhood_gme:     emo('1f3ae'), // game controller (GameStop)
-  robinhood_amc:     emo('1f3ac'), // clapper board (AMC)
+  robinhood_ozzy:    emo('1f989'), // owl (Ozzy, the Robinhood owl)
+  robinhood_cashcat: emo('1f911'), // money-mouth face (Cashcat)
   robinhood_kitty:   emo('1f981'), // lion (Roaring Kitty)
   robinhood_tendies: emo('1f357'), // poultry leg (tendies)
   robinhood_moon:    emo('1f680'), // rocket (to the moon)
@@ -353,8 +353,8 @@ reg(
 // Robinhood — lifegain midrange, sturdy bodies, dividends
 reg(
   M('robinhood_hood',    'robinhood', 'HOOD',     1, 1, 2, 'Payment for order flow IPO\'d the casino.'),
-  M('robinhood_gme',     'robinhood', 'GME',      2, 1, 4, 'Diamond hands. The floor is the ceiling.'),
-  M('robinhood_amc',     'robinhood', 'AMC',      2, 2, 3, 'Apes together strong.'),
+  M('robinhood_ozzy',    'robinhood', 'Ozzy',     2, 1, 4, 'The Robinhood owl watches every candle.'),
+  M('robinhood_cashcat', 'robinhood', 'Cashcat',  2, 2, 3, 'Nine lives, every one of them in the money.'),
   M('robinhood_kitty',   'robinhood', 'KITTY',    3, 3, 4, 'Roaring Kitty posts a single frame.'),
   M('robinhood_tendies', 'robinhood', 'TENDIES',  3, 4, 3, 'Chicken tendies, secured.'),
   M('robinhood_moon',    'robinhood', 'MOON',     4, 4, 5, 'To the moon, no brakes.'),
