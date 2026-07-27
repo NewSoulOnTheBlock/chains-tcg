@@ -3,9 +3,7 @@
 // Virtual Arena. Buying a pack mints 5 random cards + 1 foil random card as NFTs
 // on Robinhood Chain (CardPack contract). Built on the shared design tokens.
 
-import { useEffect, useState, Suspense, Component, type ReactNode } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { useGLTF, OrbitControls, Center, Bounds } from '@react-three/drei';
+import { useEffect, useState, useRef } from 'react';
 import { color as C, font as F, radius as R, shadow as SH } from './theme';
 import { Button } from './ui';
 import { detectEvmWallet } from './wallet';
@@ -71,13 +69,9 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
             <div style={{ fontFamily: F.display, fontWeight: 700, fontSize: 'clamp(26px,5vw,40px)', letterSpacing: '-0.01em' }}>Genesis Booster</div>
             <div style={{ color: C.textMid, fontSize: 14, marginTop: 6 }}>5 random cards + 1 guaranteed foil · minted on Robinhood Chain</div>
 
-            {/* 3D pack — isolated so a WebGL/GLB failure can never blank the page. */}
+            {/* 3D pack via <model-viewer> (self-contained web component — no r3f, can't crash React). */}
             <div style={{ display: 'grid', placeItems: 'center', margin: '14px 0 20px', minHeight: 380 }}>
-              <PackErrorBoundary fallback={<StaticPack spinning={phase === 'minting'} />}>
-                <Suspense fallback={<StaticPack spinning={phase === 'minting'} loading />}>
-                  <Pack3D spinning={phase === 'minting'} />
-                </Suspense>
-              </PackErrorBoundary>
+              <Pack3D spinning={phase === 'minting'} />
             </div>
 
             <Button variant="primary" onClick={open} disabled={phase === 'minting'}
@@ -109,25 +103,47 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
   );
 }
 
-function PackModel() {
-  // The GLB is meshopt-compressed; args enable DRACO + Meshopt decoders in drei.
-  const { scene } = useGLTF('/booster-pack.glb?v=2', true, true);
-  return <primitive object={scene} />;
-}
+const ModelViewer = 'model-viewer' as any;
 
+/** 3D pack via Google's <model-viewer> web component. Shows the styled StaticPack
+ *  while the GLB loads and if the model/script fails — so it can never black-screen. */
 function Pack3D({ spinning }: { spinning?: boolean }) {
+  const ref = useRef<any>(null);
+  const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onLoad = () => setReady(true);
+    const onErr = () => setFailed(true);
+    el.addEventListener('load', onLoad);
+    el.addEventListener('error', onErr);
+    // If the custom element never upgrades (script blocked), fall back after a bit.
+    const t = setTimeout(() => { if (!el.loaded) setFailed(f => f || !(el as any).modelIsVisible); }, 8000);
+    return () => { el.removeEventListener('load', onLoad); el.removeEventListener('error', onErr); clearTimeout(t); };
+  }, []);
   return (
-    <Canvas camera={{ position: [0, 0, 3.4], fov: 42 }} dpr={[1, 2]} style={{ width: 340, height: 380 }}>
-      <ambientLight intensity={0.75} />
-      <directionalLight position={[4, 6, 5]} intensity={1.5} />
-      <directionalLight position={[-5, -1, -4]} intensity={0.55} color="#9d86ff" />
-      {/* No inner <Suspense>: the model's loading state bubbles to the DOM-level
-          <Suspense> so we can show the styled StaticPack while the GLB downloads. */}
-      <Bounds fit clip observe margin={1.15}>
-        <Center><PackModel /></Center>
-      </Bounds>
-      <OrbitControls enableZoom={false} enablePan={false} autoRotate autoRotateSpeed={spinning ? 9 : 1.8} />
-    </Canvas>
+    <div style={{ position: 'relative', width: 340, height: 380, display: 'grid', placeItems: 'center' }}>
+      {(!ready || failed) && (
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+          <StaticPack spinning={spinning} loading={!failed} />
+        </div>
+      )}
+      {!failed && (
+        <ModelViewer
+          ref={ref}
+          src="/booster-pack.glb?v=2"
+          camera-controls
+          auto-rotate
+          rotation-per-second={spinning ? '140deg' : '32deg'}
+          interaction-prompt="none"
+          disable-zoom
+          exposure="1.1"
+          shadow-intensity="0.6"
+          style={{ width: '100%', height: '100%', background: 'transparent', opacity: ready ? 1 : 0, transition: 'opacity .45s ease' }}
+        />
+      )}
+    </div>
   );
 }
 
@@ -151,13 +167,6 @@ function StaticPack({ spinning, loading }: { spinning?: boolean; loading?: boole
       </div>
     </div>
   );
-}
-
-class PackErrorBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError() { return { failed: true }; }
-  componentDidCatch(e: unknown) { console.warn('[boosters] 3D pack failed, using fallback:', e); }
-  render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
 function CardTile({ card, delay }: { card: RevealedCard; delay: number }) {
