@@ -1377,6 +1377,17 @@ function Landing({
         draggable={false}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', userSelect: 'none', zIndex: 0 }}
       />
+      {/* "Built on Robinhood" mark, centered just below the main title. */}
+      <img
+        src="/built-on-robinhood.png"
+        alt="Built on Robinhood"
+        draggable={false}
+        style={{
+          position: 'absolute', zIndex: 2, left: '50%', top: '54%', transform: 'translate(-50%,-50%)',
+          width: 'clamp(200px, 24vw, 340px)', height: 'auto', pointerEvents: 'none', userSelect: 'none',
+          filter: 'drop-shadow(0 2px 10px rgba(0,0,0,0.5))',
+        }}
+      />
       {/* Real menu column overlaid on the left. */}
       <nav style={{
         position: 'absolute', zIndex: 3,
