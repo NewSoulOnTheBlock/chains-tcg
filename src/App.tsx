@@ -8,6 +8,7 @@ import { Plaza } from './Plaza';
 import { ChainsTCG } from './Game';
 import { ChainsBoard } from './Board';
 import { CARDS, COLOR_META, COLORS, STARTER_DECKS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MAX_COPIES_NONBASIC, isBasicNode, type Color, type CardType, type CardDef, type DeckIssue, type DeckValidation } from './cards';
+import { ChainLogo } from './chain-logos';
 import {
   listProfilesApi, getProfileApi, getMyProfileApi, updateMyProfileApi, getMatchHistoryApi,
   formatRecord, type Profile,
@@ -2800,7 +2801,9 @@ function ChainChips({ value, onChange }: { value: Color | 'all'; onChange: (c: C
       <span style={{ alignSelf: 'center', fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: HUB.muted, marginRight: 4 }}>CHAIN</span>
       <HubChip label="ALL" selected={value === 'all'} onClick={() => onChange('all')} />
       {COLORS.map((c) => (
-        <HubChip key={c} label={COLOR_META[c].name.toUpperCase()} selected={value === c} onClick={() => onChange(c)} accent={COLOR_META[c].hex} />
+        /* Logo replaces the plain accent dot; decorative, the chip is labelled. */
+        <HubChip key={c} label={COLOR_META[c].name.toUpperCase()} selected={value === c} onClick={() => onChange(c)} accent={COLOR_META[c].hex}
+          leading={<ChainLogo color={c} size={14} />} />
       ))}
     </>
   );
@@ -2814,7 +2817,7 @@ function TypeChips({ value, onChange }: { value: 'all' | CardType; onChange: (t:
     </>
   );
 }
-function HubChip({ label, selected, onClick, accent }: { label: string; selected: boolean; onClick: () => void; accent?: string }) {
+function HubChip({ label, selected, onClick, accent, leading }: { label: string; selected: boolean; onClick: () => void; accent?: string; leading?: React.ReactNode }) {
   const col = accent ?? HUB.violet;
   return (
     <button onClick={onClick} aria-pressed={selected} className="hub-anim" style={{
@@ -2823,7 +2826,7 @@ function HubChip({ label, selected, onClick, accent }: { label: string; selected
       background: selected ? `${col}22` : HUB.surface, color: selected ? (accent ?? HUB.text) : HUB.muted,
       border: `1px solid ${selected ? col : HUB.border}`, transition: 'all .15s ease',
     }}>
-      {accent && <span style={{ width: 8, height: 8, borderRadius: 2, background: accent }} />}
+      {leading ?? (accent && <span style={{ width: 8, height: 8, borderRadius: 2, background: accent }} />)}
       {label}
     </button>
   );
@@ -2860,7 +2863,8 @@ const HubCardTile = React.memo(function HubCardTile({ def, inDeck, cap, deckFull
         {/* real TCG proportion art */}
         <div style={{ position: 'relative', aspectRatio: '3 / 4', background: `linear-gradient(160deg, ${meta.hex}, #0a1020)`, display: 'grid', placeItems: 'center' }}>
           {def.image ? <img src={def.image} alt={def.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            : <span style={{ fontSize: 34, fontWeight: 900, color: meta.ink, opacity: 0.85 }}>{(meta as any).glyph ?? meta.name[0]}</span>}
+            /* Decorative — the tile footer below already names the chain. */
+            : <ChainLogo color={def.color} size={64} />}
           {cost != null && <span style={{ position: 'absolute', top: 6, left: 6, minWidth: 22, height: 22, padding: '0 6px', borderRadius: 8,
             background: 'rgba(0,0,0,0.72)', color: '#fff', fontSize: 12, fontWeight: 900, display: 'grid', placeItems: 'center' }}>{cost}</span>}
           <span style={{ position: 'absolute', top: 6, right: 6, padding: '2px 7px', borderRadius: 999, fontSize: 9, fontWeight: 800,
@@ -3303,7 +3307,9 @@ function LibraryRow({ def, inDeck, cap, deckFull, onAdd, owned, ownedHint }: {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, background: HUB.surface,
         border: `1px solid ${inDeck > 0 ? meta.hex + '77' : HUB.border}` }}>
         <div style={{ width: 34, height: 44, borderRadius: 6, overflow: 'hidden', background: `linear-gradient(160deg, ${meta.hex}, #0a1020)`, flex: 'none', display: 'grid', placeItems: 'center' }}>
-          {def.image ? <img src={def.image} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 12, fontWeight: 900, color: meta.ink }}>{(meta as any).glyph}</span>}
+          {/* This row has no chain name in text (only a colour dot), so the logo
+              is the sole carrier of chain identity and takes a real alt. */}
+          {def.image ? <img src={def.image} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <ChainLogo color={def.color} size={26} alt={meta.name} />}
         </div>
         {cost != null && <span style={{ minWidth: 22, height: 22, borderRadius: 6, background: HUB.raised, border: `1px solid ${HUB.border}`, display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 800, flex: 'none' }}>{cost}</span>}
         <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{def.name}</span>
@@ -4228,7 +4234,8 @@ function DeckBuilderCard({ def, count, cap, totalFull, onPlus, onMinus }: {
           {def.image
             ? <img src={def.image} alt={def.name} loading="lazy"
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            : <span style={{ fontSize: 36, color: meta.ink, fontWeight: 900, opacity: 0.8 }}>{(meta as any).glyph ?? meta.name[0]}</span>}
+            /* Decorative — the card footer below already names the chain. */
+            : <ChainLogo color={def.color as Color} size={64} />}
           {/* Type badge */}
           <span style={{
             position: 'absolute', top: 6, left: 6,
@@ -4842,7 +4849,10 @@ function StarterDeckPicker({ busy, onPick }: { busy: boolean; onPick: (c: Color)
                 background: 'rgba(10,15,25,0.75)', color: meta.hex,
                 border: `1px solid ${meta.hex}77`, fontFamily: PROFILE_FONT,
                 fontWeight: 800, fontSize: 12.5, letterSpacing: 0.3, opacity: busy ? 0.6 : 1,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
               }}>
+              {/* Decorative — the chain name is the button's own label. */}
+              <ChainLogo color={c} size={22} />
               {meta.name}
               <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, marginTop: 3, fontWeight: 600 }}>
                 {DECK_SIZE} cards

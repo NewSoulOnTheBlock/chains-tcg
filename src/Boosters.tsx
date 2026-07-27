@@ -9,6 +9,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { color as C, font as F, radius as R, shadow as SH, surface as SURF, edge as EDGE, depth as DEPTH } from './theme';
 import { CARDS, COLOR_META } from './cards';
+import { ChainLogo } from './chain-logos';
 import {
   mintPack, resumePack, packCostEstimate, getEthBalance,
   getConnectedAccount, getWalletChainId, switchToRobinhood,
@@ -955,7 +956,8 @@ function OverlayBtn({ children, onClick, variant, subtle }: { children: React.Re
 function RevealCard({ card, flipped, focused, burst, arc, onClick, onFocus }: {
   card: RevealedCard; flipped: boolean; focused: boolean; burst: boolean; arc: number; onClick: () => void; onFocus: () => void;
 }) {
-  const chainHex = (CARDS[card.id]?.color && COLOR_META[CARDS[card.id].color]?.hex) || C.accent;
+  const chainColor = CARDS[card.id]?.color;
+  const chainHex = (chainColor && COLOR_META[chainColor]?.hex) || C.accent;
   return (
     <div
       role="button" tabIndex={0}
@@ -983,7 +985,11 @@ function RevealCard({ card, flipped, focused, burst, arc, onClick, onFocus }: {
             background: 'linear-gradient(100deg, transparent, rgba(255,255,255,0.5), transparent)', animation: 'ova-sheen 2.2s linear infinite' }} />}
           {card.image
             ? <img src={card.image} alt={card.name} style={{ width: '100%', height: '64%', objectFit: 'contain', zIndex: 1, filter: 'drop-shadow(0 4px 10px rgba(0,0,0,0.5))' }} />
-            : <div style={{ width: '66%', height: '60%', borderRadius: 10, background: `radial-gradient(circle at 50% 40%, ${chainHex}, transparent 70%)`, zIndex: 1 }} />}
+            /* Nothing else on this reveal names the chain, so the logo carries
+               it and takes a real alt. Unknown ids keep the old colour blob. */
+            : chainColor
+              ? <ChainLogo color={chainColor} size={72} alt={COLOR_META[chainColor].name} style={{ zIndex: 1 }} />
+              : <div style={{ width: '66%', height: '60%', borderRadius: 10, background: `radial-gradient(circle at 50% 40%, ${chainHex}, transparent 70%)`, zIndex: 1 }} />}
           <div style={{ fontSize: 11, fontWeight: 700, color: '#fff', textAlign: 'center', lineHeight: 1.15, zIndex: 1 }}>{card.name}</div>
           {card.foil && <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.2em', color: '#ffe9a8', zIndex: 1, display: 'flex', alignItems: 'center', gap: 5 }}><Star size={9} /> FOIL</div>}
         </div>

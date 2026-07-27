@@ -4,6 +4,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { CARDS, COLOR_META, COLORS, templateFor, type Color, type CardDef } from './cards';
+import { ChainLogo } from './chain-logos';
 
 const PREVIEW_W = 280;
 const PREVIEW_H = 400;
@@ -132,15 +133,20 @@ export function TemplatedPreview({ def, tpl }: { def: CardDef; tpl: { url: strin
             onDragStart={e => e.preventDefault()}
             onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
             style={{ width: '100%', height: '100%', objectFit: 'cover', WebkitUserDrag: 'none', userSelect: 'none', pointerEvents: 'none' } as React.CSSProperties} />
-        ) : (
+        ) : tpl.glyph && tpl.glyph !== meta.glyph ? (
+          // Card-specific glyph override (MACHINE / AURA) — must keep winning
+          // over the chain logo, so this branch stays exactly as it was.
           <div style={{
             fontWeight: 900, color: meta.ink,
-            fontSize: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 32 : 56,
-            letterSpacing: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 2 : 4,
+            fontSize: tpl.glyph.length > 4 ? 32 : 56,
+            letterSpacing: tpl.glyph.length > 4 ? 2 : 4,
             textShadow: '0 3px 10px #000',
           }}>
-            {tpl.glyph ?? meta.glyph ?? meta.name}
+            {tpl.glyph}
           </div>
+        ) : (
+          // Decorative: the type bar below already reads "<type> · <chain>".
+          <ChainLogo color={def.color} size={84} />
         )}
       </div>
 

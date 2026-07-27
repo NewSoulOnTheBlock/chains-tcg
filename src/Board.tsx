@@ -6,6 +6,7 @@ import {
   CARDS, COLOR_META, COLORS, templateFor,
   type Color, type CardDef,
 } from './cards';
+import { ChainLogo } from './chain-logos';
 import type { GState, Instance } from './Game';
 import { mulliganDrawCount, MULLIGAN_FLOOR, MULLIGAN_INITIAL_HAND } from './Game';
 import { getProfileApi, formatRecord, type Profile } from './profiles';
@@ -510,14 +511,22 @@ function TemplatedCardFaceContent({ def, instance, footer, tpl }: { def: CardDef
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         overflow: 'hidden',
       }}>
-        <span style={{
-          position: 'absolute', inset: 0,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: meta.ink, fontWeight: 900,
-          fontSize: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 11 : 18,
-          letterSpacing: (tpl.glyph ?? meta.glyph ?? meta.name).length > 4 ? 1 : 2,
-          textShadow: '0 2px 6px #000',
-        }}>{tpl.glyph ?? meta.glyph ?? meta.name}</span>
+        {tpl.glyph && tpl.glyph !== meta.glyph ? (
+          // Card-specific glyph override (MACHINE / AURA) — unchanged.
+          <span style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: meta.ink, fontWeight: 900,
+            fontSize: tpl.glyph.length > 4 ? 11 : 18,
+            letterSpacing: tpl.glyph.length > 4 ? 1 : 2,
+            textShadow: '0 2px 6px #000',
+          }}>{tpl.glyph}</span>
+        ) : (
+          <span style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}><ChainLogo color={def.color} size={40} /></span>
+        )}
         {def.image && (
           <img src={def.image} alt="" loading="lazy"
             onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
@@ -1001,7 +1010,11 @@ export function ChainsBoard(props: Props) {
                     '--plate-textshadow': '0 1px 1px rgba(0,0,0,0.35)',
                   } as Vars),
                   padding: '11px 18px', fontSize: 13,
-                }}>{meta.name}</button>
+                }}>
+                  {/* Decorative — the chain name is the button's own label. */}
+                  <ChainLogo color={c} size={18} />
+                  {meta.name}
+                </button>
               );
             })}
           </div>
