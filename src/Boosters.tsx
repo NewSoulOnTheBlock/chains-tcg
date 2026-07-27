@@ -110,7 +110,8 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
 }
 
 function PackModel() {
-  const { scene } = useGLTF('/booster-pack.glb');
+  // The GLB is meshopt-compressed; args enable DRACO + Meshopt decoders in drei.
+  const { scene } = useGLTF('/booster-pack.glb?v=2', true, true);
   return <primitive object={scene} />;
 }
 
