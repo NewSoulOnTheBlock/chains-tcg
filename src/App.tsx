@@ -1435,7 +1435,7 @@ function Landing({
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#07060f', fontFamily: F.body, color: C.textHi }}>
       {/* Clean arena artwork fills the screen (cover). */}
       <img
-        src="/hub-bg.png"
+        src="/hub-bg.png?v=2"
         alt=""
         draggable={false}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', userSelect: 'none', zIndex: 0 }}
