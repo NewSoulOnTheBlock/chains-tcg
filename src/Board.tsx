@@ -640,6 +640,18 @@ export function ChainsBoard(props: Props) {
 
   // ── Render ────────────────────────────────────────────────────────────────
   const [showRules, setShowRules] = useState(false);
+
+  // Esc cancels a card/target selection; right-click cancels an active target pick.
+  useEffect(() => {
+    if (!targetMode && selectedHand == null) return;
+    const cancel = () => { setSelectedHand(null); setTargetMode(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') cancel(); };
+    const onCtx = (e: MouseEvent) => { if (targetMode) { e.preventDefault(); cancel(); } };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('contextmenu', onCtx);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('contextmenu', onCtx); };
+  }, [targetMode, selectedHand]);
+
   return (
     <div style={{ fontFamily: 'system-ui, sans-serif', padding: mobile ? 6 : 8, color: '#eee', background: '#0a0a10', minHeight: '100vh', height: mobile ? 'auto' : '100dvh', display: 'flex', flexDirection: 'column', overflow: mobile ? 'visible' : 'hidden' }}>
       {/* Compact top status bar */}
@@ -660,6 +672,35 @@ export function ChainsBoard(props: Props) {
         canForceEnd={!myTurn && !ctx.gameover && ctx.phase === 'play'}
         onForceEnd={() => moves.forceEndTurn()}
       />
+
+      {/* Selected-card targeting instruction (desktop). */}
+      {targetMode && !mobile && (
+        <div style={{
+          position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 120,
+          display: 'flex', alignItems: 'center', gap: 12, padding: '8px 18px', borderRadius: 10,
+          background: 'rgba(12,18,32,0.94)', border: '1px solid #C45CFF', color: '#F4F2EA', fontWeight: 700, fontSize: 14,
+          boxShadow: '0 0 22px rgba(196,92,255,0.5)',
+        }} role="status">
+          <span>🎯 Choose a target</span>
+          <button onClick={() => { setSelectedHand(null); setTargetMode(null); }}
+            style={{ background: 'none', border: '1px solid rgba(196,92,255,0.5)', color: '#C45CFF', borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+            Cancel · Esc
+          </button>
+        </div>
+      )}
+
+      {/* Opponent connection status. */}
+      {!isSolo && matchData && matchData.find(p => String(p.id) === oppId)?.isConnected === false && (
+        <div role="status" style={{
+          position: 'fixed', top: targetMode && !mobile ? 108 : 64, left: '50%', transform: 'translateX(-50%)', zIndex: 110,
+          padding: '7px 16px', borderRadius: 10, background: 'rgba(228,95,118,0.14)', border: '1px solid #E45F76',
+          color: '#ffc9d3', fontSize: 13, fontWeight: 700, boxShadow: '0 0 18px rgba(228,95,118,0.35)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: '#E45F76', animation: 'pulse-dot 1.2s ease-in-out infinite' }} />
+          {oppName} disconnected — waiting to reconnect…
+        </div>
+      )}
 
       {/* Floating Rules drawer */}
       {showRules && <RulesDrawer onClose={() => setShowRules(false)} />}
