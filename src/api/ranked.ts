@@ -381,10 +381,26 @@ export async function getProfile(displayName: string, signal?: AbortSignal): Pro
   return profile;
 }
 
-/** `GET /games/ranked/me` — AUTH. The caller's own standing. */
+/**
+ * `GET /games/ranked/me` — AUTH. The caller's own standing.
+ *
+ * This route does NOT wrap its body the way its sibling `/profiles/:name` does.
+ * Verified against production: `/profiles/:name` answers `{ profile: {...} }`,
+ * while `/me` spreads the same view at the top level, `{ profileId, ...view }`.
+ * Reading `body.profile` here therefore yielded `undefined`, which
+ * `standingOf()` maps to "no data", which the badge renders as
+ * RANK UNAVAILABLE — for a player the server was describing perfectly well.
+ *
+ * Accept BOTH shapes rather than picking one. The mismatch is a server-side
+ * inconsistency worth normalising, but a client that only understands today's
+ * shape would break on the day it is fixed.
+ */
 export async function getMe(signal?: AbortSignal): Promise<OwnRankedProfile> {
-  const { profile } = await get<{ profile: OwnRankedProfile }>('/games/ranked/me', { signal });
-  return profile;
+  const body = await get<{ profile?: OwnRankedProfile } & Partial<OwnRankedProfile>>(
+    '/games/ranked/me',
+    { signal },
+  );
+  return (body.profile ?? body) as OwnRankedProfile;
 }
 
 /**
