@@ -8,8 +8,13 @@ import {
   COLORS,
   MULLIGAN_FLOOR,
   MULLIGAN_INITIAL_HAND,
+  derivePrimaryColor,
+  validateDeck,
   type Color,
 } from "@chains/game-core";
+import { useMemo } from "react";
+import { getActiveDeck } from "@/lib/decks";
+import { useHydrated } from "@/hooks/useHydrated";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,20 +34,65 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ScrollText } from "lucide-react";
 import { GameCard } from "./GameCard";
 
-/** Phase 'pick' — full-screen chain color picker (5 tiles). */
+/**
+ * Phase 'pick' — full-screen chain picker: 5 starter tiles, plus a gold
+ * "Your Deck" tile when a valid active custom deck is stored locally
+ * (chains:activeDeck — see /decks). Starter tiles call onPick(color);
+ * the custom tile calls onPick(derivedColor, cards) so the caller can
+ * forward the deck list to the chooseColor move's customDeck argument.
+ */
 export function ColorPickOverlay({
   waiting,
   onPick,
 }: {
   /** True when I already picked and the opponent hasn't. */
   waiting: boolean;
-  onPick: (c: Color) => void;
+  onPick: (c: Color, customDeck?: string[]) => void;
 }) {
+  const hydrated = useHydrated();
+  // Active custom deck (only offered when it passes full deck validation).
+  const activeDeck = useMemo(() => {
+    if (!hydrated) return null;
+    const stored = getActiveDeck();
+    if (!stored || !validateDeck(stored.cards).ok) return null;
+    return { ...stored, color: derivePrimaryColor(stored.cards) };
+  }, [hydrated]);
+
   return (
     <div className="fixed inset-0 z-40 bg-background/95 backdrop-blur flex flex-col items-center justify-center gap-6 p-6">
       <h2 className="text-xl font-bold tracking-wide">
         {waiting ? "Waiting for opponent…" : "Choose your chain"}
       </h2>
+      {!waiting && activeDeck && (
+        <button
+          type="button"
+          onClick={() => onPick(activeDeck.color, activeDeck.cards)}
+          className="w-full max-w-2xl rounded-xl border p-4 flex items-center gap-3 transition-transform active:scale-[0.98] hover:-translate-y-0.5 ring-2 ring-amber-400 shadow-[0_0_16px_rgba(251,191,36,0.4)]"
+          style={{
+            borderColor: COLOR_META[activeDeck.color].hex,
+            background: `linear-gradient(160deg, ${COLOR_META[activeDeck.color].hex}2e, #0d0d16)`,
+          }}
+        >
+          <span
+            className="w-12 h-12 shrink-0 rounded-full flex items-center justify-center font-black text-xs"
+            style={{
+              backgroundColor: COLOR_META[activeDeck.color].hex,
+              color: COLOR_META[activeDeck.color].ink,
+            }}
+          >
+            {COLOR_META[activeDeck.color].glyph}
+          </span>
+          <span className="min-w-0 text-left">
+            <span className="block text-[10px] uppercase tracking-widest text-amber-400 font-bold">
+              Your Deck
+            </span>
+            <span className="block font-semibold truncate">{activeDeck.name}</span>
+          </span>
+          <span className="ml-auto text-xs text-muted-foreground shrink-0">
+            {activeDeck.cards.length} cards
+          </span>
+        </button>
+      )}
       {!waiting && (
         <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 w-full max-w-2xl">
           {COLORS.map((c) => {

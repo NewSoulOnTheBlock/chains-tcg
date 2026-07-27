@@ -7,8 +7,16 @@ CREATE TABLE IF NOT EXISTS profiles (
   name        text NOT NULL,
   wins        int NOT NULL DEFAULT 0,
   losses      int NOT NULL DEFAULT 0,
+  avatar_url  text,
+  bio         text,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- Columns added after the first release — kept here (and mirrored by the
+-- profile service's startup ensure-schema step) so existing volumes pick
+-- them up without a re-init.
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_url text;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS bio text;
 
 -- Case-insensitive uniqueness on name ("Alice" and "alice" are one profile).
 CREATE UNIQUE INDEX IF NOT EXISTS profiles_name_lower_idx ON profiles (lower(name));

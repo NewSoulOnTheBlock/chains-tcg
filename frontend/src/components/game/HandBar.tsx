@@ -2,6 +2,7 @@
 
 import { CARDS, type PlayerState } from "@chains/game-core";
 import { canPlayFromHand } from "@/lib/game";
+import { Inspectable } from "./CardInspect";
 import { GameCard } from "./GameCard";
 
 /** Your hand: horizontally scrollable card fan pinned to the bottom. */
@@ -27,14 +28,15 @@ export function HandBar({
           if (!def) return null;
           const affordable = isMyTurn && canPlayFromHand(player, def);
           return (
-            <GameCard
-              key={`${defId}-${i}`}
-              def={def}
-              size="md"
-              dimmed={!affordable}
-              onClick={() => onSelect(i)}
-              className="hover:-translate-y-2"
-            />
+            <Inspectable key={`${defId}-${i}`} def={def}>
+              <GameCard
+                def={def}
+                size="md"
+                dimmed={!affordable}
+                onClick={() => onSelect(i)}
+                className="hover:-translate-y-2"
+              />
+            </Inspectable>
           );
         })}
       </div>

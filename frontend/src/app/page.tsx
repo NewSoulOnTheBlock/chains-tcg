@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { COLOR_META, COLORS } from "@chains/game-core";
 import { Button } from "@/components/ui/button";
-import { Bot, Swords, LayoutGrid, Layers, Trophy, UserRound } from "lucide-react";
+import { BookOpen, Bot, Swords, LayoutGrid, Layers, Trophy, UserRound } from "lucide-react";
 import { SceneBackground } from "@/components/SceneBackground";
 import {
   ProfileNameDialog,
@@ -75,9 +75,21 @@ export default function LandingPage() {
             </Link>
           </Button>
         </div>
-        <Button asChild variant="outline" className="h-11 bg-background/50 backdrop-blur-sm">
-          <Link href="/leaderboard">
-            <Trophy className="size-4" /> Leaderboard
+        <div className="grid grid-cols-2 gap-3">
+          <Button asChild variant="outline" className="h-11 bg-background/50 backdrop-blur-sm">
+            <Link href="/leaderboard">
+              <Trophy className="size-4" /> Leaderboard
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="h-11 bg-background/50 backdrop-blur-sm">
+            <Link href="/profile">
+              <UserRound className="size-4" /> Profile
+            </Link>
+          </Button>
+        </div>
+        <Button asChild variant="ghost" className="h-10 text-muted-foreground">
+          <Link href="/rules">
+            <BookOpen className="size-4" /> How to play
           </Link>
         </Button>
       </div>

@@ -96,8 +96,10 @@ CORS is handled by the upstream services; nginx adds no CORS headers.
 
 | Method + path | Description |
 | --- | --- |
-| `POST /api/profiles` `{name}` | Upsert profile by name (case-insensitive) → `{id,name,wins,losses}` |
+| `POST /api/profiles` `{name}` | Upsert profile by name (case-insensitive) → `{id,name,wins,losses,avatarUrl,bio}` |
 | `GET /api/profiles/:name` | Fetch profile, 404 if missing |
+| `PATCH /api/profiles/:name` `{avatarUrl?, bio?}` | Update avatar URL and/or bio (empty string or null clears) → full profile |
+| `GET /api/profiles/:name/matches?limit=20` | Recent matches, newest first → `[{id, opponent, result: 'win'\|'loss', mode, createdAt}]` (limit clamped to 1–100) |
 | `GET /api/profiles/:name/decks` | List the profile's decks |
 | `POST /api/profiles/:name/decks` `{name, cards: string[]}` | Create deck; validated with `validateDeck` (400 + `issues` if illegal) |
 | `PUT /api/decks/:id` `{name?, cards?}` | Rename and/or replace cards (cards re-validated) |

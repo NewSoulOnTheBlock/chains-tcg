@@ -25,6 +25,7 @@ import {
   type TargetKind,
 } from "@/lib/game";
 import { BattlefieldRow, type BfItem } from "./BattlefieldRow";
+import { CardInspectCaption, CardInspectProvider } from "./CardInspect";
 import { CombatControls } from "./CombatControls";
 import { GameCard } from "./GameCard";
 import { HandBar } from "./HandBar";
@@ -220,7 +221,7 @@ export function Board({ G, ctx, moves, playerID, matchData, onExit }: BoardProps
     return (
       <ColorPickOverlay
         waiting={!me.needsColorPick}
-        onPick={(c) => moves.chooseColor(c)}
+        onPick={(c, deck) => moves.chooseColor(c, deck)}
       />
     );
   }
@@ -245,7 +246,12 @@ export function Board({ G, ctx, moves, playerID, matchData, onExit }: BoardProps
   const previewDef: CardDef | undefined =
     previewIndex != null ? CARDS[me.hand[previewIndex]] : undefined;
 
+  // Suppress hover/long-press card previews while clicks mean something else
+  // (choosing targets, declaring attackers, assigning blockers).
+  const inspectSuppressed = !!targeting || attackMode || amBlocking;
+
   return (
+    <CardInspectProvider suppressed={inspectSuppressed}>
     <div className="fixed inset-0 flex flex-col bg-background overflow-hidden">
       {/* Opponent HUD */}
       <PlayerHUD
@@ -398,8 +404,9 @@ export function Board({ G, ctx, moves, playerID, matchData, onExit }: BoardProps
               <DrawerHeader className="items-center">
                 <DrawerTitle>{previewDef.name}</DrawerTitle>
               </DrawerHeader>
-              <div className="flex justify-center pb-2">
+              <div className="flex flex-col items-center gap-1.5 pb-2 overflow-y-auto min-h-0">
                 <GameCard def={previewDef} size="lg" />
+                <CardInspectCaption def={previewDef} />
               </div>
               <DrawerFooter className="pt-0">
                 <Button
@@ -421,5 +428,6 @@ export function Board({ G, ctx, moves, playerID, matchData, onExit }: BoardProps
 
       <GameOverDialog gameover={ctx.gameover} playerID={playerID} onExit={onExit} />
     </div>
+    </CardInspectProvider>
   );
 }

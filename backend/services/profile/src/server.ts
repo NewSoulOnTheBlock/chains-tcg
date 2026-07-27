@@ -14,10 +14,18 @@ const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json());
 
-type Profile = { id: number; name: string; wins: number; losses: number };
+type Profile = {
+  id: number;
+  name: string;
+  wins: number;
+  losses: number;
+  avatarUrl: string | null;
+  bio: string | null;
+};
 type Deck = { id: number; profile_id: number; name: string; cards: string[] };
 
-const PROFILE_COLS = 'id, name, wins, losses';
+// avatar_url/bio are aliased so every profile response carries camelCase keys.
+const PROFILE_COLS = 'id, name, wins, losses, avatar_url AS "avatarUrl", bio';
 const DECK_COLS = 'id, profile_id, name, cards, created_at, updated_at';
 
 async function findProfile(name: string): Promise<Profile | null> {
@@ -74,6 +82,59 @@ app.get('/api/profiles/:name', wrap(async (req, res) => {
   const profile = await findProfile(req.params.name);
   if (!profile) return res.status(404).json({ error: 'profile not found' });
   res.json(profile);
+}));
+
+app.patch('/api/profiles/:name', wrap(async (req, res) => {
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  if (req.body?.avatarUrl !== undefined) {
+    const avatarUrl =
+      req.body.avatarUrl === null ? '' : String(req.body.avatarUrl).trim();
+    if (avatarUrl.length > 1024) {
+      return res.status(400).json({ error: 'avatarUrl too long (max 1024)' });
+    }
+    values.push(avatarUrl || null);
+    sets.push(`avatar_url = $${values.length}`);
+  }
+  if (req.body?.bio !== undefined) {
+    const bio = req.body.bio === null ? '' : String(req.body.bio).trim();
+    if (bio.length > 500) {
+      return res.status(400).json({ error: 'bio too long (max 500)' });
+    }
+    values.push(bio || null);
+    sets.push(`bio = $${values.length}`);
+  }
+  if (sets.length === 0) return res.status(400).json({ error: 'nothing to update' });
+  values.push(req.params.name);
+  const r = await pool.query(
+    `UPDATE profiles SET ${sets.join(', ')}
+     WHERE lower(name) = lower($${values.length}) RETURNING ${PROFILE_COLS}`,
+    values,
+  );
+  if (r.rowCount === 0) return res.status(404).json({ error: 'profile not found' });
+  res.json(r.rows[0] as Profile);
+}));
+
+// Recent matches for a profile, newest first, opponent resolved to a name.
+app.get('/api/profiles/:name/matches', wrap(async (req, res) => {
+  const profile = await findProfile(req.params.name);
+  if (!profile) return res.status(404).json({ error: 'profile not found' });
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+  const r = await pool.query(
+    `SELECT m.id,
+            COALESCE(op.name, 'Unknown') AS opponent,
+            CASE WHEN m.winner_id = $1 THEN 'win' ELSE 'loss' END AS result,
+            m.mode,
+            m.created_at AS "createdAt"
+     FROM matches m
+     LEFT JOIN profiles op
+       ON op.id = CASE WHEN m.winner_id = $1 THEN m.loser_id ELSE m.winner_id END
+     WHERE m.winner_id = $1 OR m.loser_id = $1
+     ORDER BY m.created_at DESC, m.id DESC
+     LIMIT $2`,
+    [profile.id, limit],
+  );
+  res.json(r.rows);
 }));
 
 // ── Decks ───────────────────────────────────────────────────────────────────
@@ -214,6 +275,21 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: 'internal error' });
 });
 
-app.listen(PORT, () => {
-  console.log(`[profile] Chains TCG profile service listening on :${PORT}`);
-});
+// ── Startup ─────────────────────────────────────────────────────────────────
+// Idempotent schema top-up: the postgres volume may predate columns that
+// init.sql now declares (init.sql only runs on first boot of the volume).
+async function ensureSchema() {
+  await pool.query('ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_url text');
+  await pool.query('ALTER TABLE profiles ADD COLUMN IF NOT EXISTS bio text');
+}
+
+ensureSchema()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`[profile] Chains TCG profile service listening on :${PORT}`);
+    });
+  })
+  .catch(err => {
+    console.error('[profile] ensure-schema failed', err);
+    process.exit(1);
+  });

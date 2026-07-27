@@ -15,6 +15,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft } from "lucide-react";
+import {
+  CardInspectCaption,
+  CardInspectProvider,
+  Inspectable,
+} from "@/components/game/CardInspect";
 import { GameCard } from "@/components/game/GameCard";
 import { SceneBackground } from "@/components/SceneBackground";
 
@@ -87,26 +92,35 @@ export default function CardsPage() {
         </TabsList>
       </Tabs>
 
-      {/* Grid */}
-      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3 justify-items-center">
-        {cards.map((def) => (
-          <GameCard
-            key={def.id}
-            def={def}
-            size="md"
-            onClick={() => setSelected(def)}
-            className="w-full max-w-28 h-auto aspect-[5/7]"
-          />
-        ))}
-      </div>
+      {/* Grid — desktop hover shows the CardInspect preview; tap opens the dialog */}
+      <CardInspectProvider>
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3 justify-items-center">
+          {cards.map((def) => (
+            <Inspectable
+              key={def.id}
+              def={def}
+              longPress={false}
+              className="w-full max-w-28"
+            >
+              <GameCard
+                def={def}
+                size="md"
+                onClick={() => setSelected(def)}
+                className="w-full h-auto aspect-[5/7]"
+              />
+            </Inspectable>
+          ))}
+        </div>
+      </CardInspectProvider>
 
       {/* Large view */}
       <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
-        <DialogContent className="w-fit max-w-[90vw] p-4">
+        <DialogContent className="w-fit max-w-[90vw] max-h-[90vh] overflow-y-auto p-4">
           {selected && (
             <>
               <DialogTitle className="sr-only">{selected.name}</DialogTitle>
               <GameCard def={selected} size="lg" className="max-w-full" />
+              <CardInspectCaption def={selected} className="mt-1.5" />
             </>
           )}
         </DialogContent>
