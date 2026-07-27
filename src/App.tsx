@@ -1354,53 +1354,55 @@ function Landing({
 }: { myName: string; onPlay: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
   const [notice, setNotice] = useState('');
   void myName;
-  // Left-menu hotspots overlaid on the painted menu, positioned as % of the
-  // 1683x935 artwork so they stay glued to the buttons at any window size.
-  const items: { label: string; top: number; onClick: () => void }[] = [
-    { label: 'Play · Ranked',   top: 57.8, onClick: onPlay },
-    { label: 'Play · Unranked', top: 61.4, onClick: onPlay },
-    { label: 'Collection',      top: 65.0, onClick: onBoosters },
-    { label: 'Masters',         top: 68.6, onClick: onMasterquest },
-    { label: 'Profile',         top: 72.2, onClick: onProfile },
-    { label: 'Rules',           top: 75.8, onClick: onRules },
-    { label: 'Settings',        top: 79.4, onClick: () => setNotice('Settings — coming soon.') },
-    { label: 'Exit',            top: 83.0, onClick: onLogout },
+  const ico = (p: React.ReactNode) => (
+    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>{p}</svg>
+  );
+  const items: { label: string; icon: React.ReactNode; onClick: () => void; primary?: boolean }[] = [
+    { label: 'Play · Ranked',   primary: true, icon: ico(<polygon points="6 4 20 12 6 20 6 4" />), onClick: onPlay },
+    { label: 'Play · Unranked', icon: ico(<><path d="M14.5 17.5 3 6V3h3l11.5 11.5" /><path d="m13 19 6-6" /><path d="m16 16 5 5" /></>), onClick: onPlay },
+    { label: 'Collection',      icon: ico(<><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z" /><path d="m3 8 9 5 9-5" /><path d="M12 13v8" /></>), onClick: onBoosters },
+    { label: 'Masters',         icon: ico(<><path d="M6 9a6 6 0 0 0 12 0V4H6Z" /><path d="M6 5H3v2a3 3 0 0 0 3 3" /><path d="M18 5h3v2a3 3 0 0 1-3 3" /><path d="M12 15v4" /><path d="M8 21h8" /></>), onClick: onMasterquest },
+    { label: 'Profile',         icon: ico(<><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>), onClick: onProfile },
+    { label: 'Rules',           icon: ico(<><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2Z" /><path d="M4 19a2 2 0 0 1 2-2h13" /></>), onClick: onRules },
+    { label: 'Settings',        icon: ico(<><circle cx="12" cy="12" r="3.2" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" /></>), onClick: () => setNotice('Settings — coming soon.') },
+    { label: 'Exit',            icon: ico(<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></>), onClick: onLogout },
   ];
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#07060f', fontFamily: F.body, color: C.textHi }}>
-      {/* Full-screen cover "stage" sized to the image's cover box and anchored to
-          the LEFT edge so the left menu is never cropped; overflow spills off the
-          right/edges. Hotspots are % of this stage, so they stay locked to the art. */}
-      <div style={{
-        position: 'absolute', top: '50%', left: 0, transform: 'translateY(-50%)',
-        width: 'max(100vw, calc(100dvh * 1683 / 935))',
-        height: 'max(100dvh, calc(100vw * 935 / 1683))',
-        lineHeight: 0,
+      {/* Clean arena artwork fills the screen (cover). */}
+      <img
+        src="/hub-bg.png"
+        alt=""
+        draggable={false}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', userSelect: 'none', zIndex: 0 }}
+      />
+      {/* Real menu column overlaid on the left. */}
+      <nav style={{
+        position: 'absolute', zIndex: 3,
+        left: 'clamp(16px, 4vw, 72px)', top: '50%', transform: 'translateY(-34%)',
+        display: 'flex', flexDirection: 'column', gap: 8, width: 236, maxWidth: 'calc(100vw - 32px)',
       }}>
-        <img
-          src="/hub-splash.png"
-          alt="On-Chain Virtual Arena — main menu"
-          draggable={false}
-          style={{ display: 'block', width: '100%', height: '100%', userSelect: 'none' }}
-        />
         {items.map(it => (
           <button
             key={it.label}
-            className="ova-hot"
-            title={it.label}
+            className={`ova-menu-item ${it.primary ? 'ova-menu-item--primary' : ''}`}
             onClick={it.onClick}
-            style={{ left: '3.3%', top: `${it.top}%`, width: '8.4%', height: '3.4%', borderRadius: 8 }}
-          />
+            title={it.label}
+          >
+            <span className="ova-menu-ico">{it.icon}</span>
+            <span>{it.label}</span>
+          </button>
         ))}
-        {notice && (
-          <div style={{
-            position: 'absolute', left: '3.3%', top: '87%', zIndex: 5,
-            fontSize: 12, color: '#c9a94a', background: 'rgba(14,12,30,0.92)',
-            border: '1px solid rgba(150,120,255,0.35)', borderRadius: 8, padding: '6px 10px',
-            backdropFilter: 'blur(8px)',
-          }}>{notice}</div>
-        )}
-      </div>
+      </nav>
+      {notice && (
+        <div style={{
+          position: 'absolute', zIndex: 4, left: 'clamp(16px, 4vw, 72px)', bottom: '6vh',
+          fontSize: 12, color: '#c9a94a', background: 'rgba(14,12,30,0.92)',
+          border: '1px solid rgba(150,120,255,0.35)', borderRadius: 8, padding: '7px 12px',
+          backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        }}>{notice}</div>
+      )}
     </div>
   );
 }

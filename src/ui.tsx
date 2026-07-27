@@ -58,6 +58,21 @@ const CSS = `
 .ova-hot:hover:not([disabled]) { background: rgba(160,120,255,0.14); border-color: rgba(160,120,255,0.6); box-shadow: 0 0 26px rgba(124,92,255,0.45); }
 .ova-hot:focus-visible { outline:2px solid ${color.accentHi}; outline-offset:2px; }
 .ova-hot[disabled] { cursor: wait; }
+
+/* Real overlaid menu item (used over a clean splash background). */
+.ova-menu-item { display:flex; align-items:center; gap:12px; width:100%; text-align:left; cursor:pointer;
+  padding:11px 14px; border-radius:10px; font-family:${font.body}; font-weight:700; font-size:13.5px;
+  letter-spacing:0.04em; color:${color.textHi}; background:rgba(12,10,26,0.72); border:1px solid ${color.border};
+  backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+  transition: background ${motion.fast}, border-color ${motion.fast}, transform ${motion.fast}, box-shadow ${motion.fast}; }
+.ova-menu-item:hover { background:rgba(30,24,60,0.82); border-color:${color.borderStrong}; transform:translateX(3px); }
+.ova-menu-item:active { transform:translateX(1px) scale(0.99); }
+.ova-menu-item:focus-visible { outline:2px solid ${color.accentHi}; outline-offset:2px; }
+.ova-menu-item .ova-menu-ico { flex:0 0 auto; color:${color.textMid}; display:flex; }
+.ova-menu-item--primary { background:linear-gradient(135deg, rgba(124,92,255,0.9), rgba(124,92,255,0.55));
+  border-color:${color.accent}; box-shadow:0 0 24px rgba(124,92,255,0.5); color:#fff; }
+.ova-menu-item--primary:hover { filter:brightness(1.08); }
+.ova-menu-item--primary .ova-menu-ico { color:#fff; }
 `;
 
 if (typeof document !== 'undefined' && !document.getElementById('ocva-theme')) {
