@@ -284,48 +284,11 @@ function Login({ onLogin, onFirstTime }: {
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, overflow: 'auto',
-      fontFamily: "'Inter', 'Geist', 'Satoshi', system-ui, -apple-system, sans-serif",
-      color: '#F8F8F8',
-      background: 'linear-gradient(180deg, #050514 0%, #0A0A22 35%, #120A35 70%, #1A103D 100%)',
+      position: 'fixed', inset: 0, overflow: 'hidden',
+      background: '#07060f', display: 'grid', placeItems: 'center',
+      fontFamily: F.body, color: '#F8F8F8',
     }}>
-      {/* Hidden audio element — looping login theme. See the effect above
-          for autoplay-policy handling and the corner toggle below for mute. */}
-      <audio
-        ref={audioRef}
-        src="/login-theme.mp3"
-        loop
-        preload="auto"
-        style={{ display: 'none' }}
-      />
-
-      {/* SideRays god-ray background — top-right origin, brand gold + soft
-          purple. Sits at z=1 so it paints OVER the static lobby-bg image,
-          radial gradients, and drifting fog (all z=0); mix-blend-mode
-          "screen" makes it add light additively rather than block the
-          existing scene. The floating particles (also z=1) and content
-          grid (z=2) sit above. */}
-      <div style={{
-        position: 'fixed', inset: 0, zIndex: 1,
-        pointerEvents: 'none',
-        mixBlendMode: 'screen',
-      }}>
-        <SideRays
-          speed={2.2}
-          rayColor1="#f3ba2f"
-          rayColor2="#9945ff"
-          intensity={2}
-          spread={2.2}
-          origin="top-right"
-          tilt={-4}
-          saturation={1.4}
-          blend={0.65}
-          falloff={1.6}
-          opacity={0.95}
-        />
-      </div>
-
-      {/* Music mute / unmute toggle — top-right corner, above everything. */}
+      <audio ref={audioRef} src="/login-theme.mp3" loop preload="auto" style={{ display: 'none' }} />
       <button
         onClick={() => setMuted(m => !m)}
         title={muted ? 'Unmute music' : 'Mute music'}
@@ -333,355 +296,119 @@ function Login({ onLogin, onFirstTime }: {
         style={{
           position: 'fixed', top: 14, right: 14, zIndex: 50,
           width: 38, height: 38, borderRadius: 19,
-          background: 'rgba(10,5,30,0.55)',
-          border: '1px solid rgba(212,175,55,0.45)',
-          color: '#D4AF37', fontSize: 16,
-          cursor: 'pointer',
+          background: 'rgba(10,5,30,0.55)', border: '1px solid rgba(212,175,55,0.45)',
+          color: '#D4AF37', fontSize: 16, cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
+          backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
           boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
-          transition: 'transform 0.12s ease, background 0.15s ease',
         }}
-        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(40,20,80,0.7)')}
-        onMouseLeave={e => (e.currentTarget.style.background = 'rgba(10,5,30,0.55)')}
-      >
-        {muted ? '🔇' : (playing ? '🔊' : '🎵')}
-      </button>
+      >{muted ? '🔇' : (playing ? '🔊' : '🎵')}</button>
+
       <style>{`
-        @keyframes loginGlow {
-          0%, 100% { text-shadow: 0 0 22px rgba(212,175,55,0.50), 0 0 6px rgba(212,175,55,0.7); }
-          50%      { text-shadow: 0 0 40px rgba(212,175,55,0.95), 0 0 10px rgba(212,175,55,1); }
-        }
-        @keyframes loginFloat {
-          0%   { transform: translateY(0) translateX(0); opacity: 0; }
-          12%  { opacity: 0.55; }
-          88%  { opacity: 0.45; }
-          100% { transform: translateY(-120vh) translateX(24px); opacity: 0; }
-        }
-        @keyframes loginFade {
-          from { opacity: 0; transform: translateY(10px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes loginIdleFloat {
-          0%, 100% { transform: translateY(0); }
-          50%      { transform: translateY(-10px); }
-        }
-        @keyframes loginFog {
-          0%   { transform: translateX(-6%); }
-          100% { transform: translateX(6%); }
-        }
-        @keyframes loginPulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(212,175,55,0.55); }
-          70%      { box-shadow: 0 0 0 14px rgba(212,175,55,0); }
-        }
-        @keyframes loginCount { from { opacity: 0; } to { opacity: 1; } }
-        .login-fadein { animation: loginFade 500ms ease both; }
-        .login-walletcard { transition: transform 220ms ease, box-shadow 220ms ease, filter 220ms ease; }
-        .login-walletcard:hover { transform: translateY(-4px) scale(1.02); filter: brightness(1.08); }
-        .login-cta { transition: transform 200ms ease, filter 200ms ease; }
-        .login-cta:hover { transform: scale(1.03); filter: brightness(1.08); }
+        .ova-hot { position:absolute; background:transparent; border:2px solid transparent; border-radius:14px;
+          cursor:pointer; padding:0; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
+        .ova-hot:hover:not([disabled]) { background: rgba(160,120,255,0.14); border-color: rgba(160,120,255,0.6);
+          box-shadow: 0 0 26px rgba(124,92,255,0.45); }
+        .ova-hot:focus-visible { outline:2px solid #9d86ff; outline-offset:2px; }
+        .ova-hot[disabled] { cursor: wait; }
       `}</style>
 
-      {/* Background image layer */}
-      <div aria-hidden style={{
-        position: 'fixed', inset: 0, zIndex: 0,
-        backgroundImage: 'url(/lobby-bg.png?v=2)',
-        backgroundSize: 'cover', backgroundPosition: 'center',
-        filter: 'blur(3px) brightness(0.35) saturate(0.85)',
-      }} />
-      <div aria-hidden style={{
-        position: 'fixed', inset: 0, zIndex: 0,
-        background: 'radial-gradient(ellipse at 30% 20%, rgba(138,43,226,0.30), transparent 55%), radial-gradient(ellipse at 80% 80%, rgba(79,209,197,0.18), transparent 55%), linear-gradient(180deg, rgba(5,5,20,0.65), rgba(5,5,20,0.85))',
-      }} />
-      {/* Drifting fog */}
-      <div aria-hidden style={{
-        position: 'fixed', inset: '-10%', zIndex: 0,
-        background: 'radial-gradient(circle at 20% 30%, rgba(138,43,226,0.10), transparent 40%), radial-gradient(circle at 80% 70%, rgba(212,175,55,0.08), transparent 45%)',
-        animation: 'loginFog 22s ease-in-out infinite alternate',
-      }} />
-      {/* Floating particles */}
-      <div aria-hidden style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 1 }}>
-        {Array.from({ length: 22 }).map((_, i) => {
-          const left = (i * 47) % 100;
-          const dur = 14 + (i % 8) * 2;
-          const delay = (i % 11) * 1.3;
-          const size = 2 + (i % 4);
-          const tint = i % 4 === 0 ? CYAN : (i % 3 === 0 ? PURPLE : GOLD);
-          return (
-            <span key={i} style={{
-              position: 'absolute', bottom: -10, left: `${left}%`,
-              width: size, height: size, borderRadius: '50%',
-              background: tint, boxShadow: `0 0 ${size * 3}px ${tint}`,
-              animation: `loginFloat ${dur}s linear ${delay}s infinite`,
-            }} />
-          );
-        })}
-      </div>
+      {/* Splash art locked to its 1717:916 aspect ratio; every hotspot is a % of
+          this box, so the transparent buttons stay glued to the painted ones. */}
+      <div style={{ position: 'relative', width: 'min(100vw, calc(100dvh * 1717 / 916))', aspectRatio: '1717 / 916', maxHeight: '100dvh' }}>
+        <img
+          src="/login-splash.png"
+          alt="On-Chain Virtual Arena — sign in"
+          draggable={false}
+          style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain', userSelect: 'none' }}
+        />
 
-      {/* Bottom-center arena sigil glow */}
-      <div aria-hidden style={{
-        position: 'fixed', left: '50%', bottom: '-190px', transform: 'translateX(-50%)',
-        width: 760, height: 760, borderRadius: '50%', zIndex: 1, pointerEvents: 'none',
-        background: 'radial-gradient(circle, rgba(138,43,226,0.35), transparent 62%)',
-      }} />
-      <div aria-hidden style={{
-        position: 'fixed', left: '50%', bottom: '-380px', transform: 'translateX(-50%)',
-        width: 560, height: 560, borderRadius: '50%', zIndex: 1, pointerEvents: 'none',
-        border: '1px solid rgba(168,120,255,0.16)',
-        boxShadow: '0 0 0 60px rgba(168,120,255,0.045), 0 0 0 120px rgba(168,120,255,0.03)',
-      }} />
+        {/* Connect Wallet -> MetaMask on Robinhood Chain */}
+        <button
+          className="ova-hot" disabled={!!busy}
+          title="Connect MetaMask on Robinhood Chain"
+          onClick={() => detectEvmWallet().installed ? doConnectRobinhood() : window.open('https://metamask.io/download/', '_blank', 'noopener')}
+          style={{ left: '28.4%', top: '63.4%', width: '13.7%', height: '14.6%' }}
+        />
+        {/* Email -> coming soon */}
+        <button
+          className="ova-hot" disabled={!!busy} title="Email login"
+          onClick={() => setNotice('Email login is coming soon.')}
+          style={{ left: '43.2%', top: '63.4%', width: '13.7%', height: '14.6%' }}
+        />
+        {/* Guest -> name entry */}
+        <button
+          className="ova-hot" disabled={!!busy} title="Guest login"
+          onClick={() => { setNotice(''); setMode('guest'); }}
+          style={{ left: '58.0%', top: '63.4%', width: '13.7%', height: '14.6%' }}
+        />
 
-      {/* Decorative side cards (wide desktop only) */}
-      <div className="login-deco" style={{ display: 'none' }}>
-        <div style={{ position: 'fixed', left: '3vw', top: '20%', zIndex: 2, transform: 'rotate(-9deg)' }}>
-          <LoginDecoCard cardName="VOID WARDEN" klass="Legendary" cost={6} atk={8} def={7} hue={270} />
-        </div>
-        <div style={{ position: 'fixed', left: '11vw', top: '42%', zIndex: 2, transform: 'rotate(-4deg)' }}>
-          <LoginDecoCard cardName="CELESTIAL PALADIN" klass="Guardian" cost={4} atk={7} def={5} hue={45} />
-        </div>
-        <div style={{ position: 'fixed', right: '3vw', top: '18%', zIndex: 2, transform: 'rotate(8deg)' }}>
-          <LoginDecoCard cardName="ARCANE SOVEREIGN" klass="Mage" cost={5} atk={8} def={7} hue={210} />
-        </div>
-        <div style={{ position: 'fixed', right: '11vw', top: '43%', zIndex: 2, transform: 'rotate(4deg)' }}>
-          <LoginDecoCard cardName="EMBER REAVER" klass="Assassin" cost={5} atk={8} def={5} hue={12} />
-        </div>
-      </div>
+        {/* Social sign-in -> coming soon */}
+        {([['Discord', 41.3], ['Google', 45.9], ['Apple', 50.5], ['X', 55.1]] as [string, number][]).map(([label, left]) => (
+          <button
+            key={label} className="ova-hot" disabled={!!busy} title={label}
+            onClick={() => setNotice(`${label} login is coming soon.`)}
+            style={{ left: `${left}%`, top: '82.2%', width: '3.3%', height: '6.6%', borderRadius: 12 }}
+          />
+        ))}
 
-      {/* Content */}
-      <div style={{
-        position: 'relative', zIndex: 3,
-        minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center',
-        padding: '46px 22px 104px',
-      }}>
-        <style>{`
-          @media (min-width: 1240px) { .login-deco { display: block !important; } }
-          @media (max-width: 640px) { .ova-tiles { grid-template-columns: 1fr !important; } }
-        `}</style>
-
-        {/* Emblem + title */}
-        <div className="login-fadein" style={{ textAlign: 'center' }}>
-          <LoginEmblem size={90} />
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 10 }}>
-            <span style={{ width: 46, height: 1, background: `linear-gradient(90deg, transparent, ${GOLD})` }} />
-            <span style={{ fontSize: 13, letterSpacing: 8, color: '#e7c96a', fontWeight: 700 }}>ON-CHAIN</span>
-            <span style={{ width: 46, height: 1, background: `linear-gradient(90deg, ${GOLD}, transparent)` }} />
-          </div>
+        {/* Guest name-entry overlay (the splash art has no input field) */}
+        {mode === 'guest' && (
           <div style={{
-            fontFamily: '"Impact", "Haettenschweiler", "Arial Narrow Bold", "Inter", system-ui, sans-serif',
-            fontWeight: 900, fontSize: 'clamp(46px, 8vw, 104px)', lineHeight: 0.9, letterSpacing: 2,
-            marginTop: 6, textTransform: 'uppercase',
-            background: 'linear-gradient(180deg, #ffffff 0%, #dcdce6 46%, #9aa0b4 100%)',
-            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-            filter: 'drop-shadow(0 3px 10px rgba(0,0,0,0.65))',
-          }}>Virtual Arena</div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
-            <span style={{ flex: '0 0 56px', height: 1, background: `linear-gradient(90deg, transparent, ${GOLD}88)` }} />
-            <span style={{ color: '#c9a94a', fontSize: 11 }}>◆</span>
-            <span style={{ fontSize: 12, letterSpacing: 5, color: '#c9a94a', fontWeight: 700 }}>BLOCKCHAIN TRADING CARD GAME</span>
-            <span style={{ color: '#c9a94a', fontSize: 11 }}>◆</span>
-            <span style={{ flex: '0 0 56px', height: 1, background: `linear-gradient(90deg, ${GOLD}88, transparent)` }} />
+            position: 'absolute', left: '50%', top: '62%', transform: 'translate(-50%,-50%)',
+            width: 'min(90%, 420px)', zIndex: 5,
+            background: 'rgba(14,12,30,0.94)', border: '1px solid rgba(150,120,255,0.4)',
+            borderRadius: 14, padding: 18, boxShadow: '0 24px 70px rgba(0,0,0,0.6)',
+            backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ color: '#b794f6', fontWeight: 800, letterSpacing: 2, fontSize: 12 }}>ENTER AS GUEST</span>
+              <button onClick={() => setMode('wallet')} style={{ background: 'none', border: 'none', color: '#8f89a3', cursor: 'pointer', fontSize: 12 }}>&larr; back</button>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={name} onChange={e => setName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && name.trim()) onLogin(name.trim()); }}
+                placeholder="Choose your champion name" autoFocus
+                style={{ flex: 1, padding: '11px 13px', fontSize: 14, background: 'rgba(10,10,20,0.8)', color: '#fff', border: '1px solid rgba(150,120,255,0.35)', borderRadius: 10, outline: 'none' }}
+              />
+              <button onClick={randomName} title="Random name" style={{ padding: '0 12px', background: 'rgba(138,43,226,0.2)', color: '#d6c4ff', border: '1px solid rgba(138,43,226,0.5)', borderRadius: 10, cursor: 'pointer', fontWeight: 700 }}>&#127922;</button>
+            </div>
+            <button
+              onClick={() => name.trim() && onLogin(name.trim())} disabled={!name.trim()}
+              style={{
+                marginTop: 12, width: '100%', padding: '12px', borderRadius: 10, border: 'none',
+                background: name.trim() ? 'linear-gradient(135deg,#7c3aed,#a855f7)' : 'rgba(60,55,80,0.45)',
+                color: name.trim() ? '#fff' : '#8a86a0', fontWeight: 800, letterSpacing: 2, textTransform: 'uppercase',
+                cursor: name.trim() ? 'pointer' : 'not-allowed',
+              }}
+            >Enter Arena</button>
           </div>
-        </div>
+        )}
 
-        {/* Login panel */}
-        <div className="login-fadein" style={{
-          marginTop: 30, width: '100%', maxWidth: 760,
-          background: 'rgba(14,12,30,0.72)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-          border: '1px solid rgba(150,120,255,0.18)', borderRadius: 18,
-          padding: '26px 26px 22px',
-          boxShadow: '0 24px 70px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)',
-        }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ color: '#b794f6', letterSpacing: 4, fontWeight: 800, fontSize: 14 }}>‹ WELCOME BACK, CHAMPION ›</div>
-            <div style={{ color: '#9a94ad', fontSize: 13, marginTop: 6 }}>Enter the Arena. Claim your victory.</div>
-          </div>
-
-          {/* Three login tiles act as tabs */}
-          <div className="ova-tiles" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 18 }}>
-            {([
-              { key: 'wallet', icon: '👛', title: 'CONNECT WALLET', sub: 'Secure. Non-custodial. On-chain.' },
-              { key: 'email',  icon: '✉',  title: 'EMAIL LOGIN',    sub: 'Access your account.' },
-              { key: 'guest',  icon: '👤', title: 'GUEST LOGIN',    sub: 'Try the Arena as a guest.' },
-            ] as const).map(t => {
-              const active = mode === t.key;
-              return (
-                <button key={t.key} onClick={() => { setMode(t.key); setNotice(''); }} style={{
-                  textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', position: 'relative',
-                  background: active ? 'rgba(124,58,237,0.20)' : 'rgba(255,255,255,0.02)',
-                  border: `1px solid ${active ? 'rgba(139,92,246,0.75)' : 'rgba(150,140,180,0.16)'}`,
-                  borderRadius: 12, padding: '16px 14px',
-                  boxShadow: active ? '0 0 24px rgba(124,58,237,0.35)' : 'none',
-                  transition: 'background .15s ease, border-color .15s ease, box-shadow .15s ease',
-                }}>
-                  {t.key === 'wallet' && <span style={{ position: 'absolute', top: 8, right: 10, fontSize: 11, color: '#c9a94a' }}>✦</span>}
-                  <div style={{ fontSize: 20 }}>{t.icon}</div>
-                  <div style={{ marginTop: 10, fontWeight: 800, letterSpacing: 1, fontSize: 13, color: '#f2eeff' }}>{t.title}</div>
-                  <div style={{ marginTop: 4, fontSize: 11, color: '#8f89a3' }}>{t.sub}</div>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Mode-specific content */}
-          <div style={{ marginTop: 18 }}>
-            {mode === 'wallet' && (() => {
-              const evm = detectEvmWallet();
-              const connecting = busy === 'robinhood';
-              return (
-                <button
-                  className="login-walletcard"
-                  onClick={() => evm.installed ? doConnectRobinhood() : window.open('https://metamask.io/download/', '_blank', 'noopener')}
-                  disabled={!!busy}
-                  style={{
-                    width: '100%', display: 'flex', alignItems: 'center', gap: 14,
-                    background: 'linear-gradient(135deg, #F6851B 0%, #E2761B 100%)', color: '#1a1408',
-                    border: 'none', borderRadius: 12, padding: '16px 18px',
-                    cursor: busy ? 'not-allowed' : 'pointer', textAlign: 'left', fontFamily: 'inherit',
-                    boxShadow: '0 10px 26px rgba(226,118,27,0.35), inset 0 1px 0 rgba(255,255,255,0.3)',
-                    opacity: busy && !connecting ? 0.5 : 1,
-                  }}
-                >
-                  <span style={{ fontSize: 26 }}>🦊</span>
-                  <span style={{ flex: 1 }}>
-                    <span style={{ display: 'block', fontSize: 11, fontWeight: 800, letterSpacing: 3, opacity: 0.8 }}>◆ ROBINHOOD CHAIN · EVM</span>
-                    <span style={{ display: 'block', fontSize: 18, fontWeight: 800, letterSpacing: 0.5, marginTop: 3 }}>
-                      {connecting ? 'Connecting…' : (evm.installed ? `Sign in with ${evm.label}` : 'Install MetaMask')}
-                    </span>
-                    <span style={{ display: 'block', marginTop: 6, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>
-                      {connecting ? 'Approve in wallet…' : (evm.installed ? '→ Connect on chain 4663' : '↗ Get the extension')}
-                    </span>
-                  </span>
-                </button>
-              );
-            })()}
-
-            {mode === 'guest' && (
-              <div>
-                <label style={{
-                  display: 'block', fontSize: 11, color: '#9c9282', letterSpacing: 2, fontWeight: 700,
-                  textTransform: 'uppercase', marginBottom: 6,
-                }}>Choose your champion name</label>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && name.trim()) onLogin(name.trim()); }}
-                    placeholder="e.g. MoonPepe"
-                    style={{
-                      flex: 1, padding: '12px 14px', fontSize: 14,
-                      background: 'rgba(10,10,20,0.75)', color: '#fff',
-                      border: '1px solid rgba(150,120,255,0.35)', borderRadius: 10, outline: 'none',
-                      fontFamily: 'inherit',
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={randomName}
-                    title="Generate name"
-                    style={{
-                      padding: '0 14px', fontSize: 13, fontWeight: 700,
-                      background: 'rgba(138,43,226,0.18)', color: '#d6c4ff',
-                      border: `1px solid ${PURPLE}66`, borderRadius: 10, cursor: 'pointer',
-                      fontFamily: 'inherit', whiteSpace: 'nowrap',
-                    }}
-                  >🎲 Random</button>
-                </div>
-                <button
-                  className="login-cta"
-                  onClick={() => name.trim() && onLogin(name.trim())}
-                  disabled={!name.trim()}
-                  style={{
-                    marginTop: 14, width: '100%', padding: '14px 18px',
-                    background: name.trim()
-                      ? 'linear-gradient(135deg, #7c3aed 0%, #a855f7 100%)'
-                      : 'rgba(60,55,80,0.45)',
-                    color: name.trim() ? '#fff' : '#8a86a0',
-                    border: 'none', borderRadius: 12,
-                    fontWeight: 800, letterSpacing: 3, fontSize: 15, textTransform: 'uppercase',
-                    cursor: name.trim() ? 'pointer' : 'not-allowed',
-                    boxShadow: name.trim() ? '0 0 24px rgba(124,58,237,0.5), 0 8px 22px rgba(0,0,0,0.5)' : 'none',
-                  }}
-                >Enter Arena</button>
-              </div>
-            )}
-
-            {mode === 'email' && (
-              <div style={{
-                padding: '18px 16px', borderRadius: 12, textAlign: 'center',
-                background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(150,140,180,0.28)',
-                color: '#a49ec0', fontSize: 13,
-              }}>
-                Email login is coming soon. For now, connect a wallet or continue as a guest.
-              </div>
-            )}
-
-            {err && (
-              <div style={{
-                marginTop: 14, padding: '10px 12px', borderRadius: 8,
-                background: 'rgba(217,75,75,0.12)', border: '1px solid rgba(217,75,75,0.45)',
-                color: '#ffb8b8', fontSize: 13,
-              }}>
-                <div>{err}</div>
-                {/context invalidated|reloaded or updated/i.test(err) && (
-                  <button onClick={() => window.location.reload()} style={{
-                    marginTop: 8, padding: '6px 12px', borderRadius: 6,
-                    background: '#7c3aed', color: '#fff', fontWeight: 700,
-                    border: 'none', cursor: 'pointer', fontSize: 12,
-                  }}>Reload Page Now</button>
-                )}
-              </div>
+        {/* Status toast: connecting / notice / error */}
+        {(busy === 'robinhood' || notice || err) && (
+          <div style={{
+            position: 'absolute', left: '50%', bottom: '2.5%', transform: 'translateX(-50%)',
+            zIndex: 6, maxWidth: '86%', textAlign: 'center',
+            padding: '9px 16px', borderRadius: 10, fontSize: 13,
+            background: err ? 'rgba(217,75,75,0.18)' : 'rgba(14,12,30,0.92)',
+            border: `1px solid ${err ? 'rgba(217,75,75,0.5)' : 'rgba(150,120,255,0.35)'}`,
+            color: err ? '#ffb8b8' : '#d9d3f0',
+            backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+          }}>
+            {busy === 'robinhood'
+              ? 'Connecting… approve the Robinhood Chain request in MetaMask.'
+              : (err || notice)}
+            {err && /context invalidated|reloaded or updated/i.test(err) && (
+              <button onClick={() => window.location.reload()} style={{ marginLeft: 10, padding: '4px 10px', borderRadius: 6, background: '#7c3aed', color: '#fff', fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 12 }}>Reload</button>
             )}
           </div>
-
-          {/* OR CONTINUE WITH */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '20px 2px 14px' }}>
-            <div style={{ flex: 1, height: 1, background: 'linear-gradient(90deg, transparent, rgba(150,140,180,0.35), transparent)' }} />
-            <div style={{ fontSize: 11, letterSpacing: 3, color: '#8f89a3', fontWeight: 700 }}>OR CONTINUE WITH</div>
-            <div style={{ flex: 1, height: 1, background: 'linear-gradient(90deg, transparent, rgba(150,140,180,0.35), transparent)' }} />
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 12 }}>
-            {([
-              { k: 'discord', label: 'Discord', glyph: '🎮', bg: 'rgba(88,101,242,0.9)', fg: '#fff' },
-              { k: 'google',  label: 'Google',  glyph: 'G',  bg: '#fff',                 fg: '#444' },
-              { k: 'apple',   label: 'Apple',   glyph: '', bg: '#111',                 fg: '#fff' },
-              { k: 'x',       label: 'X',       glyph: '𝕏',  bg: '#111',                 fg: '#fff' },
-            ] as const).map(s => (
-              <button key={s.k} onClick={() => setNotice(`${s.label} login is coming soon.`)} title={s.label} style={{
-                width: 52, height: 44, borderRadius: 12, background: s.bg,
-                border: '1px solid rgba(255,255,255,0.10)', cursor: 'pointer', color: s.fg,
-                fontWeight: 800, fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>{s.glyph}</button>
-            ))}
-          </div>
-          {notice && <div style={{ textAlign: 'center', marginTop: 12, fontSize: 12, color: '#c9a94a' }}>{notice}</div>}
-        </div>
-      </div>
-
-      {/* Footer bar */}
-      <div style={{
-        position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 4,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: 12, padding: '12px 22px', pointerEvents: 'none', flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, pointerEvents: 'auto' }}>
-          <span style={{ color: '#8b5cf6', fontSize: 16 }}>🛡</span>
-          <div>
-            <div style={{ color: '#b794f6', fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>YOUR WALLET. YOUR ASSETS. YOUR VICTORY.</div>
-            <div style={{ color: '#7a7590', fontSize: 11 }}>Built on blockchain. Owned by you.</div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, pointerEvents: 'auto' }}>
-          {['ABOUT', 'WHITEPAPER', 'DOCS', 'SUPPORT'].map((l, i, a) => (
-            <span key={l} style={{ color: '#8f89a3', fontSize: 11, letterSpacing: 1, fontWeight: 600 }}>
-              {l}{i < a.length - 1 ? ' ◇' : ''}
-            </span>
-          ))}
-          <span style={{ marginLeft: 6, padding: '6px 10px', borderRadius: 10, border: '1px solid rgba(150,140,180,0.25)', color: '#c8c2d8', fontSize: 11 }}>🌐 EN</span>
-        </div>
+        )}
       </div>
     </div>
   );
+
 }
 
 function LoginStat(_: { label: string; value: string; color: string }) { return null; }
