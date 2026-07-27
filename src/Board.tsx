@@ -2317,7 +2317,8 @@ function TurnBanner({
   canForceEnd: boolean;
   onForceEnd: () => void;
 }) {
-  const dotColor = myTurn ? '#48d97a' : '#e85c5c';
+  const dotColor = myTurn ? '#298BFF' : '#E45F76';       // player blue / opponent red-violet
+  const bannerAccent = myTurn ? '#FFD86A' : '#C45CFF';   // gold / violet illumination
   const headline = myTurn ? 'YOUR TURN' : "OPPONENT'S TURN";
 
   // 60-second auto-end-turn timer. Resets whenever turn/phase ownership changes.
@@ -2371,38 +2372,40 @@ function TurnBanner({
       <div style={{ fontSize: 11, color: '#9aa', fontWeight: 600, minWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         VS <b style={{ color: '#fff' }}>{oppName}</b> <span style={{ opacity: 0.6 }}>({formatRecord(oppProfile)})</span>
       </div>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        fontFamily: '"Cinzel", "Times New Roman", serif',
-        fontWeight: 800, fontSize: 18, letterSpacing: 2,
-        color: '#fff', textShadow: `0 0 12px ${dotColor}aa`,
-      }}>
-        <span style={{
-          display: 'inline-block', width: 12, height: 12, borderRadius: '50%',
-          background: dotColor, boxShadow: `0 0 12px ${dotColor}`,
-          animation: 'pulse-dot 1.6s ease-in-out infinite',
-        }} />
-        {headline}
-        <span style={{ fontFamily: 'system-ui', fontWeight: 600, fontSize: 11, color: '#aab', letterSpacing: 1 }}>
-          · TURN {turn} · {phase.toUpperCase()}
-        </span>
-        {canEndTurn && (
-          <span style={{
-            fontFamily: 'system-ui', fontWeight: 800, fontSize: 13, letterSpacing: 1,
-            color: timerColor, padding: '2px 8px', borderRadius: 6,
-            background: `${timerColor}22`, border: `1px solid ${timerColor}66`,
-            animation: lowTime ? 'pulse-dot 0.8s ease-in-out infinite' : 'none',
-          }} title="Auto-end-turn in">⏱ {secondsLeft}s</span>
-        )}
-        {showForceCountdown && (
-          <span style={{
-            fontFamily: 'system-ui', fontWeight: 700, fontSize: 11, letterSpacing: 1,
-            color: '#ffb84a', padding: '2px 8px', borderRadius: 6,
-            background: '#ffb84a22', border: '1px solid #ffb84a55',
-          }} title="Opponent has been thinking a long time — you'll be able to force-end their turn soon.">
-            ⏳ {Math.ceil(oppMsLeft / 1000)}s
-          </span>
-        )}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, textAlign: 'center' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', justifyContent: 'center',
+          fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 800, fontSize: 20, letterSpacing: 3,
+          color: '#F4F2EA', textShadow: `0 0 16px ${bannerAccent}`,
+        }}>
+          <span aria-hidden style={{
+            display: 'inline-block', width: 12, height: 12, borderRadius: '50%',
+            background: dotColor, boxShadow: `0 0 12px ${dotColor}`,
+            animation: 'pulse-dot 1.6s ease-in-out infinite',
+          }} />
+          {headline}
+          <span style={{ fontFamily: 'system-ui', fontWeight: 700, fontSize: 12, color: bannerAccent, letterSpacing: 1 }}>TURN {turn}</span>
+          {canEndTurn && (
+            <span style={{
+              fontFamily: 'system-ui', fontWeight: 800, fontSize: 13, letterSpacing: 1,
+              color: timerColor, padding: '2px 8px', borderRadius: 6,
+              background: `${timerColor}22`, border: `1px solid ${timerColor}66`,
+              animation: lowTime ? 'pulse-dot 0.8s ease-in-out infinite' : 'none',
+            }} title="Auto-end-turn in">⏱ {secondsLeft}s</span>
+          )}
+          {showForceCountdown && (
+            <span style={{
+              fontFamily: 'system-ui', fontWeight: 700, fontSize: 11, letterSpacing: 1,
+              color: '#ffb84a', padding: '2px 8px', borderRadius: 6,
+              background: '#ffb84a22', border: '1px solid #ffb84a55',
+            }} title="Opponent has been thinking a long time — you'll be able to force-end their turn soon.">
+              ⏳ {Math.ceil(oppMsLeft / 1000)}s
+            </span>
+          )}
+        </div>
+        <div aria-live="polite" style={{ fontFamily: 'system-ui', fontWeight: 500, fontSize: 11, color: '#989BB0', letterSpacing: 0.5 }}>
+          {myTurn ? `Your move · ${phase.toUpperCase()}` : 'Opponent is deciding…'}
+        </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 160, justifyContent: 'flex-end' }}>
         <span style={{ fontSize: 11, color: '#9aa', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
