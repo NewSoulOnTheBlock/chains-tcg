@@ -71,14 +71,16 @@ export function MasterquestPage({
   // must have built and saved a legal deck in the Library first.
   const [decks, setDecks] = useState<DeckEntry[]>([]);
   const [decksLoading, setDecksLoading] = useState<boolean>(true);
-  const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
+  // Deck ids are bigint-safe decimal strings — never `parseInt` one.
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setDecksLoading(true);
       try {
-        const list = await listDecksApi(myName);
+        // Decks are scoped to the caller's token, so there is no name to pass.
+        const list = await listDecksApi();
         if (cancelled) return;
         const legal = list.filter(d => validateDeck(d.cards).ok);
         setDecks(legal);
@@ -634,8 +636,8 @@ function DeckChooser({
 }: {
   decks: DeckEntry[];
   loading: boolean;
-  selectedDeckId: number | null;
-  onSelect: (id: number | null) => void;
+  selectedDeckId: string | null;
+  onSelect: (id: string | null) => void;
 }) {
   return (
     <div style={{

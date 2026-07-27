@@ -12,12 +12,23 @@
     <meta property="og:description" content="A Robinhood app — the 5-chain onchain card arena on Robinhood Chain." />
     <meta property="og:url" content="https://ocva.online/" />
     <meta property="og:site_name" content="On-Chain Virtual Arena" />
-    <meta property="og:image" content="https://ocva.online/intro.png" />
+    <!-- Social card: a 1200x630 JPEG derived from public/login-splash.png
+         (1681x936, 2.1 MB). Several scrapers silently skip images over ~1 MB,
+         so the shipped card is a compressed 1.91:1 crop instead of the raw
+         splash. Regenerate with:
+           sips --resampleWidth 1200 public/login-splash.png --out /tmp/a.png
+           sips -c 630 1200 /tmp/a.png --out /tmp/b.png
+           sips -s format jpeg -s formatOptions 82 /tmp/b.png --out public/og-image.jpg -->
+    <meta property="og:image" content="https://ocva.online/og-image.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="The On-Chain Virtual Arena logotype above a glowing violet arena floor, flanked by Ethereum, BNB, Solana and Robinhood card backs." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="On-Chain Virtual Arena" />
     <meta name="twitter:description" content="A Robinhood app — the 5-chain onchain card arena on Robinhood Chain." />
-    <meta name="twitter:image" content="https://ocva.online/intro.png" />
+    <meta name="twitter:image" content="https://ocva.online/og-image.jpg" />
+    <meta name="twitter:image:alt" content="The On-Chain Virtual Arena logotype above a glowing violet arena floor, flanked by Ethereum, BNB, Solana and Robinhood card backs." />
     <link rel="icon" type="image/png" href="/favicon.png?v=2" />
     <link rel="apple-touch-icon" href="/favicon.png?v=2" />
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -25,62 +36,15 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>On-Chain Virtual Arena</title>
-    <script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
-    <style>
-      *, *::before, *::after { box-sizing: border-box; }
-      html, body, #root { margin: 0; padding: 0; }
-      html, body { min-height: 100dvh; }
-      body {
-        /* Obsidian field with a faint violet zenith and gold horizon — the
-           foreground panels sit on this rather than on flat black. */
-        background:
-          radial-gradient(100% 60% at 50% -10%, rgba(124, 92, 255, 0.10), transparent 60%),
-          radial-gradient(80% 50% at 50% 108%, rgba(217, 180, 90, 0.06), transparent 62%),
-          #06050f;
-        background-attachment: fixed;
-        color: #f3f1fb;
-        font-synthesis-weight: none;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-        text-rendering: optimizeLegibility;
-        -webkit-text-size-adjust: 100%;
-        -webkit-tap-highlight-color: transparent;
-        overflow-x: hidden;
-        /* Honor iOS safe-area at the bottom (home indicator) and sides. */
-        padding-bottom: env(safe-area-inset-bottom);
-      }
-      /* Warm brand selection instead of the OS default blue. */
-      ::selection { background: rgba(217, 180, 90, 0.32); color: #fff8e4; }
-      /* Headings use the medieval display face wherever raw tags are used. */
-      h1, h2, h3 { font-family: "Cinzel", "EB Garamond", Georgia, serif; letter-spacing: 0.02em; }
-      /* Prevent iOS auto-zoom on input focus */
-      input, select, textarea, button { font-size: 16px; }
-      /* Kill 300ms tap delay & double-tap zoom on every interactive element. */
-      button, [role="button"], a, [data-tap] { touch-action: manipulation; }
-      img { max-width: 100%; }
-      /* Thin, dark, gold-tinted scrollbars (WebKit + Firefox) */
-      * { scrollbar-width: thin; scrollbar-color: rgba(190,160,110,0.30) transparent; }
-      ::-webkit-scrollbar { width: 8px; height: 8px; }
-      ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: rgba(190,160,110,0.30); border-radius: 4px; }
-      ::-webkit-scrollbar-thumb:hover { background: rgba(217,180,90,0.5); }
-      /* Respect users who prefer reduced motion: neutralize all animation/transitions. */
-      @media (prefers-reduced-motion: reduce) {
-        *, *::before, *::after {
-          animation-duration: 0.01ms !important;
-          animation-iteration-count: 1 !important;
-          transition-duration: 0.01ms !important;
-          scroll-behavior: auto !important;
-        }
-      }
-      /* Leave room for the mobile bottom action bar so nothing hides behind it. */
-      @media (max-width: 720px) {
-        body { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
-      }
-    </style>
+    <!-- Fonts + global base styles are self-hosted and imported from
+         src/index.tsx (see src/fonts.css and src/base.css). Nothing here may
+         reference a third-party origin: the gateway serves
+         `default-src 'self'; script-src 'self'`. -->
+    <!-- The two faces that paint on first frame: Inter (body) and Cinzel
+         (every heading). The latin-ext siblings load on demand via
+         unicode-range, so they are deliberately not preloaded. -->
+    <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/cinzel-latin.woff2" as="font" type="font/woff2" crossorigin />
   </head>
   <body>
     <div id="root"></div>

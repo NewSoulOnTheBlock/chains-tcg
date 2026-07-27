@@ -2,27 +2,79 @@
 // Client wiring for the CardPack booster contract on Robinhood Chain (chain 4663).
 // Buying a pack mints 5 random cards + 1 foil random card as NFTs; this decodes the
 // PackMinted event and maps card indexes back to the in-game cards for the reveal.
+//
+// ─── WHY THIS FILE DOES NOT USE THE BACKEND'S RPC PROXY ─────────────────────
+//
+// `RPC_URL` (`${VITE_API_BASE}/rpc/evm`) is scoped to ONE network chosen by
+// server env — production answers `eth_chainId` with `0xaa36a7`, i.e. Sepolia.
+// This game runs on Robinhood Chain (4663), so the proxy cannot read this
+// contract at all: no price, no balance, no `PackMinted` receipt to decode.
+//
+// The migration rule it looks like this breaks is "no RPC credential may
+// appear in the bundle" (INTEGRATION.md §8.5). Read that precisely: the
+// problem was a CREDENTIAL. This file used to carry a live Alchemy key plus a
+// `VITE_ROBINHOOD_RPC` override, and both are gone for good. What replaces
+// them is Robinhood Chain's own PUBLIC, KEYLESS endpoint — there is no secret
+// in it, nothing to rotate, and nothing an attacker gains by reading the
+// bundle. Verified: it answers `eth_chainId` with `0x1237`.
+//
+// It is deliberately a hardcoded constant rather than a `VITE_*` variable. An
+// env-injected URL is exactly how the Alchemy key got into the bundle in the
+// first place, and there is only ever one right value here.
+//
+// Writes never went through any RPC we control: `mintPack` broadcasts through
+// the user's own injected wallet, which is what the proxy's
+// `eth_sendRawTransaction` 403 requires anyway.
 
 import {
   createPublicClient, createWalletClient, custom, http, defineChain,
   parseEther, parseAbi, decodeEventLog, type Address,
 } from 'viem';
+import { ROBINHOOD_CHAIN_PARAMS } from './wallet';
 import { CARDS } from './cards';
 
-export const ROBINHOOD_RPC =
-  (import.meta.env.VITE_ROBINHOOD_RPC as string) ||
-  'https://robinhood-mainnet.g.alchemy.com/v2/h7y2nsAnaBKL98b6RHAsM';
+/**
+ * Robinhood Chain's public JSON-RPC. No API key, no account, no rate-limit
+ * token — safe to ship. Do NOT replace this with an env variable.
+ */
+export const ROBINHOOD_RPC_URL = 'https://rpc.mainnet.chain.robinhood.com';
+
+/** Blockscout, for linking a confirmed mint transaction. */
+export const ROBINHOOD_EXPLORER_URL = 'https://robinhoodchain.blockscout.com';
+
+/** Explorer link for a transaction hash. */
+export function robinhoodTxUrl(hash: string): string {
+  return `${ROBINHOOD_EXPLORER_URL}/tx/${hash}`;
+}
+
+/**
+ * Pack minting reads and writes real chain state through the public endpoint
+ * above and the user's own wallet, so it is available.
+ *
+ * Note this is INDEPENDENT of the backend's own booster tickets
+ * (`/wager/boosters/*`), which report `mintingEnabled: false` and never issue
+ * an NFT — see `src/boosters-api.ts`. These are two different products.
+ */
+export const PACK_MINTING_AVAILABLE = true as const;
+
+/** Shown if the flag above is ever turned off. */
+export const PACK_MINTING_UNAVAILABLE_MESSAGE =
+  'Booster packs are temporarily unavailable.';
+
 export const CARD_PACK = ((import.meta.env.VITE_CARD_PACK as string) ||
   '0x57200fb533b33823f8bd2ac8f3649e3b643830b3') as Address;
 export const PACK_PRICE_ETH = '0.0035';
 export const ROBINHOOD_CHAIN_ID = 4663;
+/** Robinhood Chain testnet, for reference — this build targets mainnet only. */
+export const ROBINHOOD_TESTNET_CHAIN_ID = 46630;
 // Gas limit we submit mintPack with (this chain's estimateGas is unreliable).
 export const MINT_GAS_LIMIT = 1_500_000n;
 
 export const robinhoodChain = defineChain({
-  id: 4663, name: 'Robinhood Chain',
+  id: ROBINHOOD_CHAIN_ID, name: 'Robinhood Chain',
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-  rpcUrls: { default: { http: [ROBINHOOD_RPC] } },
+  rpcUrls: { default: { http: [ROBINHOOD_RPC_URL] } },
+  blockExplorers: { default: { name: 'Blockscout', url: ROBINHOOD_EXPLORER_URL } },
 });
 
 const packAbi = parseAbi([
@@ -36,7 +88,7 @@ const CATALOG = Object.values(CARDS).filter((c) => c.type !== 'node');
 
 export type RevealedCard = { index: number; id: string; name: string; image?: string; foil: boolean };
 
-const pub = createPublicClient({ chain: robinhoodChain, transport: http(ROBINHOOD_RPC) });
+const pub = createPublicClient({ chain: robinhoodChain, transport: http(ROBINHOOD_RPC_URL) });
 
 function walletClient() {
   const eth = (window as any).ethereum;
@@ -52,7 +104,7 @@ async function ensureChain() {
     if (e?.code === 4902) {
       await eth.request({
         method: 'wallet_addEthereumChain',
-        params: [{ chainId: '0x1237', chainName: 'Robinhood Chain', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: [ROBINHOOD_RPC] }],
+        params: [ROBINHOOD_CHAIN_PARAMS],
       });
     }
   }

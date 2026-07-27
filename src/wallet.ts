@@ -171,20 +171,38 @@ export async function connectEvm(): Promise<ConnectedWallet> {
   return { chain: 'evm', address };
 }
 
-// ─── Robinhood Chain (EVM L2, Arbitrum Orbit) ──────────────────────────────
-// Chain ID 4663 (0x1237), ETH for gas. Docs: https://docs.robinhood.com/chain
+// ─── Robinhood Chain (Arbitrum L2 settling on Ethereum) ────────────────────
+//
+// THE ONLY NETWORK THIS GAME RUNS ON.
+//
+//   Chain ID   4663 (0x1237) mainnet · 46630 testnet
+//   Gas token  ETH
+//   RPC        https://rpc.mainnet.chain.robinhood.com   (public, no API key)
+//   Explorer   https://robinhoodchain.blockscout.com
+//
+// The RPC endpoint is hardcoded on purpose. It carries no credential, so it is
+// safe in the bundle — unlike the Alchemy key with an embedded API key that
+// used to live here behind a `VITE_ROBINHOOD_RPC` override (INTEGRATION.md
+// §8.5). Do not reintroduce an env variable for it.
+//
+// NOT TO BE CONFUSED WITH THE IN-GAME FACTIONS. `Color` values in `cards.ts`
+// — `sol`, `eth`, `base`, `bnb`, `robinhood` — are card factions, the sets a
+// deck is built from. They are flavour, not networks, and no card faction
+// implies a chain the game talks to.
+export const ROBINHOOD_CHAIN_PARAMS = {
+  chainId: '0x1237',
+  chainName: 'Robinhood Chain',
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  rpcUrls: ['https://rpc.mainnet.chain.robinhood.com'],
+  blockExplorerUrls: ['https://robinhoodchain.blockscout.com'],
+};
+
 export const ROBINHOOD_CHAIN = {
   chainId: 4663,
   chainIdHex: '0x1237',
-  params: {
-    chainId: '0x1237',
-    chainName: 'Robinhood Chain',
-    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-    rpcUrls: [
-      (import.meta as any).env?.VITE_ROBINHOOD_RPC ||
-        'https://robinhood-mainnet.g.alchemy.com/v2/h7y2nsAnaBKL98b6RHAsM',
-    ],
-  },
+  /** Testnet id, for reference. This build targets mainnet only. */
+  testnetChainId: 46630,
+  params: ROBINHOOD_CHAIN_PARAMS,
 };
 
 /** Is an injected EVM wallet (MetaMask etc.) present? */

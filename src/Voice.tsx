@@ -13,28 +13,23 @@
 //
 // Zero backend, zero auth. Works as long as the public broker
 // (`0.peerjs.com`, the default) is reachable.
+//
+// !! SECURITY (audit H-6) — this feature is NOT safe to enable. Peer IDs are
+// derived deterministically from the public matchID, and the `peer.on('call')`
+// handler below answers ANY inbound call with a live microphone stream. Anyone
+// who can guess a match ID can therefore open a player's mic through the public
+// broker. Only the CSP/SRI half of the finding is fixed here (PeerJS is now a
+// bundled dependency instead of an unpinned <script> from unpkg.com). Keep this
+// component unmounted until inbound calls are authenticated against the match's
+// real participants.
 
 import { useEffect, useRef, useState } from 'react';
+import type { MediaConnection } from 'peerjs';
 
-declare global {
-  interface Window { Peer?: any }
-}
-
-const PEERJS_SRC = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
-let scriptPromise: Promise<void> | null = null;
-
-function loadPeerScript(): Promise<void> {
-  if (window.Peer) return Promise.resolve();
-  if (scriptPromise) return scriptPromise;
-  scriptPromise = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = PEERJS_SRC; s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => { scriptPromise = null; reject(new Error('PeerJS script failed to load')); };
-    document.head.appendChild(s);
-  });
-  return scriptPromise;
-}
+// Type-only at module scope; the implementation is pulled in on demand so the
+// broker client costs nothing on first load (and nothing at all while the
+// feature stays disabled).
+type PeerInstance = import('peerjs').default;
 
 // Deterministic per-seat peer ID. Prefixed + sanitised so it survives the
 // PeerJS broker's id validator (alphanumerics + dash/underscore only).
@@ -51,9 +46,9 @@ export function VoiceChat({
   const [muted, setMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const peerRef = useRef<any>(null);
+  const peerRef = useRef<PeerInstance | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
-  const callRef = useRef<any>(null);
+  const callRef = useRef<MediaConnection | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const dialerTimerRef = useRef<number | null>(null);
 
@@ -89,15 +84,16 @@ export function VoiceChat({
         if (cancelled) { for (const t of stream.getTracks()) t.stop(); return; }
         localStreamRef.current = stream;
 
-        // 2. Load + construct Peer.
-        await loadPeerScript();
-        if (cancelled || !window.Peer) return;
+        // 2. Load + construct Peer. Bundled by Vite and served same-origin —
+        // no <script> injection, no CDN, no missing SRI.
+        const { default: Peer } = await import('peerjs');
+        if (cancelled) return;
         const myId = peerIdFor(matchID, playerID);
         const otherId = peerIdFor(matchID, playerID === '0' ? '1' : '0');
         // Free public TURN (openrelay) so users behind symmetric NAT or
         // cellular CGNAT can actually pass audio. Without TURN PeerJS
         // happily signals + reports "stream" but no media frames flow.
-        const peer = new window.Peer(myId, {
+        const peer = new Peer(myId, {
           debug: 1,
           config: {
             iceServers: [
@@ -132,7 +128,10 @@ export function VoiceChat({
         };
 
         // 3a. Incoming-call path (the answerer side).
-        peer.on('call', (call: any) => {
+        // !! Audit H-6: this answers *any* caller, not just the opponent. See
+        // the file header — the feature must stay disabled until the caller is
+        // verified against the match roster.
+        peer.on('call', (call) => {
           callRef.current = call;
           call.answer(localStreamRef.current!);
           call.on('stream', attachRemote);

@@ -8,11 +8,14 @@ import {
 } from './cards';
 import type { GState, Instance } from './Game';
 import { mulliganDrawCount, MULLIGAN_FLOOR, MULLIGAN_INITIAL_HAND } from './Game';
-import { recordResultApi, getProfileApi, formatRecord, type Profile } from './profiles';
+import { getProfileApi, formatRecord, type Profile } from './profiles';
 import { CardHover, CardPreview } from './CardPreview';
 import { createPortal } from 'react-dom';
 import { VoiceChat } from './Voice';
 import { Haptics } from './haptics';
+
+/** Voice chat is off until inbound callers are authenticated — see the mount site. */
+const VOICE_CHAT_ENABLED = false;
 import {
   ArrowDown, ArrowRight, Bolt, Cards, Chain, Chat as ChatIcon, Check, ChevronLeft, ChevronRight,
   Close, Diamond, Dot, Hand as HandIcon, Minus, Moon, Orb, Plus, Refresh, Robot, Scroll as ScrollIcon,
@@ -621,35 +624,15 @@ export function ChainsBoard(props: Props) {
   const oppMulliganDone = !!G.mulligan?.done?.[oppId];
   const myMulliganCount = G.mulligan?.counts?.[myId] ?? 0;
 
-  // Auto-apply the joiner's stashed deck choice from the lobby modal, once.
-  const pickAppliedRef = useRef(false);
-  useEffect(() => {
-    if (!iMustPick || pickAppliedRef.current) return;
-    let stashedDeck: string | null = null;
-    let stashedColor: string | null = null;
-    try {
-      stashedDeck = sessionStorage.getItem('pendingCustomDeck');
-      stashedColor = sessionStorage.getItem('pendingPickColor');
-    } catch {}
-    if (stashedDeck) {
-      try {
-        const deck = JSON.parse(stashedDeck);
-        if (Array.isArray(deck) && deck.length > 0) {
-          pickAppliedRef.current = true;
-          try { sessionStorage.removeItem('pendingCustomDeck'); } catch {}
-          try { sessionStorage.removeItem('pendingPickColor'); } catch {}
-          // The first arg is ignored when a custom deck is provided; pass any color.
-          moves.chooseColor('sol' as Color, deck);
-          return;
-        }
-      } catch {}
-    }
-    if (stashedColor && COLORS.includes(stashedColor as Color)) {
-      pickAppliedRef.current = true;
-      try { sessionStorage.removeItem('pendingPickColor'); } catch {}
-      moves.chooseColor(stashedColor as Color);
-    }
-  }, [iMustPick, moves]);
+  // The colour-pick phase is dead in online play. `POST /games/create` and
+  // `/join` seat both players with their validated ACTIVE decks and set
+  // `colors: [null, null]`, so `needsColorPick` is never true in a server
+  // match — and no deck can arrive from the client as a `chooseColor` argument
+  // any more. The lobby used to stash `pendingCustomDeck` / `pendingPickColor`
+  // in sessionStorage and replay it here; both are gone with the deck picker.
+  //
+  // The pick UI below still runs for LOCAL play (SoloClient, Masterquest),
+  // where `setup` is baked client-side and a colour genuinely is chosen.
 
   // Auto-pass: after combat resolves on my turn, if I have no playable cards
   // in hand AND no untapped, non-sick memes that could still attack, end the
@@ -775,16 +758,33 @@ export function ChainsBoard(props: Props) {
   const [myProfile,  setMyProfile]  = useState<Profile | null>(null);
   const [oppProfile, setOppProfile] = useState<Profile | null>(null);
 
-  // Fetch profiles initially and again whenever a result is recorded.
+  // Both records come from the PUBLIC profile route, which works signed out and
+  // exposes no wallet address for either player.
   const refreshProfiles = React.useCallback(() => {
     getProfileApi(myName).then(setMyProfile).catch(() => {});
     getProfileApi(oppName).then(setOppProfile).catch(() => {});
   }, [myName, oppName]);
   useEffect(() => { refreshProfiles(); }, [refreshProfiles]);
 
-  // On gameover, post result to API. Server dedupes by matchID so it's safe for both clients to post.
-  // Solo (vs-bot) matches use a `solo-…` matchID and skip the server hop —
-  // their results are tracked locally via SoloClient -> dailyChallenge.ts.
+  // ── On gameover ───────────────────────────────────────────────────────────
+  //
+  // THE CLIENT DOES NOT REPORT THE RESULT, and cannot.
+  //
+  // This used to `POST /api/result` with a winner, a loser, ranked metadata and
+  // a wager payout instruction — from the browser, from BOTH clients, deduped
+  // by match id. That is the hole this migration exists to close: whoever holds
+  // the page can name themselves the winner of a staked match.
+  //
+  // There is now no endpoint anywhere that accepts a match result and no
+  // request shape that can name a winner. The game service derives the outcome
+  // from its own boardgame.io state, signs it with an HMAC shared only with the
+  // wager service, and writes it itself; the settlement worker pays out from
+  // those verified rows and from nothing else.
+  //
+  // What is left here is purely local: haptics, the daily-quest flag, and the
+  // solo-mode event. After a short delay we re-read both profiles, because by
+  // then the server has written the result and the W/L shown on the board
+  // should reflect it.
   const isSolo = !!matchID && matchID.startsWith('solo-');
   const recordedRef = useRef(false);
   useEffect(() => {
@@ -792,8 +792,6 @@ export function ChainsBoard(props: Props) {
     recordedRef.current = true;
     const draw = !!ctx.gameover.draw;
     const winnerId = ctx.gameover.winner as string | undefined;
-    const winnerName = winnerId === myId ? myName : winnerId === oppId ? oppName : null;
-    const loserName  = winnerName ? (winnerName === myName ? oppName : myName) : null;
     // Buzz for the result.
     if (draw) Haptics.turn();
     else if (winnerId === myId) Haptics.win();
@@ -812,32 +810,10 @@ export function ChainsBoard(props: Props) {
       } catch { /* swallow */ }
       return;
     }
-    const rankedMeta = G.ranked
-      ? {
-          ranked: true,
-          seasonId: G.ranked.seasonId,
-          // Seat 0 / 1 mapping: keep stable as p0/p1 for the rating service.
-          player0: myId === '0' ? myName : oppName,
-          player1: myId === '0' ? oppName : myName,
-          startedAt: G.ranked.startedAt,
-          replaySeed: matchID,
-        }
-      : {};
-    const wagerMeta = G.wager?.kind === 'master' && !draw
-      ? { wager: {
-            onchainId: G.wager.onchainId,
-            winnerSeat: winnerId === '0' ? '0' : '1',
-            mode: 'custodial',
-        } }
-      : {};
-    recordResultApi(matchID, {
-      winner: draw ? null : winnerName,
-      loser:  draw ? null : loserName,
-      draw,
-      ...rankedMeta,
-      ...wagerMeta,
-    } as any).then(() => refreshProfiles()).catch(e => console.warn('record result failed', e));
-  }, [ctx.gameover, matchID, myId, oppId, myName, oppName, refreshProfiles]);
+    // Give the game service a moment to write the row, then re-read the W/L.
+    const t = setTimeout(refreshProfiles, 2000);
+    return () => clearTimeout(t);
+  }, [ctx.gameover, matchID, myId, oppId, myName, oppName, isSolo, ctx.turn, refreshProfiles]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   const [showRules, setShowRules] = useState(false);
@@ -1110,9 +1086,7 @@ export function ChainsBoard(props: Props) {
         gameover={ctx.gameover}
         wager={G.wager}
         myId={myId}
-        oppId={oppId}
         myName={myName} oppName={oppName}
-        myProfile={myProfile} oppProfile={oppProfile}
       />
 
       <WinnerShareModal
@@ -1411,8 +1385,13 @@ export function ChainsBoard(props: Props) {
       <MatchRail entries={G.log} myId={myId} messages={chatMessages ?? []} sendChatMessage={sendChatMessage}
         open={railOpen} onOpenChange={setRailOpen} />
 
-      {/* Proximity voice with your opponent (PeerJS WebRTC). Skipped in solo. */}
-      {matchID && playerID && !isSolo && (
+      {/* Proximity voice with your opponent (PeerJS WebRTC). Skipped in solo.
+          DISABLED (security audit H-6): peer ids are derived from the public
+          matchID and the inbound handler answers ANY caller with a live mic
+          stream on the public PeerJS broker, so anyone who can read a match id
+          off the lobby can open a player's microphone. Do not re-enable until
+          inbound callers are authenticated against the match roster. */}
+      {VOICE_CHAT_ENABLED && matchID && playerID && !isSolo && (
         <VoiceChat matchID={matchID} playerID={playerID} displayName={myName} />
       )}
     </div>
@@ -1580,14 +1559,31 @@ function MatchRail({ entries, myId, messages, sendChatMessage, open, onOpenChang
   );
 }
 
+/**
+ * Shown when a STAKED match ends.
+ *
+ * This used to render the winner's wallet address with a "Copy" button and
+ * tell the loser to send them the money — a hand-settled wager dressed up as a
+ * payout screen. Two things killed it:
+ *
+ *   • No profile route returns another player's wallet address any more. Only
+ *     `GET /api/profiles/me` carries one, and only to its owner. There is
+ *     deliberately no address-to-profile lookup either.
+ *   • Settlement is not the players' job. The game service writes the verified
+ *     result and a background worker decides the payout from it. There is no
+ *     settlement endpoint for anyone to call — client or otherwise.
+ *
+ * So this is now an outcome notice, not an instruction. Note the client cannot
+ * currently create a staked match at all (see `WagerControls` in App.tsx); this
+ * survives for matches created elsewhere.
+ */
 function WagerPayoutModal({
-  gameover, wager, myId, oppId, myName, oppName, myProfile, oppProfile,
+  gameover, wager, myId, myName, oppName,
 }: {
   gameover: any;
   wager: GState['wager'];
-  myId: string; oppId: string;
+  myId: string;
   myName: string; oppName: string;
-  myProfile: Profile | null; oppProfile: Profile | null;
 }) {
   const [dismissed, setDismissed] = useState(false);
   useEffect(() => { setDismissed(false); }, [gameover?.winner, gameover?.draw]);
@@ -1597,16 +1593,7 @@ function WagerPayoutModal({
 
   const iWon = gameover.winner === myId;
   const winnerName = iWon ? myName : oppName;
-  const winnerProfile = iWon ? myProfile : oppProfile;
-  const winnerWallet = winnerProfile?.walletAddress || null;
-  const winnerChain = (winnerProfile?.walletChain || '').toUpperCase() || 'WALLET';
   const amount = wager.amount;
-  const loserId = iWon ? oppId : myId;
-  void loserId;
-
-  async function copy(text: string) {
-    try { await navigator.clipboard.writeText(text); } catch {}
-  }
 
   return (
     <div onClick={() => setDismissed(true)} style={{
@@ -1631,52 +1618,18 @@ function WagerPayoutModal({
           {iWon ? 'Victory' : 'Defeat'}
         </div>
         <div style={{ textAlign: 'center', color: '#b896ff', fontSize: 13, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 16 }}>
-          Wagered Match · {amount} $MASTER
+          Staked Match{amount ? ` · ${amount}` : ''}
         </div>
 
         <div style={{
-          padding: 14, background: 'rgba(0,0,0,0.45)',
-          border: '1px solid rgba(240,179,42,0.4)', borderRadius: 6, marginBottom: 14,
+          fontSize: 14.5, textAlign: 'center', color: '#ece1c7',
+          padding: '10px 6px', lineHeight: 1.55,
         }}>
-          <div style={{ fontSize: 12, color: '#a99878', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
-            Winner
+          <b style={{ color: '#ffd66e' }}>{winnerName}</b> won this match.
+          <div style={{ marginTop: 10, fontSize: 13.5, color: '#c9bda0' }}>
+            Settlement is handled by the server. Nothing is owed between players
+            directly, and there is nothing to send by hand.
           </div>
-          <div style={{
-            fontFamily: '"Cinzel", "Times New Roman", serif',
-            fontSize: 18, fontWeight: 700, color: '#ffd66e', marginBottom: 10,
-          }}>{winnerName}</div>
-
-          <div style={{ fontSize: 12, color: '#a99878', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
-            {winnerChain} Wallet
-          </div>
-          {winnerWallet ? (
-            <div style={{
-              display: 'flex', gap: 8, alignItems: 'center',
-              padding: '8px 10px', background: '#000',
-              border: '1px solid #4c1d95', borderRadius: 4,
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-              fontSize: 12, color: '#ece1c7', wordBreak: 'break-all',
-            }}>
-              <span style={{ flex: 1 }}>{winnerWallet}</span>
-              <button onClick={() => copy(winnerWallet)} className="brd-plate brd-plate--obsidian brd-plate--sm"
-                style={{ padding: '5px 12px' }}>Copy</button>
-            </div>
-          ) : (
-            <div style={{
-              padding: '8px 10px', background: 'rgba(120,80,20,0.25)',
-              border: '1px solid #a8740f', borderRadius: 4,
-              fontSize: 12, color: '#f0b32a',
-            }}>Winner has no wallet linked to their profile.</div>
-          )}
-        </div>
-
-        <div style={{
-          fontSize: 15, textAlign: 'center', color: '#ece1c7',
-          padding: '10px 6px', lineHeight: 1.45,
-        }}>
-          {iWon
-            ? <>You won the wager. Ask <b style={{ color: '#ffd66e' }}>{oppName}</b> to send you <b style={{ color: '#ffd66e' }}>{amount} $MASTER</b>.</>
-            : <>Please pay the winner <b style={{ color: '#ffd66e' }}>{amount} $MASTER</b>.</>}
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
@@ -1695,7 +1648,7 @@ function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: str
   if (gameover.winner !== myId) return null;
   if (dismissed) return null;
 
-  const siteUrl = (typeof window !== 'undefined' ? window.location.origin : 'https://www.masterstcg.com');
+  const siteUrl = (typeof window !== 'undefined' ? window.location.origin : 'https://ocva.online');
   const imgUrl = `${siteUrl}/share-win.jpg`;
   // Plain text only — the tweet body is a string, so no emoji/pictographs here.
   const tweetText = `I just won in On-Chain Virtual Arena!\n\nPlay the 5-chain onchain card game at ${siteUrl}`;

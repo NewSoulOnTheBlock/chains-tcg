@@ -12,7 +12,9 @@ import { CARDS, COLOR_META } from './cards';
 import {
   mintPack, resumePack, packCostEstimate, getEthBalance,
   getConnectedAccount, getWalletChainId, switchToRobinhood,
-  PACK_PRICE_ETH, ROBINHOOD_CHAIN_ID, type RevealedCard,
+  PACK_PRICE_ETH, ROBINHOOD_CHAIN_ID,
+  PACK_MINTING_AVAILABLE, PACK_MINTING_UNAVAILABLE_MESSAGE,
+  type RevealedCard,
 } from './pack-evm';
 import { connectRobinhoodChain, shortAddr } from './wallet';
 import { grantCards } from './collection';
@@ -447,10 +449,68 @@ function BenefitIcon({ kind }: { kind: 'cards' | 'foil' | 'chain' }) {
 
 // ── 3D pack (self-contained web component; can't crash React) ───────────────
 const ModelViewer = 'model-viewer' as any;
+
+/**
+ * `<model-viewer>` used to arrive as a <script> tag pointing at jsDelivr, which
+ * the production gateway's `script-src 'self'` CSP blocks. It is now a real
+ * dependency, dynamically imported so its ~1MB (it ships its own copy of
+ * three.js) lands in a separate chunk that only the Boosters screen pays for.
+ * The import registers the custom element as a side effect.
+ */
+let modelViewerPromise: Promise<unknown> | null = null;
+function loadModelViewer(): Promise<unknown> {
+  if (typeof customElements !== 'undefined' && customElements.get('model-viewer')) {
+    return Promise.resolve();
+  }
+  modelViewerPromise ??= (async () => {
+    // <model-viewer> lazily pulls its DRACO decoder, KTX2 transcoder and
+    // Lottie loader from www.gstatic.com / cdn.jsdelivr.net by default — a
+    // <script>/wasm fetch that `default-src 'self'` would block. It reads
+    // `self.ModelViewerElement` as a config bag when an element is
+    // constructed, so pinning these to same-origin paths *before* the import
+    // guarantees no third-party request can ever be issued.
+    //
+    // booster-pack.glb needs none of them (its extensionsRequired are
+    // EXT_meshopt_compression / EXT_texture_webp / KHR_mesh_quantization), so
+    // these directories are intentionally empty. If a future model does use
+    // DRACO or KTX2, drop the decoder files from
+    // node_modules/three/examples/jsm/libs/{draco,basis}/ into public/ at
+    // these paths — do not point them back at a CDN.
+    const g = globalThis as any;
+    g.ModelViewerElement = {
+      ...(g.ModelViewerElement ?? {}),
+      dracoDecoderLocation: '/model-viewer/draco/',
+      ktx2TranscoderLocation: '/model-viewer/basis/',
+      lottieLoaderLocation: '/model-viewer/lottie-loader.js',
+    };
+    await import('@google/model-viewer');
+  })().catch((err) => {
+    modelViewerPromise = null;  // let a later mount retry
+    throw err;
+  });
+  return modelViewerPromise;
+}
+
 function Pack3D({ spinning }: { spinning?: boolean }) {
   const ref = useRef<any>(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+  // Only true once the custom element is registered; until then we render the
+  // CSS fallback pack rather than an inert <model-viewer>.
+  const [defined, setDefined] = useState(
+    () => typeof customElements !== 'undefined' && !!customElements.get('model-viewer'),
+  );
+
+  useEffect(() => {
+    if (defined) return;
+    let cancelled = false;
+    loadModelViewer().then(
+      () => { if (!cancelled) setDefined(true); },
+      () => { if (!cancelled) setFailed(true); },
+    );
+    return () => { cancelled = true; };
+  }, [defined]);
+
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -460,7 +520,8 @@ function Pack3D({ spinning }: { spinning?: boolean }) {
     el.addEventListener('error', onErr);
     const t = setTimeout(() => { if (!el.loaded) setFailed((f) => f || !(el as any).modelIsVisible); }, 8000);
     return () => { el.removeEventListener('load', onLoad); el.removeEventListener('error', onErr); clearTimeout(t); };
-  }, []);
+  }, [defined]);
+
   return (
     <div style={{ position: 'relative', width: 320, height: 360, display: 'grid', placeItems: 'center' }}>
       {(!ready || failed) && (
@@ -468,7 +529,7 @@ function Pack3D({ spinning }: { spinning?: boolean }) {
           <StaticPack spinning={spinning} loading={!failed} />
         </div>
       )}
-      {!failed && (
+      {!failed && defined && (
         <ModelViewer
           ref={ref}
           src="/booster-pack.glb?v=2"
@@ -550,14 +611,23 @@ function PurchasePanel(props: {
         <Row label="TOTAL" accent value={`${priceEth} ETH`} big />
 
         {/* Primary action — reflects the live state machine. */}
-        <PrimaryAction
-          tx={tx} connected={connected} onRobinhood={onRobinhood} switching={switching} pending={pending}
-          priceEth={priceEth} onConnect={onConnect} onSwitch={onSwitch} onOpen={onOpen}
-        />
-
-        <div style={{ textAlign: 'center', fontSize: 11, color: C.textLo }}>
-          {pending ? 'You can safely wait — leaving this page won’t cancel the mint.' : 'Wallet confirmation required · Network fee not included'}
-        </div>
+        {/* The purchase path is gated: the backend has no read endpoint for
+            Robinhood Chain, so a mint could be paid for and never confirmed.
+            See src/pack-evm.ts. A disabled button with a stated reason beats a
+            live one that takes ETH and hangs on the reveal. */}
+        {PACK_MINTING_AVAILABLE ? (
+          <>
+            <PrimaryAction
+              tx={tx} connected={connected} onRobinhood={onRobinhood} switching={switching} pending={pending}
+              priceEth={priceEth} onConnect={onConnect} onSwitch={onSwitch} onOpen={onOpen}
+            />
+            <div style={{ textAlign: 'center', fontSize: 11, color: C.textLo }}>
+              {pending ? 'You can safely wait — leaving this page won’t cancel the mint.' : 'Wallet confirmation required · Network fee not included'}
+            </div>
+          </>
+        ) : (
+          <ComingSoonNotice />
+        )}
 
         {(tx === 'confirming') && hash && <PendingHash hash={hash} />}
 
@@ -615,6 +685,40 @@ function Row({ label, value, accent, big }: { label: string; value: React.ReactN
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
       <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', color: accent ? C.accentHi : C.textMid }}>{label}</span>
       <span style={{ fontSize: big ? 22 : 15, fontWeight: 800, color: accent ? C.accentHi : C.textHi, textAlign: 'right' }}>{value}</span>
+    </div>
+  );
+}
+
+/**
+ * Shown in place of the buy button while pack minting is off.
+ *
+ * Two separate things are unavailable and the copy says so plainly rather than
+ * implying a date:
+ *   • this EVM pack contract has no read path through the backend's RPC proxy
+ *     (src/pack-evm.ts);
+ *   • the backend's own booster tickets never mint an NFT either —
+ *     `GET /wager/boosters/supply` reports `mintingEnabled: false`
+ *     (INTEGRATION.md §7).
+ */
+function ComingSoonNotice() {
+  return (
+    <div style={{
+      padding: '16px 18px', borderRadius: R.md,
+      background: C.bg1, border: `1px dashed ${C.accent}66`,
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 9,
+        fontFamily: F.serif, fontWeight: 700, fontSize: 13.5, letterSpacing: '0.16em',
+        textTransform: 'uppercase', color: C.accentHi,
+      }}><Warning size={15} /> Packs coming soon</div>
+      <div style={{ fontSize: 12.5, color: C.textMid, marginTop: 8, lineHeight: 1.6 }}>
+        {PACK_MINTING_UNAVAILABLE_MESSAGE}
+      </div>
+      <div style={{ fontSize: 12.5, color: C.textLo, marginTop: 8, lineHeight: 1.6 }}>
+        Booster tickets on the new backend do not mint an NFT yet either, so
+        nothing here would arrive in your wallet. The card list and pull rates
+        below are real and final — you just cannot buy in yet.
+      </div>
     </div>
   );
 }

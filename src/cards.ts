@@ -63,16 +63,16 @@ export interface CardDef {
   image?: string;
 }
 
-/** CoinMarketCap static logo CDN; the trailing id is the CMC coin id. */
-const cmc = (id: number) => `https://s2.coinmarketcap.com/static/img/coins/128x128/${id}.png`;
-
 /**
- * Twemoji CDN (Twitter's open-source emoji set, MIT/CC-BY licensed).
- * Used as art for Machines/Moves since these aren't tokens with logos.
- * Pass the unicode codepoint(s) in lowercase hex, joined with '-' for ZWJ sequences.
+ * Token logo sourced from CoinMarketCap, vendored into `public/cards/` at
+ * build-authoring time rather than hotlinked from s2.coinmarketcap.com — the
+ * production gateway's `default-src 'self'` CSP blocks third-party img hosts.
+ * The argument is still the CMC coin id so the provenance stays greppable.
+ *
+ * Adding a new one: `curl -o public/cards/cmc-<id>.png
+ * https://s2.coinmarketcap.com/static/img/coins/128x128/<id>.png`.
  */
-const emo = (cp: string) =>
-  `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/${cp}.png`;
+const cmc = (id: number) => `/cards/cmc-${id}.png`;
 
 /** Image overrides keyed by card id. Cards without an entry render the chain glyph. */
 const IMAGES: Record<string, string> = {

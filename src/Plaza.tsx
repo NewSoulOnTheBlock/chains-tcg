@@ -8,10 +8,17 @@ import { Temple } from './icons';
 
 type Color = 'bnb' | 'sol' | 'eth' | 'robinhood' | 'base';
 
+/**
+ * A row of `GET /games/lobby`, narrowed to what the plaza draws.
+ *
+ * Kept structural rather than importing `LobbyEntry` so this stays a pure view
+ * component. Note there is no `setupData` and no colours: the lobby response
+ * deliberately carries no decklists or match internals, so tables are drawn in
+ * neutral colours now.
+ */
 type Match = {
   matchID: string;
-  players: Array<{ id: number; name?: string }>;
-  setupData?: { colors?: Array<Color | null> };
+  seats: Array<{ filled: boolean; displayName: string | null }>;
 };
 
 type Table = {
@@ -64,7 +71,7 @@ export function Plaza({
 
   // Lay open matches out as tables along the middle band.
   const tables: Table[] = useMemo(() => {
-    const open = matches.filter(m => (m.players ?? []).some(p => !p.name)).slice(0, 6);
+    const open = matches.filter(m => (m.seats ?? []).some(s => !s.filled)).slice(0, 6);
     return open.map((m, i) => {
       const col = 3 + (i % 6) * 3;
       const row = 7;
@@ -167,8 +174,10 @@ export function Plaza({
 
     // Tables (open matches).
     for (const t of tables) {
-      const c1 = t.match.setupData?.colors?.[0];
-      const c2 = t.match.setupData?.colors?.[1];
+      // The lobby never reveals what anyone is playing, so both seats draw in
+      // the neutral table colour.
+      const c1: Color | null = null;
+      const c2: Color | null = null;
       ctx.fillStyle = '#3a2a1a';
       ctx.fillRect(t.x * TILE, t.y * TILE, t.w * TILE, t.h * TILE);
       ctx.strokeStyle = '#c8a050';
@@ -244,7 +253,7 @@ export function Plaza({
                   Open table · {popup.table.match.matchID.slice(0, 8)}
                 </div>
                 <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 8 }}>
-                  {(popup.table.match.players ?? []).filter(p => p.name).length}/2 seated
+                  {(popup.table.match.seats ?? []).filter(s => s.filled).length}/2 seated
                 </div>
                 <button onClick={() => onJoinMatch(popup.table.match)} style={{
                   background: '#6c4bd8', color: '#fff', border: 'none',

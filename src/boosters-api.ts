@@ -1,60 +1,169 @@
 // src/boosters-api.ts
-// HTTP client for the REAL Booster Pack Ticket mint flow (Metaplex Core).
 //
-// Flow:
-//   1. getBoosterSupply()                 → price + treasury pubkey + remaining
-//   2. buildBuyIntent(wallet)             → unsigned tx (SOL transfer to treasury)
-//   3. confirmPayment(wallet, signature)  → server mints NFT ticket to wallet
-//   4. getMyTickets(wallet)               → list owned tickets + redemption status
-//   5. redeemDigital / redeemPhysical / redeemMerch
+// Client for the booster ticket routes on the secure backend
+// (`/wager/boosters/*`, INTEGRATION.md §3). Goes through `src/api/http` so it
+// inherits the bearer token, the refresh-once-on-401 and the 429 handling.
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// NOTHING HERE MINTS AN NFT (INTEGRATION.md §7)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `UnavailableTicketMinter` is what is wired in production. The reservation,
+// the ticket number, the supply cap and the idempotency constraints are all
+// real and enforced in Postgres — but `assetAddress` and `tokenId` stay `null`
+// forever and `confirm()` answers 202 with `minted: false`.
+//
+// So the UI must NOT say "minted", must NOT render an explorer link, and must
+// NOT imply the player owns an on-chain asset. Gate the whole purchase flow on
+// `supply.mintingEnabled`, which production currently reports as `false`:
+//
+//   {"cap":2000,"reserved":0,"remaining":2000,
+//    "priceWei":"3500000000000000",
+//    "treasury":"0x2fa2…c634","mintingEnabled":false}
+//
+// Digital redemption is off too (`BOOSTER_CARD_POOL` is empty → 503).
+//
+// ─── WHAT CHANGED FROM THE LEGACY CLIENT ───────────────────────────────────
+//
+//   /api/boosters/*                    → /wager/boosters/*
+//   buy-intent {wallet}                → POST /intents, empty body — the seat,
+//                                        the price and the recipient are all
+//                                        server-side; a client never proposes
+//                                        an amount or names a wallet
+//   confirm {wallet, signature}        → confirm {paymentTxHash}
+//   tickets/:wallet (UNAUTHENTICATED!) → GET /tickets, scoped to the token.
+//                                        The old route let anyone read anyone's
+//                                        tickets and shipping address by
+//                                        address alone — that is H-2.
+//   redeem-* {mintAddress, wallet}     → tickets/:n/redeem/{kind}; ownership is
+//                                        proven against the reservation row,
+//                                        never a body field
+//   Solana / lamports / SOL price      → EVM / wei. There is no Solana money
+//                                        path in this backend at all.
 
-const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
-
-async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-  });
-  if (!res.ok) {
-    let detail = '';
-    try { detail = (await res.json())?.error ?? ''; } catch { /* noop */ }
-    throw new Error(`${path}: ${res.status} ${res.statusText}${detail ? ' — ' + detail : ''}`);
-  }
-  return res.json() as Promise<T>;
-}
+import { get, post } from './api';
 
 // ── Supply / config ────────────────────────────────────────────────────────
 
 export type BoosterSupply = {
-  minted: number;
   cap: number;
+  reserved: number;
   remaining: number;
-  priceSol: number;
-  priceLamports: number;
-  treasury: string | null;
-  mode: 'live' | 'preview';
+  /** Decimal string in wei. Bigint-safe — never `Number()` it. */
+  priceWei: string;
+  /** The address a payment must be sent to. */
+  treasury: string;
+  /**
+   * FALSE in production. When false, a confirmed payment still reserves a
+   * ticket number but no NFT is ever issued. Gate the buy flow on this.
+   */
+  mintingEnabled: boolean;
 };
 
-export async function getBoosterSupply(): Promise<BoosterSupply> {
-  return http<BoosterSupply>('/api/boosters/supply');
+/** `GET /wager/boosters/supply` — public, works signed out. */
+export function getBoosterSupply(signal?: AbortSignal): Promise<BoosterSupply> {
+  return get<BoosterSupply>('/wager/boosters/supply', { auth: 'optional', signal });
 }
 
-// ── Mint flow ──────────────────────────────────────────────────────────────
+// ── Purchase ───────────────────────────────────────────────────────────────
 
-export type BuyIntent = {
-  ok: true;
-  txBase64: string;
-  treasury: string;
-  lamports: number;
-  blockhash: string;
-  lastValidBlockHeight: number;
+export type BoosterIntent = {
+  /** Server-issued, single-use. */
+  nonce: string;
+  /** Where the payment must go. */
+  recipient: string;
+  /** EXACT value the payment must carry, in wei. Decimal string. */
+  valueWei: string;
+  /** Calldata that binds the payment to this intent. Send it verbatim. */
+  data: string;
+  /** ISO-8601. */
+  expiresAt: string;
 };
 
-export async function buildBuyIntent(wallet: string): Promise<BuyIntent> {
-  return http<BuyIntent>('/api/boosters/buy-intent', {
-    method: 'POST',
-    body: JSON.stringify({ wallet }),
-  });
+/**
+ * `POST /wager/boosters/intents` — 201. Empty body.
+ *
+ * The price, the recipient and the buyer all come from the server and the
+ * session. Broadcast the resulting transaction through the USER'S OWN wallet:
+ * `/rpc/evm` refuses `eth_sendRawTransaction` by design.
+ *
+ * 409 + `reason: 'sold_out'` when the cap is reached.
+ */
+export async function createBoosterIntent(signal?: AbortSignal): Promise<BoosterIntent> {
+  const { intent } = await post<{ intent: BoosterIntent }>(
+    '/wager/boosters/intents',
+    {},
+    { signal },
+  );
+  return intent;
+}
+
+export type RedemptionKind = 'digital' | 'physical' | 'merch';
+
+export type Ticket = {
+  ticketNumber: number;
+  /** ALWAYS null on this deployment — no NFT is ever issued. */
+  assetAddress: string | null;
+  /** ALWAYS null on this deployment. */
+  tokenId: string | null;
+  /** `reserved` | `minted` | `mint_failed`. Production stops at `reserved`. */
+  status: string;
+  ownerAddress: string;
+  /** ISO-8601. */
+  reservedAt: string;
+  /** ISO-8601, or null while unminted — which is always, here. */
+  mintedAt: string | null;
+  redemptions: Array<{
+    kind: RedemptionKind;
+    at: string;
+    cardIds: string[] | null;
+    tracking: string | null;
+  }>;
+};
+
+export type ConfirmResult = {
+  ticket: Ticket;
+  /** FALSE on this deployment. Do not render "minted" when this is false. */
+  minted: boolean;
+  /** Null on this deployment. */
+  mintTxHash: string | null;
+};
+
+/**
+ * `POST /wager/boosters/confirm` — binds a paid transaction to one intent.
+ *
+ * 200 when the ticket minted, **202 when it only reserved**, which is the only
+ * outcome production produces. Both are success: the buyer owns ticket number
+ * N and nobody else can be given it.
+ */
+export function confirmBoosterPayment(
+  paymentTxHash: string,
+  signal?: AbortSignal,
+): Promise<ConfirmResult> {
+  return post<ConfirmResult>('/wager/boosters/confirm', { paymentTxHash }, { signal });
+}
+
+// ── Inventory + redemption ─────────────────────────────────────────────────
+
+/**
+ * `GET /wager/boosters/tickets` — YOUR tickets, scoped to the session.
+ *
+ * There is deliberately no route that takes a wallet address and returns
+ * tickets: the legacy one did, unauthenticated, and leaked the buyer's
+ * shipping address with it.
+ */
+export async function getMyTickets(signal?: AbortSignal): Promise<Ticket[]> {
+  const { tickets } = await get<{ tickets: Ticket[] }>('/wager/boosters/tickets', { signal });
+  return tickets;
+}
+
+/** `GET /wager/boosters/tickets/:n` — owner (or operator) only. */
+export async function getTicket(ticketNumber: number, signal?: AbortSignal): Promise<Ticket> {
+  const { ticket } = await get<{ ticket: Ticket }>(
+    `/wager/boosters/tickets/${ticketNumber}`,
+    { signal },
+  );
+  return ticket;
 }
 
 export type ShippingAddress = {
@@ -68,59 +177,35 @@ export type ShippingAddress = {
   email?: string;
 };
 
-export type TicketRow = {
-  mintAddress: string;
-  buyerWallet: string;
-  ticketNumber: number;
-  paymentSig: string;
-  priceSol: number;
-  mintedAt: number;
-  digitalRedeemedAt: number | null;
-  digitalCardIds: string[] | null;
-  physicalRedeemedAt: number | null;
-  physicalAddress: ShippingAddress | null;
-  physicalTracking: string | null;
-  merchRedeemedAt: number | null;
-  merchAddress: ShippingAddress | null;
-  merchTracking: string | null;
-};
-
-export type ConfirmResult = {
-  ok: true;
-  ticket: TicketRow;
-  mintSignature: string;
-};
-
-export async function confirmPayment(wallet: string, signature: string): Promise<ConfirmResult> {
-  return http<ConfirmResult>('/api/boosters/confirm', {
-    method: 'POST',
-    body: JSON.stringify({ wallet, signature }),
-  });
+/**
+ * `POST /wager/boosters/tickets/:n/redeem/{kind}` — 201. One redemption per
+ * kind per ticket, enforced by a database constraint.
+ *
+ * `digital` takes no address and CURRENTLY 503s (`reason:
+ * 'card_pool_unconfigured'`) because `BOOSTER_CARD_POOL` is empty — the server
+ * refuses to invent card ids rather than handing out something meaningless.
+ */
+export function redeemTicket(
+  ticketNumber: number,
+  kind: RedemptionKind,
+  address?: ShippingAddress,
+  signal?: AbortSignal,
+): Promise<{ ticket: Ticket; cardIds: string[] | null }> {
+  return post<{ ticket: Ticket; cardIds: string[] | null }>(
+    `/wager/boosters/tickets/${ticketNumber}/redeem/${kind}`,
+    kind === 'digital' ? {} : { address },
+    { signal },
+  );
 }
 
-// ── Inventory + redemption ─────────────────────────────────────────────────
-
-export async function getMyTickets(wallet: string): Promise<{ wallet: string; tickets: TicketRow[] }> {
-  return http(`/api/boosters/tickets/${encodeURIComponent(wallet)}`);
-}
-
-export async function redeemDigital(mintAddress: string, wallet: string): Promise<{ ok: true; cardIds: string[]; ticket: TicketRow }> {
-  return http('/api/boosters/redeem-digital', {
-    method: 'POST',
-    body: JSON.stringify({ mintAddress, wallet }),
-  });
-}
-
-export async function redeemPhysical(mintAddress: string, wallet: string, address: ShippingAddress): Promise<{ ok: true; ticket: TicketRow }> {
-  return http('/api/boosters/redeem-physical', {
-    method: 'POST',
-    body: JSON.stringify({ mintAddress, wallet, address }),
-  });
-}
-
-export async function redeemMerch(mintAddress: string, wallet: string, address: ShippingAddress): Promise<{ ok: true; ticket: TicketRow }> {
-  return http('/api/boosters/redeem-merch', {
-    method: 'POST',
-    body: JSON.stringify({ mintAddress, wallet, address }),
-  });
+/** `GET /wager/boosters/tickets/:n/shipping` — owner or operator only (H-2). */
+export async function getShipping(
+  ticketNumber: number,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const { shipping } = await get<{ shipping: unknown }>(
+    `/wager/boosters/tickets/${ticketNumber}/shipping`,
+    { signal },
+  );
+  return shipping;
 }

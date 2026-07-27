@@ -4,18 +4,23 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Client } from 'boardgame.io/react';
 import { SocketIO } from 'boardgame.io/multiplayer';
-import { LobbyClient } from 'boardgame.io/client';
 import { Plaza } from './Plaza';
 import { ChainsTCG } from './Game';
 import { ChainsBoard } from './Board';
 import { CARDS, COLOR_META, COLORS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MAX_COPIES_NONBASIC, isBasicNode, type Color, type CardType, type CardDef, type DeckIssue, type DeckValidation } from './cards';
 import {
-  listProfilesApi, getProfileApi, getProfileByWalletApi, upsertProfileApi, updateProfileApi, getLibraryApi,
-  getDeckApi, saveDeckApi, formatRecord, type Profile, type LibraryCard,
+  listProfilesApi, getProfileApi, getMyProfileApi, updateMyProfileApi, getMatchHistoryApi,
+  formatRecord, type Profile,
   listDecksApi, createDeckApi, updateDeckApi, deleteDeckApi, activateDeckApi, type DeckEntry,
-  createChallengeApi, listIncomingChallengesApi, listOutgoingChallengesApi, respondChallengeApi, type Challenge,
 } from './profiles';
-import { connectSolanaWith, connectSolana, getSolanaWallet, detectSolanaWallets, connectRobinhoodChain, detectEvmWallet, shortAddr, type ConnectedWallet, type SolanaWalletKind } from './wallet';
+import {
+  auth, decks as decksApi, lobby as lobbyApi, session as sessionApi,
+  ApiError, SOCKET_URL,
+  type AuthChain, type LobbyEntry, type OwnProfile, type SeatInfo,
+} from './api';
+import { errorText, errorIssues, isDeckBlocked } from './error-text';
+import { RANKED_AVAILABLE, RANKED_UNAVAILABLE_MESSAGE } from './ranked-client';
+import { connectRobinhoodChain, detectEvmWallet, shortAddr, ROBINHOOD_CHAIN } from './wallet';
 import { getCollection, deckCap, validateOwnedDeck, ownershipIssues } from './collection';
 import { color as C, font as F, surface as SURF, edge as EDGE, depth as DEPTH } from './theme';
 import { Button as UIButton, goldPlate, obsidianPlate, engravedPanel } from './ui';
@@ -32,19 +37,12 @@ import {
   Hand, Dice, Icon, type IconKey,
 } from './icons';
 import { CardHover, CardPreview } from './CardPreview';
-import { RankedAPI, tierColors, rankLabel, type PublicRankedProfile, type LeaderboardEntry } from './ranked-client';
-import { Connection } from '@solana/web3.js';
-import { newMatchId, matchIdToHex } from './wager-program';
-import {
-  requestWagerIntent, depositCustodialWager,
-} from './wager-custodial';
 import { SoloClient } from './SoloClient';
 import type { Difficulty } from './bot';
 import type { SoloMode } from './SoloClient';
 import { saveDailyResult, todayKey, todayBest } from './dailyChallenge';
 import { BoostersPage } from './Boosters';
 import { MasterquestPage } from './masterquest/MasterquestPage';
-import { listOwnedSprotoGremlins, SPROTO_COLLECTION_MINT, type OwnedNft } from './nft-showcase';
 import ShinyText, { ShinyBrand, ShinyButtonLabel } from './ShinyText';
 // PixelTrail is lazy-loaded — it pulls in three + r3f + drei (~240KB
 // gzipped), which we don't want in the in-game bundle. Loaded on demand
@@ -54,63 +52,15 @@ import SideRays from './SideRays';
 import Iridescence from './Iridescence';
 
 // ── Config ──────────────────────────────────────────────────────────────────
-// Server base: in dev Vite proxies /games (lobby) and /socket.io to :8000.
-// In prod the React build is served by the same Node server, so use same origin.
-const SERVER_BASE = (import.meta.env.VITE_SERVER_BASE as string | undefined) ?? '';
-const GAME_NAME = ChainsTCG.name!;
+// There is no same-origin server any more. The API lives on its own origin
+// (`VITE_API_BASE`, see `src/api/config.ts` and `.env.development` /
+// `.env.production`), and the boardgame.io socket transport sits on that same
+// gateway origin at `/socket.io/`.
+//
+// boardgame.io's LOBBY REST API is not mounted server-side at all — no
+// `GET /games/chains-tcg`, no `/create`, no `/join`, no `/playAgain`. Every
+// lobby operation goes through `lobbyApi` (`src/api/lobby.ts`).
 const COLOR_ORDER: Color[] = ['bnb', 'sol', 'eth', 'robinhood', 'base'];
-
-const lobby = new LobbyClient({ server: SERVER_BASE || undefined });
-
-// Lazy-init Solana connection (only used for wagered matches).
-// We build a wrapper that transparently fails over to a public-RPC pool when
-// the primary endpoint 403s or rate-limits — common when the build did not
-// inject VITE_SOLANA_RPC (e.g. HELIUS_API_KEY unset in the deploy env).
-let _solConn: Connection | null = null;
-function solConn(): Connection {
-  if (!_solConn) {
-    const env = (import.meta.env.VITE_SOLANA_RPC as string | undefined) || '';
-    const fallbacks = [
-      'https://solana-rpc.publicnode.com',
-      'https://solana-mainnet.public.blastapi.io',
-      'https://solana.drpc.org',
-      'https://api.mainnet-beta.solana.com',
-    ];
-    const candidates = [env, ...fallbacks].filter(Boolean) as string[];
-    const conns = candidates.map(u => new Connection(u, 'confirmed'));
-    const primary = conns[0];
-    // Patch _rpcRequest on the primary so any 403/429/5xx auto-rotates.
-    let idx = 0;
-    const tryNext = async (method: string, args: any[]): Promise<any> => {
-      let lastErr: any;
-      for (let i = 0; i < conns.length; i++) {
-        const c = conns[(idx + i) % conns.length];
-        try {
-          const res = await (c as any)._rpcRequestOriginal(method, args);
-          if (res?.error && /401|403|forbidden|429|rate|invalid api key|unauthor/i.test(JSON.stringify(res.error))) {
-            lastErr = new Error(JSON.stringify(res.error));
-            continue;
-          }
-          if (i > 0) {
-            idx = (idx + i) % conns.length;
-            try { console.warn('[rpc] failover ->', candidates[idx]); } catch {}
-          }
-          return res;
-        } catch (e: any) {
-          lastErr = e;
-          if (!/401|403|forbidden|429|rate|invalid api key|unauthor|fetch|network|timeout/i.test(String(e?.message))) throw e;
-        }
-      }
-      throw lastErr ?? new Error('all RPC endpoints failed');
-    };
-    for (const c of conns) {
-      (c as any)._rpcRequestOriginal = (c as any)._rpcRequest.bind(c);
-    }
-    (primary as any)._rpcRequest = tryNext;
-    _solConn = primary;
-  }
-  return _solConn;
-}
 
 // ── Responsive helper ──────────────────────────────────────────────────────
 function useIsMobile(breakpoint = 720) {
@@ -143,15 +93,69 @@ const local = {
   del(k: string) { try { localStorage.removeItem(k); } catch {} },
 };
 
-type Seat = { matchID: string; playerID: string; credentials: string; playerName: string };
+/**
+ * The player's seat in a match.
+ *
+ * `playerID` and `credentials` are BOTH NULL until an opponent joins: while the
+ * match is `open` the server has not materialised a boardgame.io match yet, so
+ * `GET /games/:id/seat` returns `credentials: null` and omits `playerID`
+ * entirely. `MatchSeat` polls until they arrive and only then mounts the
+ * socket client.
+ *
+ * `seat` is a NUMBER (0 | 1); `playerID` is boardgame.io's STRING form of the
+ * same value. They are not interchangeable.
+ */
+type Seat = {
+  matchID: string;
+  seat: 0 | 1;
+  playerID: '0' | '1' | null;
+  credentials: string | null;
+  playerName: string;
+};
+
+/** Build a `Seat` from whatever `GET /games/:id/seat` returned. */
+function seatFrom(info: SeatInfo, playerName: string): Seat {
+  return {
+    matchID: info.matchID,
+    seat: info.seat,
+    playerID: info.playerID ?? null,
+    credentials: info.credentials,
+    playerName,
+  };
+}
+
+/**
+ * The chain slug sent to `/auth/nonce`, i.e. the server's IDENTITY NAMESPACE.
+ *
+ * The allowlist is `ethereum | base | arbitrum | polygon | solana`; there is no
+ * `robinhood` value, even though Robinhood Chain (4663) is the only network
+ * this game uses. An EVM signature is chain-agnostic ecrecover, so the slug
+ * changes nothing but the `Chain ID` line in the message the user reads.
+ *
+ * Two consequences worth knowing:
+ *   • the sign-in message says "Chain ID: 1" while the wallet is on 4663;
+ *   • a profile is keyed on (chain, address), so changing this slug later
+ *     would strand every existing account behind a new identity.
+ * Adding a `robinhood` slug server-side is the fix; see the punch list.
+ */
+const SIGN_IN_CHAIN: AuthChain = 'ethereum';
 
 // ── Login screen ────────────────────────────────────────────────────────────
-// ── Login screen (premium fantasy gateway) ──────────────────────────────────
-const LOGIN_NAMES = [
-  'MoonPepe', 'GasWizard', 'RuneKnight', 'ChainLord', 'SnowMage',
-  'DegenPaladin', 'VoidPepe', 'CryptoWarden', 'ArcaneBull', 'MemeKing',
-  'NodeShaman', 'AlphaSeer', 'PixelOracle', 'ShardSorcerer', 'FrogLord',
-];
+//
+// Identity is a WALLET SIGNATURE. There is no name field, no guest mode, no
+// `?name=` deep link and nothing read out of storage: the only way in is
+//
+//   connect wallet → server mints a challenge → wallet signs it VERBATIM
+//                  → server returns a token pair
+//
+// `auth.signIn()` (src/api/auth.ts) owns the three-step handshake; this
+// component owns only the wallet CONNECTION and the chain choice.
+//
+// The chain slug is the server's own: ethereum | base | arbitrum | polygon |
+// solana. There is no `evm` — `src/wallet.ts` uses that coarser word for
+// provider selection and `auth.toAuthChain()` translates. An EVM signature is
+// plain ecrecover and chain-agnostic, so the slug only decides which `Chain ID`
+// line the user sees in the message they are asked to sign.
 
 /** Gold interlocking geometric emblem for the login hero. */
 function LoginEmblem({ size = 92 }: { size?: number }) {
@@ -173,78 +177,46 @@ function LoginEmblem({ size = 92 }: { size?: number }) {
   );
 }
 
-/** Decorative, non-interactive TCG card used to frame the login hero (desktop only). */
-function LoginDecoCard({ cardName, klass, cost, atk, def, hue, style }: {
-  cardName: string; klass: string; cost: number; atk: number; def: number; hue: number;
-  style?: React.CSSProperties;
-}) {
-  return (
-    <div style={{
-      width: 150, height: 214, borderRadius: 12, padding: 8, position: 'relative',
-      background: `linear-gradient(160deg, hsl(${hue} 45% 16%), hsl(${hue} 55% 8%))`,
-      border: '1px solid rgba(212,175,55,0.55)',
-      boxShadow: '0 26px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06)',
-      color: '#e8e2d0', fontFamily: 'inherit',
-      ...style,
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{
-          width: 22, height: 22, borderRadius: '50%', fontWeight: 900, fontSize: 12,
-          background: 'linear-gradient(180deg,#ffe9a8,#b98f2b)', color: '#1a1408',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>{cost}</div>
-      </div>
-      <div style={{ marginTop: 6, fontSize: 10, fontWeight: 800, letterSpacing: 1, textAlign: 'center', color: '#f0e6c8' }}>{cardName}</div>
-      <div style={{
-        marginTop: 6, height: 96, borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)',
-        background: `radial-gradient(circle at 50% 38%, hsl(${hue} 70% 48% / .55), transparent 70%), linear-gradient(180deg, hsl(${hue} 40% 24%), hsl(${hue} 40% 10%))`,
-      }} />
-      <div style={{ marginTop: 6, fontSize: 8, fontWeight: 800, letterSpacing: 2, textAlign: 'center', color: '#c9a94a', textTransform: 'uppercase' }}>{klass}</div>
-      <div style={{ position: 'absolute', left: 9, bottom: 6, fontSize: 12, fontWeight: 900, color: '#8fd0ff' }}>{atk}</div>
-      <div style={{ position: 'absolute', right: 9, bottom: 6, fontSize: 12, fontWeight: 900, color: '#ff9a6a' }}>{def}</div>
-    </div>
-  );
-}
-
-function Login({ onLogin, onFirstTime }: {
-  onLogin: (name: string) => void;
-  onFirstTime: (wallet: ConnectedWallet) => void;
-}) {
-  const [name, setName] = useState(local.get<string>('lastName', '') || sess.get<string>('lastName', ''));
+function Login({ onSignedIn }: { onSignedIn: () => void }) {
   const [err, setErr] = useState('');
-  const [busy, setBusy] = useState<string | null>(null);
-  const [mode, setMode] = useState<'wallet' | 'email' | 'guest'>('wallet');
-  const [notice, setNotice] = useState('');
+  const [stage, setStage] = useState<'idle' | 'connecting' | 'signing'>('idle');
+  const [remember, setRemember] = useState(false);
 
-  async function doConnect(kind: SolanaWalletKind) {
-    setErr(''); setBusy(kind);
+  // "Remember me on this device" is the ONLY way the refresh token reaches
+  // localStorage. The default is sessionStorage — one tab, gone when it closes
+  // — because the refresh token is the long-lived credential and leaving it in
+  // localStorage is exactly the finding (M-4) this migration exists to fix.
+  useEffect(() => {
+    sessionApi.setPersistence(remember ? 'local' : 'session');
+  }, [remember]);
+
+  /**
+   * Connect the wallet on Robinhood Chain, then sign the server's challenge.
+   *
+   * `connectRobinhoodChain()` also switches (or adds) the network, so the
+   * player is on 4663 before anything else happens — the game runs nowhere
+   * else, and a wallet pointed at Ethereum mainnet would fail later, at pack
+   * purchase, with a much more confusing message.
+   *
+   * The `chain` slug sent to `/auth/nonce` is a SERVER NAMESPACE, not the
+   * network the player is on. Its allowlist is
+   * `ethereum | base | arbitrum | polygon | solana` and there is no
+   * `robinhood` value, so `ethereum` is used as the identity namespace. This
+   * is safe — an EVM signature is plain ecrecover and chain-agnostic, so the
+   * slug only decides which `Chain ID` line appears in the message text — but
+   * it does mean the message the user reads says "Chain ID: 1" while they are
+   * on 4663. Adding a `robinhood` slug server-side is on the punch list.
+   */
+  async function signIn() {
+    setErr(''); setStage('connecting');
     try {
-      const w = await connectSolanaWith(kind);
-      const existing = await getProfileByWalletApi(w.address);
-      if (existing) onLogin(existing.name);
-      else onFirstTime(w);
-    } catch (e: any) {
-      setErr(String(e?.message ?? e));
-    } finally { setBusy(null); }
-  }
-
-  // Sign in with MetaMask on Robinhood Chain (EVM).
-  async function doConnectRobinhood() {
-    setErr(''); setBusy('robinhood');
-    try {
-      const w = await connectRobinhoodChain();
-      const existing = await getProfileByWalletApi(w.address);
-      if (existing) onLogin(existing.name);
-      else onFirstTime(w);
-    } catch (e: any) {
-      setErr(String(e?.message ?? e));
-    } finally { setBusy(null); }
-  }
-
-  function randomName() {
-    const pick = LOGIN_NAMES[Math.floor(Math.random() * LOGIN_NAMES.length)];
-    const suffix = Math.floor(Math.random() * 9000) + 1000;
-    setName(`${pick}${suffix}`);
+      const { address } = await connectRobinhoodChain();
+      setStage('signing');
+      await auth.signIn({ address, chain: SIGN_IN_CHAIN });
+      onSignedIn();
+    } catch (e) {
+      setErr(loginErrorText(e));
+    } finally { setStage('idle'); }
   }
 
   // ── Login-screen theme music ─────────────────────────────────────────────
@@ -252,8 +224,7 @@ function Login({ onLogin, onFirstTime }: {
   //   1. Mount the <audio>, attempt to play() immediately.
   //   2. If the promise rejects (autoplay policy), wait for the first
   //      pointerdown anywhere on the screen and retry.
-  //   3. Always render a sound-on / sound-off toggle in the corner so the user can mute.
-  // Mute preference persists across sessions via localStorage.
+  //   3. Always render a sound-on / sound-off toggle so the user can mute.
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [muted, setMuted] = useState<boolean>(() => local.get<boolean>('loginMuted', false));
   const [playing, setPlaying] = useState(false);
@@ -267,8 +238,6 @@ function Login({ onLogin, onFirstTime }: {
       const p = a.play();
       if (p && typeof p.then === 'function') {
         p.then(() => setPlaying(true)).catch(() => {
-          // autoplay blocked — arm a one-shot listener for the first
-          // user interaction anywhere on the document.
           const unlock = () => {
             a.play().then(() => setPlaying(true)).catch(() => {});
             window.removeEventListener('pointerdown', unlock);
@@ -280,10 +249,7 @@ function Login({ onLogin, onFirstTime }: {
       }
     };
     tryPlay();
-    return () => {
-      a.pause();
-      setPlaying(false);
-    };
+    return () => { a.pause(); setPlaying(false); };
   }, []);
 
   useEffect(() => {
@@ -291,311 +257,84 @@ function Login({ onLogin, onFirstTime }: {
     local.set('loginMuted', muted);
   }, [muted]);
 
-  const GOLD = '#D4AF37';
-  const PURPLE = '#8A2BE2';
-  const CYAN = '#4FD1C5';
   const mobile = useIsMobile();
+  const evm = detectEvmWallet();
+  const busy = stage !== 'idle';
+  const label = stage === 'connecting' ? 'Connecting…' : 'Confirm in your wallet…';
 
-  // ── Sign-in ───────────────────────────────────────────────────────────────
-  // The splash art is a clean arena scene, so real controls sit on top: a
-  // centered card on desktop, a bottom sheet on mobile (both over a cover image).
-  {
-    const evm = detectEvmWallet();
-    const connecting = busy === 'robinhood';
-    return (
-      <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#07060f', fontFamily: F.body, color: '#F8F8F8' }}>
-        <audio ref={audioRef} src="/login-theme.mp3" loop preload="auto" style={{ display: 'none' }} />
-        <img src="/login-splash.png?v=2" alt="" draggable={false}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', userSelect: 'none', zIndex: 0 }} />
-        <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 1, background: mobile
-          ? 'linear-gradient(180deg, rgba(7,6,15,0.10) 0%, rgba(7,6,15,0.55) 55%, rgba(7,6,15,0.96) 100%)'
-          : 'radial-gradient(55% 55% at 50% 66%, rgba(7,6,15,0.72), transparent 72%), linear-gradient(180deg, rgba(7,6,15,0.28), rgba(7,6,15,0.5))' }} />
-        <button onClick={() => setMuted(m => !m)} aria-label={muted ? 'Unmute' : 'Mute'} style={{
-          position: 'fixed', top: 'calc(12px + env(safe-area-inset-top))', right: 14, zIndex: 5, width: 44, height: 44, borderRadius: 22,
-          background: 'rgba(10,5,30,0.6)', border: '1px solid rgba(212,175,55,0.45)', color: '#D4AF37', fontSize: 17, cursor: 'pointer',
-          backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-        }}>{muted ? <SoundOff size={18} /> : (playing ? <SoundOn size={18} /> : <Music size={18} />)}</button>
-
-        <div style={mobile ? {
-          position: 'absolute', zIndex: 2, left: 0, right: 0, bottom: 0,
-          padding: '18px 16px calc(20px + env(safe-area-inset-bottom))',
-          display: 'flex', flexDirection: 'column', gap: 10,
-        } : {
-          position: 'absolute', zIndex: 2, left: '50%', top: '64%', transform: 'translate(-50%,-50%)',
-          width: 'min(440px, calc(100vw - 40px))', display: 'flex', flexDirection: 'column', gap: 12,
-          background: 'rgba(12,10,26,0.72)', border: '1px solid rgba(150,120,255,0.22)', borderRadius: 18,
-          padding: 26, backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', boxShadow: '0 24px 70px rgba(0,0,0,0.55)',
-        }}>
-          <div style={{ textAlign: 'center', marginBottom: 2 }}>
-            <div style={{ color: '#b794f6', letterSpacing: 3, fontWeight: 800, fontSize: 14 }}>‹ WELCOME BACK, CHAMPION ›</div>
-            <div style={{ color: '#9a94ad', fontSize: 12, marginTop: 4 }}>Enter the Arena. Claim your victory.</div>
-          </div>
-
-          <button className="ocva-btn" disabled={!!busy}
-            onClick={() => evm.installed ? doConnectRobinhood() : window.open('https://metamask.io/download/', '_blank', 'noopener')}
-            style={{ width: '100%', padding: '15px', fontSize: 15, background: 'linear-gradient(135deg,#F6851B,#E2761B)', color: '#1a1408' }}>
-            <Fox size={18} /> {connecting ? 'Connecting…' : (evm.installed ? `Sign in with ${evm.label}` : 'Install MetaMask')}
-          </button>
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input value={name} onChange={e => setName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && name.trim()) onLogin(name.trim()); }}
-              placeholder="Guest name" inputMode="text"
-              style={{ flex: 1, padding: '13px 14px', fontSize: 16, background: 'rgba(10,10,20,0.85)', color: '#fff', border: '1px solid rgba(150,120,255,0.35)', borderRadius: 12, outline: 'none' }} />
-            <button className="ocva-btn ocva-btn--primary" onClick={() => name.trim() && onLogin(name.trim())} disabled={!name.trim()}
-              style={{ padding: '0 18px', fontSize: 15 }}>Play</button>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 2, flexWrap: 'wrap' }}>
-            {(['Discord', 'Google', 'Apple', 'X'] as const).map(s => (
-              <button key={s} onClick={() => setNotice(`${s} login is coming soon.`)}
-                style={{ background: 'none', border: 'none', color: '#8f89a3', fontSize: 12, cursor: 'pointer', textDecoration: 'underline',
-                  padding: '12px 8px', minHeight: 44 }}>{s}</button>
-            ))}
-          </div>
-          {(err || notice) && (
-            <div style={{ textAlign: 'center', fontSize: 12, color: err ? '#ffb8b8' : '#c9a94a', marginTop: 2 }}>{err || notice}</div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-
-}
-
-function LoginStat(_: { label: string; value: string; color: string }) { return null; }
-void LoginStat;
-
-// ── First-time profile creation (after wallet connect with no existing profile) ─
-const OVP = {
-  bg: '#060711', panel: 'rgba(10,12,26,0.90)', input: '#090D19',
-  gold: '#E5B84B', goldHi: '#FFD86A', purple: '#8E4DFF', violet: '#C45CFF',
-  cyan: '#19D3D2', green: '#39E879', text: '#F4F2EA', muted: '#989BB0',
-  border: 'rgba(229,184,75,0.35)',
-};
-
-/** One node in the Connect Wallet -> Create Profile -> Enter Arena stepper. */
-function ProfileStep({ n, label, state }: { n: React.ReactNode; label: string; state: 'done' | 'active' | 'todo' }) {
-  const ring = state === 'done' ? OVP.gold : state === 'active' ? OVP.purple : '#3a3f55';
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-      <span aria-hidden style={{
-        flex: '0 0 auto', width: 34, height: 34, borderRadius: '50%', display: 'grid', placeItems: 'center',
-        border: `2px solid ${ring}`, background: state === 'active' ? OVP.purple : 'transparent',
-        color: state === 'todo' ? OVP.muted : '#fff', fontWeight: 800, fontSize: 14,
-        boxShadow: state === 'active' ? `0 0 16px ${OVP.purple}88` : 'none',
-      }}>{n}</span>
-      <span style={{ fontSize: 12, letterSpacing: 1.4, fontWeight: 700, color: state === 'todo' ? OVP.muted : OVP.text, whiteSpace: 'nowrap' }}>{label}</span>
+    <div style={{ position: 'fixed', inset: 0, overflow: 'auto', background: '#07060f', fontFamily: F.body, color: '#F8F8F8' }}>
+      <audio ref={audioRef} src="/login-theme.mp3" loop preload="auto" style={{ display: 'none' }} />
+      <img src="/login-splash.png?v=2" alt="" draggable={false}
+        style={{ position: 'fixed', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', userSelect: 'none', zIndex: 0 }} />
+      <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 1, background: mobile
+        ? 'linear-gradient(180deg, rgba(7,6,15,0.10) 0%, rgba(7,6,15,0.55) 55%, rgba(7,6,15,0.96) 100%)'
+        : 'radial-gradient(55% 55% at 50% 66%, rgba(7,6,15,0.72), transparent 72%), linear-gradient(180deg, rgba(7,6,15,0.28), rgba(7,6,15,0.5))' }} />
+      <button onClick={() => setMuted(m => !m)} aria-label={muted ? 'Unmute' : 'Mute'} style={{
+        position: 'fixed', top: 'calc(12px + env(safe-area-inset-top))', right: 14, zIndex: 5, width: 44, height: 44, borderRadius: 22,
+        background: 'rgba(10,5,30,0.6)', border: '1px solid rgba(212,175,55,0.45)', color: '#D4AF37', fontSize: 17, cursor: 'pointer',
+        backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+      }}>{muted ? <SoundOff size={18} /> : (playing ? <SoundOn size={18} /> : <Music size={18} />)}</button>
+
+      <div style={mobile ? {
+        position: 'relative', zIndex: 2, marginTop: '42vh',
+        padding: '18px 16px calc(20px + env(safe-area-inset-bottom))',
+        display: 'flex', flexDirection: 'column', gap: 10,
+      } : {
+        position: 'absolute', zIndex: 2, left: '50%', top: '64%', transform: 'translate(-50%,-50%)',
+        width: 'min(460px, calc(100vw - 40px))', display: 'flex', flexDirection: 'column', gap: 12,
+        background: 'rgba(12,10,26,0.72)', border: '1px solid rgba(150,120,255,0.22)', borderRadius: 18,
+        padding: 26, backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', boxShadow: '0 24px 70px rgba(0,0,0,0.55)',
+      }}>
+        <div style={{ textAlign: 'center', marginBottom: 2 }}>
+          <div style={{ color: '#b794f6', letterSpacing: 3, fontWeight: 800, fontSize: 14 }}>‹ SIGN IN WITH YOUR WALLET ›</div>
+          <div style={{ color: '#9a94ad', fontSize: 12, marginTop: 4 }}>
+            You will be asked to sign a short message. It is free and moves no funds.
+          </div>
+        </div>
+
+        <button className="ocva-btn" disabled={busy}
+          onClick={() => evm.installed ? signIn() : window.open('https://metamask.io/download/', '_blank', 'noopener')}
+          style={{ width: '100%', padding: '15px', fontSize: 15, background: 'linear-gradient(135deg,#F6851B,#E2761B)', color: '#1a1408' }}>
+          <Fox size={18} /> {busy ? label : (evm.installed ? `Sign in with ${evm.label}` : 'Install MetaMask')}
+        </button>
+
+        <div style={{ fontSize: 11, color: '#8f89a3', textAlign: 'center', lineHeight: 1.55 }}>
+          Your wallet will be switched to <b style={{ color: '#c8c2d8' }}>Robinhood Chain</b> (4663).
+          The game runs on this network only.
+        </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12, color: '#9a94ad', cursor: 'pointer', padding: '6px 2px' }}>
+          <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} disabled={!!busy}
+            style={{ width: 16, height: 16, accentColor: '#8A2BE2' }} />
+          Remember me on this device
+        </label>
+        <div style={{ fontSize: 10.5, color: '#6f6a80', marginTop: -6, lineHeight: 1.45 }}>
+          Off by default: your session lives in this tab only and ends when you close it.
+        </div>
+
+        {err && (
+          <div role="alert" style={{ textAlign: 'center', fontSize: 12.5, color: '#ffb8b8', marginTop: 2, lineHeight: 1.5 }}>
+            {err}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function FirstTimeProfile({ wallet, onCreated, onCancel }: {
-  wallet: ConnectedWallet;
-  onCreated: (name: string) => void;
-  onCancel: () => void;
-}) {
-  const [name, setName] = useState('');
-  const [bio, setBio] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState('');
-  const [err, setErr] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [nameStatus, setNameStatus] = useState<'idle' | 'checking' | 'ok' | 'taken'>('idle');
-
-  async function checkName() {
-    const t = name.trim();
-    if (t.length < 3) { setNameStatus('idle'); return; }
-    setNameStatus('checking');
-    try {
-      const taken = await getProfileApi(t);
-      setNameStatus(taken && (taken.walletAddress || '').toLowerCase() !== wallet.address.toLowerCase() ? 'taken' : 'ok');
-    } catch { setNameStatus('idle'); }
+/**
+ * Sign-in failures deserve slightly warmer copy than the generic mapper: the
+ * most common one by far is the user closing the wallet popup, and the raw
+ * provider text for that ("User rejected the request.") reads like a fault.
+ */
+function loginErrorText(e: unknown): string {
+  const code = (e as { code?: unknown } | null)?.code;
+  if (code === 4001) return 'Signature cancelled. Approve the message in your wallet to sign in.';
+  if (e instanceof ApiError && e.status === 401) {
+    return 'That signature was not accepted. Try again — the challenge may have expired.';
   }
-
-  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0]; if (!f) return;
-    if (f.size > 5 * 1024 * 1024) { setErr('Image too large — must be under 5 MB.'); return; }
-    const reader = new FileReader();
-    reader.onload = () => setAvatarUrl(String(reader.result || ''));
-    reader.readAsDataURL(f);
-  }
-
-  async function create() {
-    const trimmed = name.trim();
-    if (!trimmed) { setErr('Pick a display name.'); return; }
-    setErr(''); setSaving(true);
-    try {
-      // Make sure the name isn't already in use.
-      const taken = await getProfileApi(trimmed);
-      if (taken && (taken.walletAddress || '').toLowerCase() !== wallet.address.toLowerCase()) {
-        setErr(`The name "${trimmed}" is already taken. Pick another.`);
-        setSaving(false); return;
-      }
-      await upsertProfileApi(trimmed);
-      await updateProfileApi(trimmed, {
-        walletAddress: wallet.address,
-        walletChain: wallet.chain,
-        bio: bio.trim() || null,
-        avatarUrl: avatarUrl.trim() || null,
-      });
-      onCreated(trimmed);
-    } catch (e: any) {
-      setErr(String(e?.message ?? e));
-    } finally { setSaving(false); }
-  }
-
-  const nameOk = name.trim().length >= 3 && name.trim().length <= 20;
-  const canSubmit = nameOk && !saving;
-  const FIELD: React.CSSProperties = {
-    width: '100%', padding: '13px 14px', fontSize: 14, fontFamily: F.body,
-    color: OVP.text, background: OVP.input, border: '1px solid #2a3350', borderRadius: 10,
-  };
-  return (
-    <div style={{ position: 'fixed', inset: 0, overflow: 'auto', background: OVP.bg, color: OVP.text, fontFamily: F.body }}>
-      <style>{`
-        .ovp-field { transition: border-color .15s ease, box-shadow .15s ease; }
-        .ovp-field:focus { outline: none; border-color: ${OVP.purple}; box-shadow: 0 0 0 3px rgba(142,77,255,0.28); }
-        .ovp-field::placeholder { color: ${OVP.muted}; }
-        .ovp-primary { transition: filter .15s ease, transform .1s ease, box-shadow .15s ease; }
-        .ovp-primary:hover:not(:disabled) { filter: brightness(1.06); }
-        .ovp-primary:active:not(:disabled) { transform: translateY(1px); }
-        .ovp-link:hover { color: ${OVP.goldHi}; }
-        .ovp-primary:focus-visible, .ovp-link:focus-visible, .ovp-upload:focus-within { outline: 2px solid ${OVP.goldHi}; outline-offset: 2px; }
-        @media (max-width: 760px) { .ovp-grid { grid-template-columns: 1fr !important; } }
-        @media (prefers-reduced-motion: reduce) { .ovp-field, .ovp-primary { transition: none; } }
-      `}</style>
-
-      {/* Arena backdrop */}
-      <img src="/hub-bg.png?v=2" alt="" aria-hidden style={{ position: 'fixed', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0, filter: 'blur(2px)' }} />
-      <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 1,
-        background: 'radial-gradient(70% 60% at 50% 40%, rgba(6,7,17,0.72), rgba(6,7,17,0.94)), linear-gradient(180deg, rgba(6,7,17,0.6), rgba(6,7,17,0.92))' }} />
-
-      <div style={{ position: 'relative', zIndex: 2, minHeight: '100dvh', display: 'flex', flexDirection: 'column', padding: '18px clamp(14px, 4vw, 40px) 28px' }}>
-        {/* header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <LoginEmblem size={38} />
-            <div style={{ lineHeight: 1.05 }}>
-              <div style={{ fontSize: 9, letterSpacing: 4, color: OVP.gold }}>ON-CHAIN</div>
-              <div style={{ fontFamily: '"Cinzel", serif', fontWeight: 700, fontSize: 15, color: '#fff' }}>VIRTUAL ARENA</div>
-            </div>
-          </div>
-          <button className="ovp-link" onClick={onCancel} style={{ background: 'none', border: 'none', color: OVP.muted, fontSize: 14, cursor: 'pointer', fontFamily: F.body }}>Cancel</button>
-        </div>
-
-        {/* stepper */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'clamp(8px,2vw,20px)', margin: '10px 0 22px', flexWrap: 'wrap' }}>
-          <ProfileStep n={<Check size={15} />} label="CONNECT WALLET" state="done" />
-          <span aria-hidden style={{ width: 'clamp(20px,6vw,80px)', height: 1, background: 'rgba(229,184,75,0.4)' }} />
-          <ProfileStep n="2" label="CREATE PROFILE" state="active" />
-          <span aria-hidden style={{ width: 'clamp(20px,6vw,80px)', height: 1, background: 'rgba(255,255,255,0.14)' }} />
-          <ProfileStep n="3" label="ENTER ARENA" state="todo" />
-        </div>
-
-        {/* panel */}
-        <div style={{
-          position: 'relative', width: 'min(1100px, 100%)', margin: '0 auto',
-          background: OVP.panel, border: `1px solid ${OVP.border}`, borderRadius: 16,
-          padding: 'clamp(20px, 3vw, 34px)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
-          boxShadow: '0 30px 90px rgba(0,0,0,0.6), 0 0 40px rgba(142,77,255,0.12)',
-        }}>
-          <div style={{ textAlign: 'center' }}>
-            <h1 style={{ margin: 0, fontFamily: '"Cinzel", serif', fontWeight: 800, fontSize: 'clamp(26px, 4vw, 40px)', letterSpacing: 2,
-              background: `linear-gradient(180deg, ${OVP.goldHi}, ${OVP.gold})`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>CREATE YOUR PROFILE</h1>
-            <div style={{ color: OVP.muted, fontSize: 14, marginTop: 8 }}>Choose how other players will see you in the arena.</div>
-          </div>
-
-          {/* wallet strip */}
-          <div style={{ margin: '18px auto 0', maxWidth: 760, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, flexWrap: 'wrap',
-            padding: '11px 18px', borderRadius: 10, background: 'rgba(25,211,210,0.06)', border: `1px solid ${OVP.cyan}55` }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <span aria-hidden style={{ width: 9, height: 9, borderRadius: '50%', background: OVP.green, boxShadow: `0 0 8px ${OVP.green}` }} />
-              <span style={{ color: '#cfe8df', fontSize: 13 }}>Wallet connected</span>
-            </span>
-            <b style={{ color: '#fff', fontFamily: 'ui-monospace, monospace', fontSize: 14 }}>{shortAddr(wallet.address)}</b>
-            <span style={{ fontSize: 11, fontWeight: 800, color: OVP.cyan, background: 'rgba(25,211,210,0.12)', border: `1px solid ${OVP.cyan}66`, borderRadius: 6, padding: '2px 8px' }}>{wallet.chain.toUpperCase()}</span>
-            <button className="ovp-link" onClick={onCancel} style={{ background: 'none', border: 'none', color: OVP.cyan, cursor: 'pointer', fontSize: 13, fontFamily: F.body }}>Change wallet</button>
-          </div>
-
-          {/* two-column form */}
-          <div className="ovp-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 280px) 1fr', gap: 'clamp(20px, 3vw, 40px)', marginTop: 26 }}>
-            {/* left: avatar */}
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 12, letterSpacing: 3, color: OVP.gold, fontWeight: 800, marginBottom: 14 }}>PROFILE IMAGE</div>
-              <div style={{ width: 180, height: 180, borderRadius: '50%', margin: '0 auto', overflow: 'hidden',
-                border: `2px solid ${OVP.gold}`, boxShadow: '0 0 26px rgba(142,77,255,0.4)',
-                background: 'radial-gradient(circle at 50% 38%, #3a2a6a, #14102a)', display: 'grid', placeItems: 'center' }}>
-                {avatarUrl
-                  ? <img src={avatarUrl} alt="Profile preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  : <span aria-hidden style={{ color: OVP.violet, display: 'flex' }}><User size={72} /></span>}
-              </div>
-              <label className="ovp-upload" style={{ display: 'block', marginTop: 16, padding: '12px', borderRadius: 9,
-                background: 'rgba(9,13,25,0.85)', border: `1px solid ${OVP.gold}66`, color: OVP.text, fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><ArrowUp size={15} /> UPLOAD IMAGE</span>
-                <input type="file" accept="image/png,image/jpeg,image/webp" onChange={onPickFile} style={{ display: 'none' }} aria-label="Upload profile image" />
-              </label>
-              {avatarUrl && (
-                <button onClick={() => setAvatarUrl('')} style={{ marginTop: 8, background: 'none', border: 'none', color: OVP.muted, cursor: 'pointer', fontSize: 12, textDecoration: 'underline' }}>Remove image</button>
-              )}
-              <div style={{ color: OVP.muted, fontSize: 12, margin: '12px 0 6px' }}>or</div>
-              <label htmlFor="ovp-img-url" style={{ display: 'block', fontSize: 11, letterSpacing: 2, color: OVP.muted, fontWeight: 700, marginBottom: 6 }}>IMAGE URL</label>
-              <input id="ovp-img-url" className="ovp-field" value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)} placeholder="Paste image URL" style={FIELD} />
-              <div style={{ color: OVP.muted, fontSize: 11, marginTop: 8 }}>PNG, JPG or WebP · Max 5 MB</div>
-            </div>
-
-            {/* right: fields */}
-            <div>
-              <label htmlFor="ovp-name" style={{ display: 'block', fontSize: 12, letterSpacing: 2, color: '#cdd2e2', fontWeight: 800 }}>DISPLAY NAME <span style={{ color: OVP.violet }}>*</span></label>
-              <input id="ovp-name" className="ovp-field" value={name} autoFocus maxLength={20}
-                onChange={e => { setName(e.target.value); setNameStatus('idle'); }}
-                onBlur={checkName}
-                placeholder="Enter your display name" style={{ ...FIELD, fontSize: 16, marginTop: 6 }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
-                <span style={{ fontSize: 12, color: OVP.muted }}>3–20 characters</span>
-                <button className="ovp-link" onClick={checkName} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontFamily: F.body,
-                  color: nameStatus === 'ok' ? OVP.green : nameStatus === 'taken' ? '#ff6b6b' : OVP.muted }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    {nameStatus === 'checking' ? <>… Checking</>
-                      : nameStatus === 'ok' ? <><Check size={13} /> Available</>
-                      : nameStatus === 'taken' ? <><Close size={13} /> Taken</>
-                      : <><DiamondOutline size={11} /> Check availability</>}
-                  </span>
-                </button>
-              </div>
-
-              <div style={{ marginTop: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <label htmlFor="ovp-bio" style={{ fontSize: 12, letterSpacing: 2, color: '#cdd2e2', fontWeight: 800 }}>BIO</label>
-                <span style={{ fontSize: 10, color: OVP.muted, border: '1px solid #2a3350', borderRadius: 5, padding: '2px 7px', letterSpacing: 1 }}>OPTIONAL</span>
-              </div>
-              <textarea id="ovp-bio" className="ovp-field" value={bio} onChange={e => setBio(e.target.value.slice(0, 500))} rows={6}
-                placeholder="Tell the arena about yourself..." style={{ ...FIELD, marginTop: 6, minHeight: 150, resize: 'vertical', fontFamily: F.body }} />
-              <div style={{ textAlign: 'right', fontSize: 11, color: OVP.muted, marginTop: 2 }}>{bio.length} / 500</div>
-            </div>
-          </div>
-
-          {err && (
-            <div role="alert" style={{ marginTop: 16, padding: '10px 14px', borderRadius: 8,
-              background: 'rgba(255,107,107,0.1)', border: '1px solid rgba(255,107,107,0.45)', color: '#ffb4b4', fontSize: 13 }}>{err}</div>
-          )}
-
-          {/* footer */}
-          <div style={{ marginTop: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: OVP.muted, fontSize: 13 }}>
-              <span aria-hidden style={{ color: OVP.purple, display: 'inline-flex' }}><Shield size={15} /></span> You can update your profile later in Settings.
-            </div>
-            <button className="ova-plate ova-plate--gold" onClick={create} disabled={!canSubmit} style={{
-              padding: '16px 30px', fontSize: 14.5, letterSpacing: '0.16em',
-            }}>
-              <Diamond size={9} className="ova-orn" />
-              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}><Swords size={17} /> {saving ? 'CREATING PROFILE…' : 'CREATE PROFILE & ENTER ARENA'}</span>
-              <Diamond size={9} className="ova-orn" />
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return errorText(e);
 }
 
 // ── Background music player (used for menu + battle tracks) ────────────────
@@ -2072,17 +1811,17 @@ function fmtCountdown(ms: number) {
 type QueueMode = 'ranked' | 'casual';
 
 function Landing({
-  myName, onPlay, onMasterquest, onBoosters, onProfile, onRules, onSettings,
-}: { myName: string; onPlay: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onSettings: () => void }) {
+  myName, profile, onPlay, onMasterquest, onBoosters, onProfile, onRules, onSettings,
+}: { myName: string; profile: Profile; onPlay: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onSettings: () => void }) {
   const mobile = useIsMobile(767);
   const tablet = useIsMobile(1279);
-  const [prof, setProf] = useState<Profile | null>(null);
-  const [ranked, setRanked] = useState<PublicRankedProfile | null>(null);
-  const [season, setSeason] = useState<{ id: string; name: string; endsAt: number } | null>(null);
+  // The signed-in player's own profile is already loaded by the root — it is
+  // the only shape that carries a wallet address, and re-fetching it here would
+  // just be a second `GET /api/profiles/me`.
+  const prof = profile;
   const [players, setPlayers] = useState<number | null>(null);
   const [activeDeck, setActiveDeck] = useState<DeckEntry | null>(null);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState<QueueMode>(() => (localStorage.getItem('ocva.queueMode') as QueueMode) || 'ranked');
   const [muted, setMuted] = useState<boolean>(() => { try { return localStorage.getItem('ocva.muted') === '1'; } catch { return false; } });
   const [copied, setCopied] = useState(false);
   const liveRef = useRef<HTMLDivElement>(null);
@@ -2091,24 +1830,19 @@ function Landing({
     let alive = true;
     (async () => {
       setLoading(true);
-      const [p, r, s, all, decks] = await Promise.all([
-        getProfileApi(myName).catch(() => null),
-        RankedAPI.profile(myName).catch(() => null),
-        RankedAPI.season().catch(() => null),
+      // No ranked profile and no season: neither endpoint exists any more. See
+      // src/ranked-client.ts for what would have to be built to bring them back.
+      const [all, decks] = await Promise.all([
         listProfilesApi().catch(() => [] as Profile[]),
-        listDecksApi(myName).catch(() => [] as DeckEntry[]),
+        listDecksApi().catch(() => [] as DeckEntry[]),
       ]);
       if (!alive) return;
-      setProf(p); setRanked(r);
-      if (s) setSeason({ id: s.id, name: s.name, endsAt: s.endsAt });
       setPlayers(all.length);
       setActiveDeck(decks.find((d) => d.isActive) ?? decks[0] ?? null);
       setLoading(false);
     })();
     return () => { alive = false; };
   }, [myName]);
-
-  useEffect(() => { try { localStorage.setItem('ocva.queueMode', mode); } catch {} }, [mode]);
   useEffect(() => {
     try { localStorage.setItem('ocva.muted', muted ? '1' : '0'); } catch {}
     document.querySelectorAll('audio,video').forEach((a) => { (a as HTMLMediaElement).muted = muted; });
@@ -2116,12 +1850,13 @@ function Landing({
     try { window.dispatchEvent(new CustomEvent(PREFS_EVENT)); } catch {}
   }, [muted]);
 
-  const games = prof ? prof.wins + prof.losses + prof.draws : 0;
-  const level = Math.max(1, Math.floor(Math.sqrt((games + 1) * 2.2)));
+  const games = prof.wins + prof.losses + prof.draws;
+  // `level` is derived server-side from wins; the XP bar is a local flourish
+  // on top of it, not a second source of truth.
+  const level = prof.level;
   const xpForLvl = (l: number) => Math.round((l + 1) * (l + 1) / 2.2);
   const xpPrev = xpForLvl(level - 1), xpNext = xpForLvl(level);
   const xpInto = games - xpPrev, xpRange = Math.max(1, xpNext - xpPrev);
-  const placement = ranked?.placementMatchesRemaining ?? 0;
 
   const deckCards = activeDeck?.cards ?? [];
   const deckValid = activeDeck ? validateDeck(deckCards) : null;
@@ -2136,10 +1871,9 @@ function Landing({
   const goCollection = () => { try { window.location.hash = 'collection'; } catch {} onProfile(); };
 
   const play = () => {
-    // Always enter the matchmaking lobby — that's where deck selection (incl.
-    // chain Standard decks), create/join, challenges and the ranked queue live.
-    // Ranked still can't be queued with an invalid deck (enforced in the lobby).
-    if (liveRef.current) liveRef.current.textContent = `Entering ${mode} matchmaking.`;
+    // The lobby is where create / join / challenge live. Deck choice is not
+    // made here or there any more: the server seats you with your ACTIVE deck.
+    if (liveRef.current) liveRef.current.textContent = 'Entering matchmaking.';
     onPlay();
   };
 
@@ -2152,10 +1886,9 @@ function Landing({
       <div aria-live="polite" ref={liveRef} style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }} />
 
       <PlayerHUD
-        name={prof?.name ?? myName} avatarUrl={prof?.avatarUrl ?? null} level={level}
-        xpInto={xpInto} xpRange={xpRange} placement={placement}
-        rankLabel={ranked && placement === 0 ? rankLabel(ranked) : null}
-        walletAddress={prof?.walletAddress ?? null} copied={copied} onCopy={copyAddr}
+        name={prof.name} avatarUrl={prof.avatarUrl} level={level}
+        xpInto={xpInto} xpRange={xpRange}
+        walletAddress={prof.walletAddress} copied={copied} onCopy={copyAddr}
         muted={muted} onToggleMute={() => setMuted((m) => !m)} onSettings={onSettings}
         loading={loading} mobile={mobile}
       />
@@ -2165,14 +1898,14 @@ function Landing({
         display: mobile ? 'flex' : 'block', flexDirection: 'column', gap: 12,
         padding: mobile ? '76px 12px 90px' : 0 }}>
         <div style={mobile ? {} : { position: 'absolute', left: tablet ? 20 : 'clamp(24px, 4vw, 64px)', bottom: mobile ? undefined : 108, width: 'min(380px, 42vw)' }}>
-          <MatchmakingPanel mode={mode} setMode={setMode} deckState={deckState} deckName={activeDeck?.name ?? null}
+          <MatchmakingPanel deckState={deckState} deckName={activeDeck?.name ?? null}
             deckCount={deckCards.length} deckFaction={deckFaction} deckIssue={deckValid?.issues?.[0]?.message ?? null}
             players={players} onPlay={play} onChangeDeck={() => { try { window.location.hash = 'decks'; } catch {} onProfile(); }}
             loading={loading} mobile={mobile} />
         </div>
 
         <div style={mobile ? {} : { position: 'absolute', right: tablet ? 20 : 'clamp(24px, 4vw, 64px)', bottom: mobile ? undefined : 108, width: 'min(340px, 40vw)' }}>
-          <ActivityPanel season={season} placement={placement} ranked={ranked} onViewEvent={onMasterquest} loading={loading} mobile={mobile} />
+          <ActivityPanel onViewEvent={onMasterquest} mobile={mobile} />
         </div>
       </div>
 
@@ -2188,13 +1921,13 @@ function Landing({
   );
 }
 
-function PlayerHUD({ name, avatarUrl, level, xpInto, xpRange, placement, rankLabel: rl, walletAddress, copied, onCopy, muted, onToggleMute, onSettings, loading, mobile }: {
-  name: string; avatarUrl: string | null; level: number; xpInto: number; xpRange: number; placement: number; rankLabel: string | null;
+function PlayerHUD({ name, avatarUrl, level, xpInto, xpRange, walletAddress, copied, onCopy, muted, onToggleMute, onSettings, loading, mobile }: {
+  name: string; avatarUrl: string | null; level: number; xpInto: number; xpRange: number;
   walletAddress: string | null; copied: boolean; onCopy: () => void; muted: boolean; onToggleMute: () => void; onSettings: () => void; loading: boolean; mobile: boolean;
 }) {
   const [notifOpen, setNotifOpen] = useState(false);
+  // Placement notifications came from the ranked service, which is gone.
   const notifs: string[] = [];
-  if (placement > 0) notifs.push(`${placement} placement matches left to earn your rank.`);
   const xpPct = Math.max(0, Math.min(100, Math.round((xpInto / xpRange) * 100)));
   const connected = !!walletAddress;
   return (
@@ -2218,10 +1951,6 @@ function PlayerHUD({ name, avatarUrl, level, xpInto, xpRange, placement, rankLab
               <div className="menu-anim" style={{ width: `${loading ? 0 : xpPct}%`, height: '100%', background: `linear-gradient(90deg, ${MENU.gold}, ${MENU.violet})`, transition: 'width .3s ease' }} />
             </div>
             {!mobile && <span style={{ fontSize: 11, color: MENU.text2 }}>{xpInto} / {xpRange} XP</span>}
-            <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.05em', color: placement > 0 ? MENU.goldHi : MENU.cyan,
-              padding: '2px 8px', borderRadius: 999, background: `${placement > 0 ? MENU.gold : MENU.cyan}1c`, border: `1px solid ${placement > 0 ? MENU.gold : MENU.cyan}55`, whiteSpace: 'nowrap' }}>
-              {placement > 0 ? `PLACEMENT · ${placement} LEFT` : (rl ? rl.toUpperCase() : 'UNRANKED')}
-            </span>
           </div>
         </div>
       </div>
@@ -2259,36 +1988,25 @@ function hudBtn(): React.CSSProperties {
     background: 'rgba(20,22,44,0.7)', border: `1px solid ${MENU.border}`, color: MENU.text, cursor: 'pointer' };
 }
 
-function MatchmakingPanel({ mode, setMode, deckState, deckName, deckCount, deckFaction, deckIssue, players, onPlay, onChangeDeck, loading, mobile }: {
-  mode: QueueMode; setMode: (m: QueueMode) => void; deckState: 'missing' | 'invalid' | 'valid';
+function MatchmakingPanel({ deckState, deckName, deckCount, deckFaction, deckIssue, players, onPlay, onChangeDeck, loading, mobile }: {
+  deckState: 'missing' | 'invalid' | 'valid';
   deckName: string | null; deckCount: number; deckFaction: { name: string; color: string } | null; deckIssue: string | null;
   players: number | null; onPlay: () => void; onChangeDeck: () => void; loading: boolean; mobile: boolean;
 }) {
-  const modeDesc = mode === 'ranked' ? 'Competitive ladder · Best-of-one' : 'Casual play · no rank at stake';
-  // The button always opens the lobby (deck selection + matchmaking live there);
-  // the label reflects the current deck so the next step is clear.
-  const playLabel = deckState === 'missing' ? 'CHOOSE A DECK' : deckState === 'invalid' ? 'FIX DECK & PLAY' : `PLAY ${mode.toUpperCase()}`;
+  // The button always opens the lobby (create / join / challenge live there);
+  // the label reflects the ACTIVE deck, which is what the server will seat you
+  // with — there is no per-match deck choice any more.
+  const playLabel = deckState === 'missing' ? 'CHOOSE A DECK' : deckState === 'invalid' ? 'FIX DECK & PLAY' : 'PLAY';
   const canPlay = true;
   return (
     <section aria-label="Matchmaking" style={{ padding: 18, borderRadius: 16, background: MENU.panelPurple, border: `1px solid ${MENU.border}`, backdropFilter: 'blur(12px)', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
       <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.18em', color: MENU.gold }}>MATCHMAKING</div>
       <h2 style={{ margin: '4px 0 14px', fontFamily: MENU_SERIF, fontWeight: 700, fontSize: mobile ? 26 : 30, color: MENU.text }}>ENTER THE ARENA</h2>
 
-      <div role="tablist" aria-label="Match mode" style={{ display: 'flex', gap: 4, padding: 4, borderRadius: 12, background: 'rgba(8,8,22,0.6)', border: `1px solid ${MENU.border}` }}>
-        {(['ranked', 'casual'] as QueueMode[]).map((m) => {
-          const on = mode === m;
-          return (
-            <button key={m} role="tab" aria-selected={on} onClick={() => setMode(m)} className="menu-anim"
-              style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px', borderRadius: 9, cursor: 'pointer',
-                fontWeight: 800, letterSpacing: '0.06em', fontSize: 13, transition: 'all .18s ease',
-                color: on ? '#20170a' : MENU.text2, background: on ? `linear-gradient(180deg, ${MENU.goldHi}, ${MENU.gold})` : 'transparent', border: 'none' }}>
-              {m === 'ranked' ? mIco(<><path d="m14.5 17.5 5-5" /><path d="M3 21l6-6" /><path d="M14 3l7 7-4 4-7-7z" /></>, 15) : mIco(<><circle cx="12" cy="12" r="9" /><path d="m9 12 2 2 4-4" /></>, 15)}
-              {m.toUpperCase()}
-            </button>
-          );
-        })}
-      </div>
-      <div style={{ fontSize: 12.5, color: MENU.text2, margin: '10px 2px 12px' }}>{modeDesc}</div>
+      {/* The ranked / casual toggle is gone: `POST /games/create` accepts a
+          `ranked` mode but nothing rates, seeds or seasons those matches, so
+          the choice would have been cosmetic. See src/ranked-client.ts. */}
+      <div style={{ fontSize: 12.5, color: MENU.text2, margin: '10px 2px 12px' }}>Casual play · no rank at stake</div>
 
       {/* Selected deck */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 12, background: 'rgba(8,8,22,0.55)', border: `1px solid ${MENU.border}` }}>
@@ -2327,8 +2045,8 @@ function MatchmakingPanel({ mode, setMode, deckState, deckName, deckCount, deckF
   );
 }
 
-function ActivityPanel({ season, placement, ranked, onViewEvent, loading, mobile }: {
-  season: { id: string; name: string; endsAt: number } | null; placement: number; ranked: PublicRankedProfile | null; onViewEvent: () => void; loading: boolean; mobile: boolean;
+function ActivityPanel({ onViewEvent, mobile }: {
+  onViewEvent: () => void; mobile: boolean;
 }) {
   const now = useNow(1000);
   const eventMs = nextUtcMidnight() - now;
@@ -2340,21 +2058,14 @@ function ActivityPanel({ season, placement, ranked, onViewEvent, loading, mobile
     const t = setInterval(check, 5000); window.addEventListener('focus', check);
     return () => { clearInterval(t); window.removeEventListener('focus', check); };
   }, [dayKey]);
-  const placementDone = Math.max(0, 10 - placement);
 
   return (
     <aside aria-label="Activity" style={{ display: 'flex', flexDirection: mobile ? 'row' : 'column', gap: 12, overflowX: mobile ? 'auto' : 'visible' }}>
-      <ActCard title={`SEASON ${season ? String(season.name).replace(/\D/g, '') || '01' : '01'}`} mobile={mobile}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontFamily: MENU_SERIF, fontWeight: 700, fontSize: 16, color: MENU.goldHi }}>{placement > 0 ? 'PLACEMENT' : (ranked ? rankLabel(ranked) : 'UNRANKED')}</span>
-        </div>
-        {placement > 0 ? (
-          <>
-            <div style={{ fontSize: 12, color: MENU.text2, margin: '2px 0 8px' }}>{placement} matches left</div>
-            <Bar pct={loading ? 0 : (placementDone / 10) * 100} />
-            <div style={{ fontSize: 11, color: MENU.text2, marginTop: 4, textAlign: 'right' }}>{placementDone} / 10</div>
-          </>
-        ) : <div style={{ fontSize: 12, color: MENU.text2, marginTop: 4 }}>Ranked placement complete.</div>}
+      {/* Seasons, LP and placement all came from `/api/ranked/*`, which is a
+          404 on the new backend. Say so rather than render a made-up rank. */}
+      <ActCard title="RANKED LADDER" mobile={mobile}>
+        <div style={{ fontFamily: MENU_SERIF, fontWeight: 700, fontSize: 16, color: MENU.goldHi }}>COMING SOON</div>
+        <div style={{ fontSize: 12, color: MENU.text2, marginTop: 6, lineHeight: 1.55 }}>{RANKED_UNAVAILABLE_MESSAGE}</div>
       </ActCard>
 
       <ActCard title="DAILY QUEST" mobile={mobile}>
@@ -2429,6 +2140,14 @@ function NavDock({ onCollection, onBoosters, onMasters, onProfile, onRules, onSe
 // sign-out ConfirmDialog were removed when the real Settings screen landed —
 // see src/Settings.tsx. Both the NavDock gear and the PlayerHUD gear now route
 // to view 'settings', which carries those three actions plus the rest.
+
+/**
+ * The $MASTER token address, kept only as a display string for the landing
+ * footer. Nothing in the client transacts in it any more: the wager service is
+ * EVM-only (its stake token is an ERC-20 read from `wager.getStakes()`), and
+ * there is no Solana money path in this backend at all.
+ */
+const MASTER_TOKEN_ADDRESS = 'DpPowzjETiU6421ReuwBB8XmDB7sMyB2JGzFLssYpump';
 
 function ContractAddressFooter() {
   const mobile = useIsMobile();
@@ -2565,22 +2284,21 @@ function ProfilePage({ myName, onBack, onSettings }: { myName: string; onBack: (
   const [muted, setMuted] = useState<boolean>(() => { try { return localStorage.getItem('ocva.muted') === '1'; } catch { return false; } });
   const [copied, setCopied] = useState(false);
 
+  // The hub always shows the SIGNED-IN player, so read the own-profile route:
+  // it is the only one that returns a wallet address, and only to its owner.
   const reload = useCallback(async () => {
-    let p = await getProfileApi(myName);
-    if (!p) p = await upsertProfileApi(myName);
-    setProf(p);
-  }, [myName]);
+    setProf(await getMyProfileApi());
+  }, []);
 
   const reloadDecks = useCallback(async () => {
-    try { setDecks(await listDecksApi(myName)); } catch { setDecks([]); }
-  }, [myName]);
+    try { setDecks(await listDecksApi()); } catch { setDecks([]); }
+  }, []);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
         await reload();
-        try { setRanked(await RankedAPI.profile(myName).catch(() => null)); } catch { setRanked(null); }
         await reloadDecks();
       } finally { setLoading(false); }
     })();
@@ -2606,7 +2324,7 @@ function ProfilePage({ myName, onBack, onSettings }: { myName: string; onBack: (
 
   const games  = prof ? prof.wins + prof.losses + prof.draws : 0;
   const winPct = games ? Math.round((prof!.wins / games) * 100) : 0;
-  const level  = Math.max(1, Math.floor(Math.sqrt((games + 1) * 2.2)));
+  const level  = prof?.level ?? 1;
   const xpForNextLevel = (lvl: number) => Math.round((lvl + 1) * (lvl + 1) / 2.2);
   const xpPrev = xpForNextLevel(level - 1);
   const xpNext = xpForNextLevel(level);
@@ -2886,24 +2604,12 @@ function OverviewTab({ prof, ranked, winPct, games, favoriteDeck, favoriteFactio
         </div>
       </HubCard>
 
-      <HubCard title="PLACEMENT PROGRESS">
-        {placementLeft > 0 ? (
-          <>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ fontSize: 28, fontWeight: 800, color: HUB.goldHi }}>{placementDone}</span>
-              <span style={{ color: HUB.muted }}>/ 10 placement matches</span>
-            </div>
-            <div style={{ height: 8, borderRadius: 999, background: HUB.surface, border: `1px solid ${HUB.border}`, overflow: 'hidden', marginTop: 10 }}>
-              <div style={{ width: `${(placementDone / 10) * 100}%`, height: '100%', background: `linear-gradient(90deg, ${HUB.gold}, ${HUB.violet})` }} />
-            </div>
-            <div style={{ fontSize: 12, color: HUB.muted, marginTop: 8 }}>Finish {placementLeft} more to earn your rank.</div>
-          </>
-        ) : (
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: HUB.goldHi }}>{ranked ? formatRankLabel(ranked) : 'Unranked'}</div>
-            <div style={{ fontSize: 12, color: HUB.muted, marginTop: 6 }}>{ranked ? 'Placement complete.' : 'Play ranked matches to earn a rank.'}</div>
-          </div>
-        )}
+      {/* Placement, LP and rank all came from `/api/ranked/*`, which no longer
+          exists. Rendering "Unranked · play ranked matches to earn a rank"
+          would be a promise the backend cannot keep. */}
+      <HubCard title="RANKED LADDER">
+        <div style={{ fontSize: 18, fontWeight: 800, color: HUB.goldHi }}>Coming soon</div>
+        <div style={{ fontSize: 12, color: HUB.muted, marginTop: 6, lineHeight: 1.55 }}>{RANKED_UNAVAILABLE_MESSAGE}</div>
       </HubCard>
 
       <HubCard title="FAVORITE DECK">
@@ -3135,7 +2841,8 @@ const HubCardTile = React.memo(function HubCardTile({ def, inDeck, cap, deckFull
 // ── Deck workspace (library + persistent current-deck panel) ────────────────
 function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mobile: boolean; onDecksChanged: () => void }) {
   const [decks, setDecks] = useState<DeckEntry[]>([]);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  // Deck ids are bigint-safe decimal STRINGS. Never `parseInt` one.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [deckName, setDeckName] = useState('Untitled Deck');
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [savedSnapshot, setSavedSnapshot] = useState<string>('[]');
@@ -3154,6 +2861,8 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [ownFilter, setOwnFilter] = useState<'all' | 'inDeck' | 'notInDeck'>('all');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  /** Per-issue detail from a failed `POST /api/decks/:id/activate`. */
+  const [activationIssues, setActivationIssues] = useState<string[]>([]);
   const liveRef = useRef<HTMLDivElement>(null);
 
   // Owned-card collection (boosters + starting Nodes). Custom decks may only use owned cards.
@@ -3178,11 +2887,11 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
     (async () => {
       setLoading(true);
       try {
-        const list = await listDecksApi(myName);
+        const list = await listDecksApi();
         setDecks(list);
         loadInto(list.find((d) => d.isActive) ?? list[0] ?? null);
-      } catch {
-        try { const cards = await getDeckApi(myName); setCounts(countsFrom(cards)); setSavedSnapshot(JSON.stringify([...cards].sort())); } catch {}
+      } catch (e) {
+        setStatus({ msg: errorText(e), ok: false });
       } finally { setLoading(false); }
     })();
   }, [myName, loadInto]);
@@ -3243,26 +2952,73 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
     return list;
   }, [search, chain, type, sort, ownFilter, counts]);
 
-  async function refreshDecks() { try { const l = await listDecksApi(myName); setDecks(l); } catch {} onDecksChanged(); }
+  async function refreshDecks() { try { setDecks(await listDecksApi()); } catch { /* status already shown */ } onDecksChanged(); }
 
+  /**
+   * Save WITHOUT requiring 60 cards.
+   *
+   * `POST /api/decks` and `PUT /api/decks/:id` validate card ids and copy
+   * limits but deliberately NOT size, so a half-built deck is savable and the
+   * player does not lose an hour of work to a page refresh. The 60-card gate
+   * lives on `activate()` alone — see `makeActive()` below.
+   */
   async function save() {
-    if (saving || !deckName.trim() || total !== DECK_SIZE || !v60.ok) return;
+    if (saving || !deckName.trim()) return;
     setSaving(true); setStatus(null);
     try {
-      if (editingId != null) {
-        const up = await updateDeckApi(myName, editingId, { cards: deckList, name: deckName.trim() });
+      if (editingId !== null) {
+        const up = await updateDeckApi(editingId, { cards: deckList, name: deckName.trim() });
         setSavedSnapshot(JSON.stringify([...up.cards].sort()));
         setDecks((prev) => prev.map((d) => d.id === editingId ? { ...d, cards: up.cards, name: up.name } : d));
       } else {
-        const created = await createDeckApi(myName, deckName.trim(), deckList);
+        const created = await createDeckApi(deckName.trim(), deckList);
         setEditingId(created.id); setSavedSnapshot(JSON.stringify([...created.cards].sort()));
         setDecks((prev) => [...prev, created]);
       }
-      try { await saveDeckApi(myName, deckList); } catch {}
-      setStatus({ msg: 'Deck saved.', ok: true });
+      setStatus({
+        msg: total === DECK_SIZE ? 'Deck saved.' : `Draft saved — ${total}/${DECK_SIZE} cards.`,
+        ok: true,
+      });
       onDecksChanged();
-    } catch (e: any) { setStatus({ msg: String(e?.message ?? e), ok: false }); }
+    } catch (e) { setStatus({ msg: errorText(e), ok: false }); }
     finally { setSaving(false); }
+  }
+
+  /**
+   * Save, then activate — the only route that enforces full legality.
+   *
+   * The server re-reads the STORED deck, so this saves first. On failure it
+   * returns structured `issues` (`{code:'size'|'unknown'|'copies', message}`)
+   * and every one of them is shown: the server knows exactly what is wrong and
+   * "invalid deck" would be throwing that away.
+   */
+  async function makeActive() {
+    if (saving || !deckName.trim()) return;
+    setSaving(true); setStatus(null); setActivationIssues([]);
+    try {
+      let id = editingId;
+      if (id === null) {
+        const created = await createDeckApi(deckName.trim(), deckList);
+        id = created.id;
+        setEditingId(id);
+        setDecks((prev) => [...prev, created]);
+      } else {
+        const up = await updateDeckApi(id, { cards: deckList, name: deckName.trim() });
+        setDecks((prev) => prev.map((d) => d.id === up.id ? { ...d, cards: up.cards, name: up.name } : d));
+      }
+      setSavedSnapshot(JSON.stringify([...deckList].sort()));
+      const activated = await activateDeckApi(id);
+      setDecks((prev) => prev.map((d) => ({ ...d, isActive: d.id === activated.id })));
+      setStatus({ msg: 'This is now your active deck — matches will seat you with it.', ok: true });
+      onDecksChanged();
+    } catch (e) {
+      if (decksApi.isDeckLegalityError(e)) {
+        setActivationIssues(decksApi.deckIssues(e).map((i) => i.message));
+        setStatus({ msg: 'This deck cannot be activated yet.', ok: false });
+      } else {
+        setStatus({ msg: errorText(e), ok: false });
+      }
+    } finally { setSaving(false); }
   }
 
   async function newDeck() {
@@ -3277,20 +3033,48 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
     loadInto(d); setShowLibrary(false);
   }
   async function setFavorite(d: DeckEntry) {
-    try { await activateDeckApi(myName, d.id); setDecks((prev) => prev.map((x) => ({ ...x, isActive: x.id === d.id }))); onDecksChanged(); } catch {}
+    setStatus(null); setActivationIssues([]);
+    try {
+      await activateDeckApi(d.id);
+      setDecks((prev) => prev.map((x) => ({ ...x, isActive: x.id === d.id })));
+      onDecksChanged();
+    } catch (e) {
+      if (decksApi.isDeckLegalityError(e)) {
+        setActivationIssues(decksApi.deckIssues(e).map((i) => i.message));
+        setStatus({ msg: `“${d.name}” cannot be activated yet.`, ok: false });
+      } else {
+        setStatus({ msg: errorText(e), ok: false });
+      }
+    }
   }
   async function duplicate(d: DeckEntry) {
-    try { const c = await createDeckApi(myName, `${d.name} copy`, d.cards); setDecks((prev) => [...prev, c]); onDecksChanged(); } catch {}
+    try { const c = await createDeckApi(`${d.name} copy`, d.cards); setDecks((prev) => [...prev, c]); onDecksChanged(); }
+    catch (e) { setStatus({ msg: errorText(e), ok: false }); }
   }
   async function removeDeck(d: DeckEntry) {
     if (!window.confirm(`Delete “${d.name}”? This cannot be undone.`)) return;
+    setStatus(null);
     try {
-      await deleteDeckApi(myName, d.id);
+      await deleteDeckApi(d.id);
       const remaining = decks.filter((x) => x.id !== d.id);
       setDecks(remaining);
       if (editingId === d.id) loadInto(remaining.find((x) => x.isActive) ?? remaining[0] ?? null);
       onDecksChanged();
-    } catch {}
+    } catch (e) {
+      // A deck that has ever been seated into a match cannot be deleted: the
+      // server returns a bare 400 from a foreign-key violation in
+      // `game.matches`, with no `details.reason` to branch on. Cancelling the
+      // match does not release it. Say what actually happened and point at the
+      // thing that does work, rather than failing silently as this used to.
+      if (decksApi.isUndeletableDeckError(e)) {
+        setStatus({
+          msg: `“${d.name}” has been played, so it is kept for match history and cannot be deleted. Rename it or replace its cards instead.`,
+          ok: false,
+        });
+      } else {
+        setStatus({ msg: errorText(e), ok: false });
+      }
+    }
   }
 
   const deckFull = total >= DECK_SIZE;
@@ -3299,8 +3083,10 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
     <CurrentDeckPanel
       deckName={deckName} setDeckName={setDeckName} total={total} legality={legality}
       counts={counts} bump={bump} copyIssues={copyIssues} v60={v60} dirty={dirty}
-      canSave={!!deckName.trim() && total === DECK_SIZE && v60.ok && !saving}
-      saving={saving} status={status} onSave={save} onClear={clearDeck} onNew={newDeck}
+      canSave={!!deckName.trim() && !saving}
+      canActivate={!!deckName.trim() && total === DECK_SIZE && v60.ok && !saving}
+      activationIssues={activationIssues}
+      saving={saving} status={status} onSave={save} onActivate={makeActive} onClear={clearDeck} onNew={newDeck}
       onOpenLibrary={() => setShowLibrary(true)} savedCount={decks.length} editingId={editingId}
     />
   );
@@ -3434,10 +3220,17 @@ function LibraryRow({ def, inDeck, cap, deckFull, onAdd, owned }: { def: CardDef
 function CurrentDeckPanel(props: {
   deckName: string; setDeckName: (s: string) => void; total: number; legality: 'EMPTY' | 'INCOMPLETE' | 'INVALID' | 'READY';
   counts: Record<string, number>; bump: (id: string, d: number) => void; copyIssues: DeckIssue[]; v60: DeckValidation; dirty: boolean;
-  canSave: boolean; saving: boolean; status: { msg: string; ok: boolean } | null; onSave: () => void; onClear: () => void; onNew: () => void;
-  onOpenLibrary: () => void; savedCount: number; editingId: number | null;
+  /** Saving is always allowed — the server does not enforce size on save. */
+  canSave: boolean;
+  /** Activating requires a full legal 60. That is the ONLY server-side gate. */
+  canActivate: boolean;
+  /** Per-issue detail from a rejected activation. */
+  activationIssues: string[];
+  saving: boolean; status: { msg: string; ok: boolean } | null;
+  onSave: () => void; onActivate: () => void; onClear: () => void; onNew: () => void;
+  onOpenLibrary: () => void; savedCount: number; editingId: string | null;
 }) {
-  const { deckName, setDeckName, total, legality, counts, bump, copyIssues, v60, dirty, canSave, saving, status, onSave, onClear, onNew, onOpenLibrary, savedCount } = props;
+  const { deckName, setDeckName, total, legality, counts, bump, copyIssues, v60, dirty, canSave, canActivate, activationIssues, saving, status, onSave, onActivate, onClear, onNew, onOpenLibrary, savedCount } = props;
   const [editingName, setEditingName] = useState(false);
   const legColor = legality === 'READY' ? HUB.green : legality === 'INVALID' ? HUB.red : HUB.gold;
   const pct = Math.min(100, (total / DECK_SIZE) * 100);
@@ -3534,12 +3327,29 @@ function CurrentDeckPanel(props: {
           </div>
         )}
         {total === 0 && <div style={{ marginBottom: 10, fontSize: 11.5, color: HUB.muted, display: 'flex', alignItems: 'center', gap: 6 }}><Dot size={7} /> 60 cards required · No cards selected</div>}
-        {status && <div style={{ marginBottom: 10, fontSize: 12, color: status.ok ? HUB.green : HUB.red }}>{status.msg}</div>}
+        {status && <div role="status" style={{ marginBottom: 10, fontSize: 12, color: status.ok ? HUB.green : HUB.red }}>{status.msg}</div>}
+        {/* Straight from `POST /api/decks/:id/activate` — the server names the
+            exact problem per issue, so show them all rather than a summary. */}
+        {activationIssues.length > 0 && (
+          <ul style={{ margin: '0 0 10px', paddingLeft: 18, fontSize: 12, color: HUB.red, lineHeight: 1.6 }}>
+            {activationIssues.map((msg, i) => <li key={i}>{msg}</li>)}
+          </ul>
+        )}
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={onClear} style={{ padding: '12px 18px', borderRadius: 10, background: HUB.surface, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: 'pointer', fontWeight: 700, letterSpacing: '0.06em', fontSize: 12 }}>CLEAR</button>
-          <button onClick={onSave} disabled={!canSave} style={{ ...hubGoldBtn(!canSave), flex: 1, marginTop: 0, padding: '12px 18px', fontSize: 14 }}>{saving ? 'SAVING…' : 'SAVE DECK'}</button>
+          <button onClick={onSave} disabled={!canSave}
+            style={{ padding: '12px 18px', borderRadius: 10, background: HUB.surface, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: canSave ? 'pointer' : 'default', fontWeight: 700, letterSpacing: '0.06em', fontSize: 12, opacity: canSave ? 1 : 0.5 }}>
+            {saving ? 'SAVING…' : total === DECK_SIZE ? 'SAVE' : 'SAVE DRAFT'}
+          </button>
+          <button onClick={onActivate} disabled={!canActivate} style={{ ...hubGoldBtn(!canActivate), flex: 1, marginTop: 0, padding: '12px 18px', fontSize: 14 }}>
+            {saving ? 'SAVING…' : 'SET AS ACTIVE'}
+          </button>
         </div>
-        {!canSave && total !== DECK_SIZE && <div style={{ marginTop: 8, fontSize: 11, color: HUB.muted, textAlign: 'center' }}>Add {DECK_SIZE} cards to save this deck.</div>}
+        <div style={{ marginTop: 8, fontSize: 11, color: HUB.muted, textAlign: 'center', lineHeight: 1.55 }}>
+          {total !== DECK_SIZE
+            ? `Drafts save at any size. ${DECK_SIZE} cards are required to set a deck active.`
+            : 'Your active deck is the one the server seats you with — no deck is chosen per match.'}
+        </div>
       </div>
     </div>
   );
@@ -3547,7 +3357,7 @@ function CurrentDeckPanel(props: {
 const deckStep: React.CSSProperties = { width: 24, height: 24, borderRadius: 6, background: HUB.raised, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: 'pointer', fontWeight: 900, fontSize: 14, lineHeight: 1 };
 
 function SavedDeckLibrary({ decks, editingId, onClose, onSelect, onFavorite, onDuplicate, onDelete }: {
-  decks: DeckEntry[]; editingId: number | null; onClose: () => void;
+  decks: DeckEntry[]; editingId: string | null; onClose: () => void;
   onSelect: (d: DeckEntry) => void; onFavorite: (d: DeckEntry) => void; onDuplicate: (d: DeckEntry) => void; onDelete: (d: DeckEntry) => void;
 }) {
   return (
@@ -3965,83 +3775,6 @@ function AchievementBadge({ a }: { a: Achievement }) {
 }
 
 // ── FAVORITE DECK ──────────────────────────────────────────────────────────
-function FavoriteDeck({ deck, myName }: { deck: string[]; myName: string }) {
-  const stats = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const id of deck) counts[id] = (counts[id] ?? 0) + 1;
-    const colorTally: Record<string, number> = {};
-    let topCard: { id: string; count: number; def: any } | null = null;
-    for (const [id, n] of Object.entries(counts)) {
-      const d = CARDS[id]; if (!d) continue;
-      colorTally[d.color] = (colorTally[d.color] ?? 0) + n;
-      if (!topCard || n > topCard.count) topCard = { id, count: n, def: d };
-    }
-    const sortedColors = Object.entries(colorTally).sort((a, b) => b[1] - a[1]);
-    return {
-      size: deck.length,
-      colors: sortedColors.slice(0, 3).map(([c]) => COLOR_META[c as Color]),
-      topCard,
-      archetype: sortedColors.length === 1
-        ? `Mono-${COLOR_META[sortedColors[0][0] as Color].name}`
-        : sortedColors.length >= 2
-          ? `${COLOR_META[sortedColors[0][0] as Color].name}/${COLOR_META[sortedColors[1][0] as Color].name}`
-          : 'Custom',
-    };
-  }, [deck]);
-
-  return (
-    <SectionShell title="Favorite Deck" eyebrow="Your Featured Build" accent={PROFILE_TOKENS.secondary}>
-      {deck.length === 0 ? (
-        <EmptyState icon="cards" title="No deck saved yet"
-          message="Build a 60-card deck below to feature it here." />
-      ) : (
-        <div style={{ display: 'flex', gap: 18, alignItems: 'stretch', flexWrap: 'wrap' }}>
-          {/* Deck "spine" art */}
-          <div style={{
-            position: 'relative', width: 140, height: 192, flex: '0 0 auto',
-            borderRadius: 12, overflow: 'hidden',
-            background: stats.colors.length === 1
-              ? `linear-gradient(160deg, ${stats.colors[0].hex}, #0a1020)`
-              : `linear-gradient(160deg, ${stats.colors.map(c => c.hex).join(', ')})`,
-            border: `1px solid ${PROFILE_TOKENS.borderHi}`,
-            boxShadow: '0 12px 28px -8px #000c, inset 0 0 30px #0008',
-            display: 'flex', alignItems: 'flex-end', padding: 10,
-          }}>
-            <div style={{
-              fontFamily: '"Cinzel", "Times New Roman", serif',
-              fontSize: 18, fontWeight: 900, color: '#fff',
-              textShadow: '0 2px 6px #000', lineHeight: 1.1,
-            }}>{stats.archetype}</div>
-          </div>
-          <div style={{ flex: '1 1 280px', minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: '#fff', marginBottom: 4 }}>{myName}'s {stats.archetype}</div>
-              <div style={{ fontSize: 12, color: PROFILE_TOKENS.muted, marginBottom: 12 }}>
-                {stats.size}/60 cards · {stats.colors.length === 1 ? 'Mono-color' : `${stats.colors.length} chain split`}
-              </div>
-              <div style={{ display: 'flex', gap: 16, marginBottom: 14 }}>
-                <Mini label="Cards" value={`${stats.size}/60`} color={stats.size === 60 ? PROFILE_TOKENS.accent : PROFILE_TOKENS.warning} />
-                {stats.topCard && <Mini label="Most Used" value={`${stats.topCard.def.name} ×${stats.topCard.count}`} color={PROFILE_TOKENS.secondary} />}
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {stats.colors.map(c => (
-                  <span key={c.name} style={{
-                    padding: '4px 10px', borderRadius: 999, fontSize: 10, fontWeight: 800,
-                    background: c.hex, color: c.ink, letterSpacing: 1, textTransform: 'uppercase',
-                  }}>{c.name}</span>
-                ))}
-              </div>
-            </div>
-            <div style={{ fontSize: 11, color: PROFILE_TOKENS.muted, marginTop: 14 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>Edit your deck in the Deck Builder below <ArrowDown size={12} /></span>
-            </div>
-          </div>
-        </div>
-      )}
-    </SectionShell>
-  );
-}
-
 function Mini({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div>
@@ -4066,7 +3799,18 @@ function EmptyState({ icon, title, message }: { icon: IconKey; title: string; me
 }
 
 // ── EDIT MODAL ─────────────────────────────────────────────────────────────
+/**
+ * Edit YOUR OWN profile.
+ *
+ * `PATCH /api/profiles/me` edits the caller and nobody else — there is no route
+ * that takes a target profile — so this has no name parameter to send.
+ *
+ * The display name is server state now. New players are given a default
+ * derived from their wallet address (e.g. `0xe8ee…de8f`); this is where they
+ * change it.
+ */
 function ProfileEditModal({ prof, onClose, onSaved }: { prof: Profile; onClose: () => void; onSaved: () => void }) {
+  const [displayName, setDisplayName] = useState(prof.name);
   const [bio, setBio] = useState(prof.bio ?? '');
   const [avatarUrl, setAvatarUrl] = useState(prof.avatarUrl ?? '');
   const [saving, setSaving] = useState(false);
@@ -4081,10 +3825,20 @@ function ProfileEditModal({ prof, onClose, onSaved }: { prof: Profile; onClose: 
   }
   async function save() {
     setSaving(true); setErr('');
+    const trimmed = displayName.trim();
     try {
-      await updateProfileApi(prof.name, { bio: bio.trim() || null, avatarUrl: avatarUrl.trim() || null });
+      await updateMyProfileApi({
+        // Only send the name when it actually changed: an unchanged value would
+        // still be checked for uniqueness and 409 against the player's own row.
+        ...(trimmed && trimmed !== prof.name ? { displayName: trimmed } : {}),
+        bio: bio.trim() || null,
+        avatarUrl: avatarUrl.trim() || null,
+      });
+      // The root re-reads the profile; the display name threads through every
+      // screen, so it cannot just be updated locally here.
+      announceProfileChanged();
       onSaved();
-    } catch (e: any) { setErr(String(e?.message ?? e)); setSaving(false); }
+    } catch (e) { setErr(errorText(e)); setSaving(false); }
   }
   return (
     <div onClick={onClose} style={{
@@ -4113,6 +3867,14 @@ function ProfileEditModal({ prof, onClose, onSaved }: { prof: Profile; onClose: 
             </label>
             <input value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)} placeholder="...or paste image URL"
               style={{ padding: '8px 10px', background: PROFILE_TOKENS.bg, color: PROFILE_TOKENS.text, border: `1px solid ${PROFILE_TOKENS.border}`, borderRadius: 8, fontSize: 13, fontFamily: PROFILE_FONT }} />
+          </div>
+        </div>
+        <div style={{ marginBottom: 18 }}>
+          <label htmlFor="prof-display-name" style={{ display: 'block', fontSize: 11, color: PROFILE_TOKENS.muted, letterSpacing: 1.5, fontWeight: 700, marginBottom: 6 }}>DISPLAY NAME</label>
+          <input id="prof-display-name" value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={32}
+            style={{ width: '100%', padding: '10px 12px', background: PROFILE_TOKENS.bg, color: PROFILE_TOKENS.text, border: `1px solid ${PROFILE_TOKENS.border}`, borderRadius: 8, fontSize: 14, fontFamily: PROFILE_FONT, boxSizing: 'border-box' }} />
+          <div style={{ fontSize: 10.5, color: PROFILE_TOKENS.muted, marginTop: 4 }}>
+            3–32 characters. Letters, numbers, space and <code>_ . -</code>. Other players find you by this name.
           </div>
         </div>
         <div style={{ marginBottom: 18 }}>
@@ -4146,15 +3908,15 @@ function PublicProfile({ name, onBack }: { name: string; onBack: () => void }) {
     (async () => {
       setLoading(true); setErr('');
       try {
-        const [p, d] = await Promise.all([
-          getProfileApi(name).catch(() => null),
-          getDeckApi(name).catch(() => [] as string[]),
-        ]);
+        // Only the public profile. Another player's decklist is not readable by
+        // anyone — `GET /api/decks` is scoped to the caller's own token, and
+        // that is deliberate: a decklist is competitive information.
+        const p = await getProfileApi(name);
         if (cancelled) return;
         setProf(p);
-        setDeck(d);
-      } catch (e: any) {
-        if (!cancelled) setErr(String(e?.message ?? e));
+        setDeck([]);
+      } catch (e) {
+        if (!cancelled) setErr(errorText(e));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -4309,537 +4071,6 @@ function PublicProfile({ name, onBack }: { name: string; onBack: () => void }) {
 }
 
 // ── Sproto Gremlin NFT showcase (collection 5Vz7…6MSU) ──────────────────────
-function SprotoGremlinShowcase({ walletAddress }: { walletAddress: string | null }) {
-  const [items, setItems] = useState<OwnedNft[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const isSol = !!walletAddress && !walletAddress.startsWith('0x');
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!walletAddress || !isSol) { setItems([]); return; }
-      setLoading(true);
-      try {
-        const owned = await listOwnedSprotoGremlins(walletAddress);
-        if (!cancelled) setItems(owned);
-      } catch {
-        if (!cancelled) setItems([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [walletAddress, isSol]);
-
-  if (!walletAddress) return null;
-  if (!isSol)         return null;
-  if (loading && !items) {
-    return (
-      <div style={{ padding: 18, color: '#9aa6c0', fontSize: 13 }}>
-        Scanning your wallet for Sproto Gremlins…
-      </div>
-    );
-  }
-  if (!items || items.length === 0) return null;
-
-  return (
-    <div style={{ marginBottom: 18 }}>
-      <div style={{
-        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-        marginBottom: 10, padding: '0 4px',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, color: '#e9eef7' }}>
-          <Lizard size={16} /> Sproto Gremlins <span style={{ color: '#7d8aa3', fontWeight: 500 }}>· {items.length} owned</span>
-        </div>
-        <a
-          href={`https://solscan.io/token/${SPROTO_COLLECTION_MINT}`}
-          target="_blank" rel="noopener noreferrer"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#7c5cff', textDecoration: 'none' }}
-        >
-          collection <ArrowUpRight size={12} />
-        </a>
-      </div>
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-        gap: 12,
-      }}>
-        {items.map(it => (
-          <a
-            key={it.mint}
-            href={`https://solscan.io/token/${it.mint}`}
-            target="_blank" rel="noopener noreferrer"
-            title={it.name}
-            style={{
-              display: 'block',
-              border: '1px solid #232f45',
-              borderRadius: 12,
-              overflow: 'hidden',
-              background: '#0e1422',
-              textDecoration: 'none',
-              color: 'inherit',
-              transition: 'transform 120ms ease, border-color 120ms ease',
-            }}
-            onMouseEnter={e => {
-              (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-2px)';
-              (e.currentTarget as HTMLAnchorElement).style.borderColor = '#7c5cff';
-            }}
-            onMouseLeave={e => {
-              (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(0)';
-              (e.currentTarget as HTMLAnchorElement).style.borderColor = '#232f45';
-            }}
-          >
-            <div style={{ aspectRatio: '5 / 7', background: '#000' }}>
-              <img
-                src={it.image}
-                alt={it.name}
-                loading="lazy"
-                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/sproto-gremlin.png'; }}
-              />
-            </div>
-            <div style={{ padding: '8px 10px', fontSize: 12, fontWeight: 600, color: '#e9eef7' }}>
-              {it.name}
-            </div>
-          </a>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── NFT library (Memetic Masters via Helius) ────────────────────────────────
-function LibrarySection({ prof }: { prof: Profile | null }) {
-  const mobile = useIsMobile();
-  const [cards, setCards] = useState<LibraryCard[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState('');
-  const wallet = prof?.walletAddress ?? '';
-  const isSol = !!wallet && !wallet.startsWith('0x');
-
-  const load = useCallback(async () => {
-    if (!wallet) return;
-    setLoading(true); setErr('');
-    try { setCards(await getLibraryApi(wallet)); }
-    catch (e: any) { setErr(String(e?.message ?? e)); }
-    finally { setLoading(false); }
-  }, [wallet]);
-
-  useEffect(() => { if (wallet && isSol) load(); }, [wallet, isSol, load]);
-
-  const count = cards?.length ?? 0;
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-        <div style={{ fontSize: 13, color: '#cfd6e3', fontWeight: 700 }}>
-          {count > 0 ? `${count} NFT${count === 1 ? '' : 's'} Owned` : '0 NFTs Owned'}
-        </div>
-        {wallet && isSol && (
-          <button onClick={load} style={profileChip(false)} disabled={loading}>
-            {loading ? '…' : <><Refresh size={13} /> Refresh</>}
-          </button>
-        )}
-      </div>
-
-      {!wallet && (
-        <EmptyState icon="link" title="No wallet linked"
-          message="Connect a Solana wallet from the home screen to display your Memetic Masters collection." />
-      )}
-      {wallet && !isSol && (
-        <EmptyState icon="warning" title="EVM wallet detected"
-          message={`Memetic Masters live on Solana. Your linked wallet (${wallet.slice(0,6)}…) is EVM — link a Solana wallet.`} />
-      )}
-      {err && (
-        <div style={{ marginTop: 8, fontSize: 12, color: PROFILE_TOKENS.danger }}>{err}</div>
-      )}
-      {wallet && isSol && !loading && cards && cards.length === 0 && !err && (
-        <EmptyState icon="cards" title="No Memetic Masters found"
-          message="No Memetic Masters NFTs were found in this wallet. Pick some up to fill your showcase." />
-      )}
-      {wallet && isSol && loading && (
-        <div style={{ padding: 24, color: PROFILE_TOKENS.muted, fontSize: 13, textAlign: 'center' }}>Scanning chain…</div>
-      )}
-
-      {cards && cards.length > 0 && (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 130 : 168}px, 1fr))`,
-          gap: 12,
-        }}>
-          {cards.map(c => <LibraryCardTile key={c.id} card={c} />)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LibraryCardTile({ card }: { card: LibraryCard }) {
-  return (
-    <div
-      onMouseEnter={e => {
-        const img = e.currentTarget.querySelector('img') as HTMLImageElement | null;
-        if (img) img.style.transform = 'scale(1.08)';
-        e.currentTarget.style.transform = 'translateY(-2px)';
-        e.currentTarget.style.boxShadow = `0 14px 30px -10px ${PROFILE_TOKENS.accent}55`;
-        e.currentTarget.style.borderColor = PROFILE_TOKENS.accent + '88';
-      }}
-      onMouseLeave={e => {
-        const img = e.currentTarget.querySelector('img') as HTMLImageElement | null;
-        if (img) img.style.transform = 'scale(1)';
-        e.currentTarget.style.transform = 'translateY(0)';
-        e.currentTarget.style.boxShadow = 'none';
-        e.currentTarget.style.borderColor = PROFILE_TOKENS.border;
-      }}
-      style={{
-        borderRadius: 10, overflow: 'hidden',
-        background: PROFILE_TOKENS.cardSoft, border: `1px solid ${PROFILE_TOKENS.border}`,
-        display: 'flex', flexDirection: 'column',
-        transition: '200ms ease',
-      }}>
-      <div style={{ aspectRatio: '1', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-        {card.image
-          ? <img src={card.image} alt={card.name} loading="lazy"
-              style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 300ms ease' }} />
-          : <div style={{ color: PROFILE_TOKENS.muted, display: 'flex' }}><Cards size={36} /></div>}
-      </div>
-      <div style={{ padding: '8px 10px' }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {card.name}
-        </div>
-        {card.collection && (
-          <div style={{ fontSize: 10, color: PROFILE_TOKENS.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {card.collection}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Deckbuilder ─────────────────────────────────────────────────────────────
-function DeckbuilderPanel({ myName }: { myName: string }) {
-  const mobile = useIsMobile();
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState('');
-  const [filter, setFilter] = useState<Color | 'all'>('all');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'node' | 'meme' | 'machine' | 'aura' | 'move'>('all');
-
-  // ── Deck Library state ─────────────────────────────────────────────────────
-  const [decks, setDecks] = useState<DeckEntry[]>([]);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editingName, setEditingName] = useState<string>('');
-  const [libBusy, setLibBusy] = useState(false);
-
-  function countsFromCards(cards: string[]): Record<string, number> {
-    const next: Record<string, number> = {};
-    for (const id of cards) next[id] = (next[id] ?? 0) + 1;
-    return next;
-  }
-
-  // Initial load: list decks, populate editor with active (or first).
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const list = await listDecksApi(myName);
-        setDecks(list);
-        const pick = list.find(d => d.isActive) ?? list[0] ?? null;
-        if (pick) {
-          setEditingId(pick.id);
-          setEditingName(pick.name);
-          setCounts(countsFromCards(pick.cards));
-        } else {
-          // Legacy fallback: pull "the deck" via back-compat endpoint.
-          const cards = await getDeckApi(myName);
-          setCounts(countsFromCards(cards));
-          setEditingId(null);
-          setEditingName('');
-        }
-      } catch {
-        try {
-          const cards = await getDeckApi(myName);
-          setCounts(countsFromCards(cards));
-        } catch { /* leave empty */ }
-      } finally { setLoading(false); }
-    })();
-  }, [myName]);
-
-  const deckList = useMemo(() => {
-    const out: string[] = [];
-    for (const [id, n] of Object.entries(counts)) for (let i = 0; i < n; i++) out.push(id);
-    return out;
-  }, [counts]);
-  const validation = useMemo(() => validateDeck(deckList), [deckList]);
-  const total = validation.size;
-
-  function bump(id: string, delta: number) {
-    setCounts(prev => {
-      const cur = prev[id] ?? 0;
-      let next = cur + delta;
-      if (next < 0) next = 0;
-      if (!isBasicNode(id) && next > MAX_COPIES_NONBASIC) next = MAX_COPIES_NONBASIC;
-      if (delta > 0 && total >= DECK_SIZE) return prev;
-      const out = { ...prev };
-      if (next === 0) delete out[id]; else out[id] = next;
-      return out;
-    });
-  }
-
-  async function save() {
-    setSaving(true); setStatus('');
-    try {
-      if (!validation.ok) { setStatus(validation.issues[0]?.message ?? 'Invalid deck.'); return; }
-      if (editingId != null) {
-        const updated = await updateDeckApi(myName, editingId, { cards: deckList });
-        setDecks(prev => prev.map(d => d.id === editingId ? { ...d, cards: updated.cards } : d));
-        setStatus(`Saved “${editingName}”!`);
-      } else {
-        // Create a new deck row (legacy fallback path).
-        const name = window.prompt('Name this deck:', 'Default') ?? '';
-        if (!name.trim()) { setStatus('Save cancelled.'); return; }
-        const created = await createDeckApi(myName, name.trim(), deckList);
-        setDecks(prev => [...prev, created]);
-        setEditingId(created.id);
-        setEditingName(created.name);
-        setStatus(`Saved “${created.name}”!`);
-      }
-      // Also write the back-compat single-deck slot so old callers see latest.
-      try { await saveDeckApi(myName, deckList); } catch { /* non-fatal */ }
-    } catch (e: any) {
-      setStatus(String(e?.message ?? e));
-    } finally { setSaving(false); }
-  }
-  function clear() {
-    if (!confirm('Clear cards from this deck (does not delete the deck)?')) return;
-    setCounts({});
-    setStatus('');
-  }
-
-  async function newDeck() {
-    const name = window.prompt('Name your new deck:', `Deck ${decks.length + 1}`) ?? '';
-    if (!name.trim()) return;
-    setLibBusy(true); setStatus('');
-    try {
-      const created = await createDeckApi(myName, name.trim(), []);
-      setDecks(prev => [...prev, created]);
-      setEditingId(created.id);
-      setEditingName(created.name);
-      setCounts({});
-      setStatus(`Created “${created.name}”.`);
-    } catch (e: any) {
-      setStatus(String(e?.message ?? e));
-    } finally { setLibBusy(false); }
-  }
-
-  function loadDeck(d: DeckEntry) {
-    if (saving || libBusy) return;
-    if (editingId === d.id) return;
-    setEditingId(d.id);
-    setEditingName(d.name);
-    setCounts(countsFromCards(d.cards));
-    setStatus('');
-  }
-
-  async function setActive(d: DeckEntry) {
-    setLibBusy(true); setStatus('');
-    try {
-      await activateDeckApi(myName, d.id);
-      setDecks(prev => prev.map(x => ({ ...x, isActive: x.id === d.id })));
-      setStatus(`“${d.name}” is now active.`);
-    } catch (e: any) {
-      setStatus(String(e?.message ?? e));
-    } finally { setLibBusy(false); }
-  }
-
-  async function renameDeck(d: DeckEntry) {
-    const name = window.prompt('Rename deck:', d.name) ?? '';
-    if (!name.trim() || name.trim() === d.name) return;
-    setLibBusy(true); setStatus('');
-    try {
-      const updated = await updateDeckApi(myName, d.id, { name: name.trim() });
-      setDecks(prev => prev.map(x => x.id === d.id ? { ...x, name: updated.name } : x));
-      if (editingId === d.id) setEditingName(updated.name);
-    } catch (e: any) {
-      setStatus(String(e?.message ?? e));
-    } finally { setLibBusy(false); }
-  }
-
-  async function removeDeck(d: DeckEntry) {
-    if (!confirm(`Delete deck “${d.name}”? This cannot be undone.`)) return;
-    setLibBusy(true); setStatus('');
-    try {
-      await deleteDeckApi(myName, d.id);
-      const remaining = decks.filter(x => x.id !== d.id);
-      setDecks(remaining);
-      if (editingId === d.id) {
-        const next = remaining.find(x => x.isActive) ?? remaining[0] ?? null;
-        if (next) { setEditingId(next.id); setEditingName(next.name); setCounts(countsFromCards(next.cards)); }
-        else      { setEditingId(null); setEditingName(''); setCounts({}); }
-      }
-    } catch (e: any) {
-      setStatus(String(e?.message ?? e));
-    } finally { setLibBusy(false); }
-  }
-
-  const visible = useMemo(() => {
-    return BUILDABLE_CARDS.filter(c =>
-      (filter === 'all' || c.color === filter) &&
-      (typeFilter === 'all' || c.type === typeFilter)
-    );
-  }, [filter, typeFilter]);
-
-  return (
-    <div>
-      {/* Deck Library sidebar (rendered as a horizontal bar on mobile, top on desktop too for simplicity) */}
-      <div style={{
-        marginBottom: 14, padding: 12, borderRadius: 12,
-        background: '#0a1224', border: `1px solid ${PROFILE_TOKENS.border}`,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, letterSpacing: 1.5, fontWeight: 700, color: PROFILE_TOKENS.muted, textTransform: 'uppercase' }}>
-            <Books size={14} /> Deck Library {decks.length > 0 && <span style={{ color: PROFILE_TOKENS.accent }}>({decks.length})</span>}
-          </div>
-          <button onClick={newDeck} disabled={libBusy || saving}
-            style={{ ...profileChip(true), opacity: (libBusy || saving) ? 0.5 : 1 }}>
-            + New Deck
-          </button>
-        </div>
-        {decks.length === 0 ? (
-          <div style={{ fontSize: 12, color: PROFILE_TOKENS.muted }}>
-            No saved decks yet. Build cards below and hit <b>Save Deck</b> to create your first.
-          </div>
-        ) : (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {decks.map(d => {
-              const isEditing = d.id === editingId;
-              return (
-                <div key={d.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px',
-                  borderRadius: 8,
-                  background: isEditing ? `${PROFILE_TOKENS.accent}22` : '#0f1830',
-                  border: `1px solid ${isEditing ? PROFILE_TOKENS.accent : PROFILE_TOKENS.border}`,
-                }}>
-                  <button onClick={() => loadDeck(d)} title="Load into editor"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, padding: 0 }}>
-                    {d.isActive ? <Star size={13} style={{ color: PROFILE_TOKENS.warning }} /> : null}{d.name}
-                    <span style={{ marginLeft: 6, fontSize: 10, color: PROFILE_TOKENS.muted, fontWeight: 600 }}>
-                      ({d.cards.length})
-                    </span>
-                  </button>
-                  {!d.isActive && (
-                    <button onClick={() => setActive(d)} disabled={libBusy} title="Set as active deck"
-                      style={{ display: 'inline-flex', background: 'transparent', border: 'none', color: PROFILE_TOKENS.accent, cursor: 'pointer' }}>
-                      <StarOutline size={14} />
-                    </button>
-                  )}
-                  <button onClick={() => renameDeck(d)} disabled={libBusy} title="Rename"
-                    style={{ display: 'inline-flex', background: 'transparent', border: 'none', color: PROFILE_TOKENS.muted, cursor: 'pointer' }}>
-                    <EditIcon size={14} />
-                  </button>
-                  <button onClick={() => removeDeck(d)} disabled={libBusy} title="Delete"
-                    style={{ display: 'inline-flex', background: 'transparent', border: 'none', color: PROFILE_TOKENS.danger, cursor: 'pointer' }}>
-                    <Trash size={14} />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Header — deck progress + actions */}
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12,
-        marginBottom: 14,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
-          <div style={{ fontSize: 32, fontWeight: 900, color: total === DECK_SIZE ? PROFILE_TOKENS.accent : '#fff', lineHeight: 1 }}>
-            {total}<span style={{ fontSize: 18, color: PROFILE_TOKENS.muted, fontWeight: 700 }}>/{DECK_SIZE}</span>
-          </div>
-          <div style={{ fontSize: 11, color: PROFILE_TOKENS.muted, letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase' }}>
-            {editingName ? `Editing: ${editingName}` : 'Cards in Deck'}
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {status && <span style={{ fontSize: 12, color: status.startsWith('Saved') || status.startsWith('Created') || status.endsWith('active.') ? PROFILE_TOKENS.accent : PROFILE_TOKENS.danger }}>{status}</span>}
-          <button onClick={clear} style={profileChip(false)}>Clear</button>
-          <button onClick={save} disabled={!validation.ok || saving}
-            style={{ ...profileChip(true), opacity: (!validation.ok || saving) ? 0.5 : 1, cursor: (!validation.ok || saving) ? 'not-allowed' : 'pointer' }}>
-            {saving ? 'Saving…' : (editingId != null ? <><Save size={13} /> Save Deck</> : <><Save size={13} /> Save as New</>)}
-          </button>
-        </div>
-      </div>
-
-      {/* Progress bar */}
-      <div style={{
-        height: 6, borderRadius: 999, overflow: 'hidden',
-        background: '#0a1224', border: `1px solid ${PROFILE_TOKENS.border}`,
-        marginBottom: 14,
-      }}>
-        <div style={{
-          width: `${Math.min(100, (total / DECK_SIZE) * 100)}%`, height: '100%',
-          background: total === DECK_SIZE
-            ? `linear-gradient(90deg, ${PROFILE_TOKENS.accent}, ${PROFILE_TOKENS.secondary})`
-            : PROFILE_TOKENS.warning,
-          transition: 'width 200ms ease',
-        }} />
-      </div>
-
-      {/* Validation hints */}
-      {!validation.ok && validation.issues.length > 0 && total > 0 && (
-        <div style={{
-          marginBottom: 12, padding: '8px 12px', borderRadius: 8,
-          background: `${PROFILE_TOKENS.warning}11`, border: `1px solid ${PROFILE_TOKENS.warning}55`,
-          fontSize: 12, color: PROFILE_TOKENS.warning,
-        }}>
-          {validation.issues.slice(0, 3).map((it, i) => <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Dot size={6} /> {it.message}</div>)}
-        </div>
-      )}
-
-      {/* Filters */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-        <FilterChip selected={filter === 'all'} onClick={() => setFilter('all')} label="All Chains" />
-        {COLORS.map(c => (
-          <FilterChip key={c} selected={filter === c}
-            onClick={() => setFilter(c)}
-            label={COLOR_META[c].name} hex={COLOR_META[c].hex} ink={COLOR_META[c].ink} />
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-        {(['all', 'node', 'meme', 'machine', 'aura', 'move'] as const).map(t => (
-          <FilterChip key={t} selected={typeFilter === t}
-            onClick={() => setTypeFilter(t)}
-            label={t === 'all' ? 'All Types' : t.charAt(0).toUpperCase() + t.slice(1)} />
-        ))}
-      </div>
-
-      {loading ? (
-        <div style={{ padding: 24, color: PROFILE_TOKENS.muted, fontSize: 13 }}>Loading deck…</div>
-      ) : (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 152 : 180}px, 1fr))`,
-          gap: 12,
-        }}>
-          {visible.map(def => {
-            const n = counts[def.id] ?? 0;
-            const cap = isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC;
-            return (
-              <DeckBuilderCard key={def.id}
-                def={def} count={n} cap={cap} totalFull={total >= DECK_SIZE}
-                onPlus={() => bump(def.id, +1)}
-                onMinus={() => bump(def.id, -1)}
-              />
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function DeckBuilderCard({ def, count, cap, totalFull, onPlus, onMinus }: {
   def: any; count: number; cap: number; totalFull: boolean;
   onPlus: () => void; onMinus: () => void;
@@ -4963,413 +4194,180 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
 
 // ── Lobby screen ────────────────────────────────────────────────────────────
 function Lobby({
-  myName, onJoined, onBack, onViewProfile, onSolo,
-}: { myName: string; onJoined: (seat: Seat) => void; onBack: () => void; onViewProfile: (name: string) => void; onSolo: () => void }) {
+  myName, onJoined, onBack, onViewProfile, onSolo, onDeckScreen,
+}: {
+  myName: string;
+  onJoined: (seat: Seat) => void;
+  onBack: () => void;
+  onViewProfile: (name: string) => void;
+  onSolo: () => void;
+  /** Send the player to the deck builder — the only fix for `no_active_deck`. */
+  onDeckScreen: () => void;
+}) {
   const mobile = useIsMobile();
-  const [matches, setMatches] = useState<any[]>([]);
+  const [matches, setMatches] = useState<LobbyEntry[]>([]);
+  const [invites, setInvites] = useState<LobbyEntry[]>([]);
   const [leaderboard, setLeaderboard] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  // Create-match panel state — creator only picks their own color now.
-  const [myColor, setMyColor] = useState<Color>('sol');
-  const [seatChoice, setSeatChoice] = useState<'0' | '1'>('0');
-  // Custom-deck state (creator and joiner each pick standard color OR custom).
-  // myDecks = all saved decks; selected* = which one is in play. The flat
-  // myDeck/joinDeck arrays below are derived from those, kept as state so
-  // the rest of the lobby code (validation, setupData payload, etc.) can
-  // read them synchronously.
-  const [myDecks, setMyDecks] = useState<DeckEntry[]>([]);
-  const [mySelectedDeckId, setMySelectedDeckId] = useState<number | null>(null);
-  const [myDeck, setMyDeck] = useState<string[]>([]);
-  const [useCustom, setUseCustom] = useState(false);
-  const [joinSelectedDeckId, setJoinSelectedDeckId] = useState<number | null>(null);
-  const [joinDeck, setJoinDeck] = useState<string[]>([]);
-  const [joinUseCustom, setJoinUseCustom] = useState(false);
-  // Join modal state — second player picks their color when accepting.
-  const [joinTarget, setJoinTarget] = useState<{ match: any; seat: string } | null>(null);
+  /** Set when the server refused because of the active deck. Shows a CTA, not
+   *  a red box the player can do nothing about. */
+  const [deckProblem, setDeckProblem] = useState<{ message: string; issues: string[] } | null>(null);
+  const [busy, setBusy] = useState<null | 'create' | 'quick' | 'challenge' | string>(null);
   const [plazaOpen, setPlazaOpen] = useState(false);
-  const [joinColor, setJoinColor] = useState<Color>('eth');
-  // Match stakes — 'free' or a $MASTER token wager. Currently UI-only metadata stored in setupData.
-  const [wagerKind, setWagerKind] = useState<'free' | 'master'>('free');
-  const [wagerAmount, setWagerAmount] = useState<string>('1000');
-  // Optional human-readable match name so opponents can find each other in the lobby.
-  const [matchName, setMatchName] = useState<string>('');
-  // Center-column action tabs — one dominant action at a time instead of 3 stacked forms.
+  const [unlisted, setUnlisted] = useState(false);
+  const [challengeTarget, setChallengeTarget] = useState('');
   const [centerTab, setCenterTab] = useState<'quick' | 'create' | 'challenge'>('quick');
 
-  // Player profile for top-bar header (avatar, win rate, level)
   const [myProfile, setMyProfile] = useState<Profile | null>(null);
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        let p = await getProfileApi(myName);
-        if (!p) p = await upsertProfileApi(myName);
-        if (alive) setMyProfile(p);
-      } catch {}
-    })();
-    return () => { alive = false; };
-  }, [myName]);
+  const [myDecks, setMyDecks] = useState<DeckEntry[]>([]);
+  const activeDeck = useMemo(() => myDecks.find(d => d.isActive) ?? null, [myDecks]);
 
-  // ── Solana wallet picker (Phantom / Solflare / Backpack) ───────────────────
-  const [walletPicker, setWalletPicker] = useState<null | {
-    resolve: (kind: SolanaWalletKind) => void; reject: (e: Error) => void;
-  }>(null);
-  const pickSolanaWallet = useCallback((): Promise<SolanaWalletKind> => {
-    return new Promise((resolve, reject) => setWalletPicker({ resolve, reject }));
+  /**
+   * ONE place where a thrown value becomes lobby UI.
+   *
+   * `no_active_deck` / `invalid_active_deck` are not errors the player can
+   * retry their way out of — they need the deck screen — so they get their own
+   * state with a working button instead of a red banner.
+   */
+  const report = useCallback((e: unknown) => {
+    if (isDeckBlocked(e)) {
+      setError('');
+      setDeckProblem({ message: errorText(e), issues: errorIssues(e) });
+      return;
+    }
+    setDeckProblem(null);
+    setError(errorText(e));
   }, []);
 
-  // ── Challenges: poll both incoming and outgoing every 5s ────────────────────
-  const [incomingChallenges, setIncomingChallenges] = useState<Challenge[]>([]);
-  const [outgoingChallenges, setOutgoingChallenges] = useState<Challenge[]>([]);
-  const [challengeTarget, setChallengeTarget] = useState<string>('');
-  const [challengeMsg, setChallengeMsg] = useState<string>('');
-  const [challengeBusy, setChallengeBusy] = useState<boolean>(false);
-  useEffect(() => {
-    if (!myName) return;
-    let alive = true;
-    const poll = async () => {
-      try {
-        const [inc, out] = await Promise.all([
-          listIncomingChallengesApi(myName),
-          listOutgoingChallengesApi(myName),
-        ]);
-        if (!alive) return;
-        setIncomingChallenges(inc);
-        setOutgoingChallenges(out);
-      } catch {}
-    };
-    poll();
-    const t = setInterval(poll, 5000);
-    return () => { alive = false; clearInterval(t); };
-  }, [myName]);
+  const clearErrors = useCallback(() => { setError(''); setDeckProblem(null); }, []);
 
-  // Load this player's full deck library on mount. Default both the create-
-  // and join-side selection to the active deck (or first deck if no active).
   useEffect(() => {
+    let alive = true;
     (async () => {
       try {
-        const decks = await listDecksApi(myName);
-        setMyDecks(decks);
-        const initial = decks.find(d => d.isActive) ?? decks[0] ?? null;
-        if (initial) {
-          setMySelectedDeckId(initial.id);
-          setJoinSelectedDeckId(initial.id);
-          setMyDeck(initial.cards);
-          setJoinDeck(initial.cards);
-        }
-      } catch {}
+        const p = await getMyProfileApi();
+        if (alive) setMyProfile(p);
+      } catch (e) { if (alive) report(e); }
     })();
-  }, [myName]);
+    return () => { alive = false; };
+  }, [report]);
 
-  // Whenever the user picks a different deck from the dropdown, sync the
-  // flat cards array used by the rest of the lobby code.
-  useEffect(() => {
-    const d = myDecks.find(d => d.id === mySelectedDeckId);
-    if (d) setMyDeck(d.cards);
-  }, [myDecks, mySelectedDeckId]);
-  useEffect(() => {
-    const d = myDecks.find(d => d.id === joinSelectedDeckId);
-    if (d) setJoinDeck(d.cards);
-  }, [myDecks, joinSelectedDeckId]);
-
-  const myDeckOk = useMemo(() => validateDeck(myDeck).ok, [myDeck]);
-  // Ranked requires a custom deck built only from owned (booster) cards.
-  const myDeckOwnedOk = useMemo(() => validateOwnedDeck(myName, myDeck).ok, [myName, myDeck]);
+  const reloadDecks = useCallback(async () => {
+    try { setMyDecks(await listDecksApi()); } catch { /* the deck panel says so */ }
+  }, []);
+  useEffect(() => { void reloadDecks(); }, [reloadDecks]);
 
   const refresh = useCallback(async () => {
-    setLoading(true); setError('');
+    setLoading(true);
     try {
-      const r = await lobby.listMatches(GAME_NAME);
-      setMatches(r.matches);
-      const profs = await listProfilesApi();
+      // `getLobby` replaces boardgame.io's `GET /games/chains-tcg`, which is not
+      // mounted any more. Rows carry no setupData, no decklists and no
+      // credentials — just what the lobby needs to render.
+      const [open, invited, profs] = await Promise.all([
+        lobbyApi.getLobby({ limit: 50 }),
+        lobbyApi.getInvites().catch(() => [] as LobbyEntry[]),
+        listProfilesApi().catch(() => [] as Profile[]),
+      ]);
+      setMatches(open);
+      setInvites(invited);
       setLeaderboard(profs);
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
+      setError('');
+    } catch (e) {
+      report(e);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [report]);
 
-  useEffect(() => { refresh(); const t = setInterval(refresh, 4000); return () => clearInterval(t); }, [refresh]);
+  useEffect(() => { void refresh(); const t = setInterval(() => { void refresh(); }, 5000); return () => clearInterval(t); }, [refresh]);
 
-  async function createAndJoin() {
-    setError('');
+  /** Seat the player once they hold a match id. */
+  const enterMatch = useCallback(async (matchID: string) => {
+    // After `create` the match is still `open`: no boardgame.io match exists,
+    // so `getSeat` returns `credentials: null` and no `playerID`. That is fine
+    // — the waiting room polls for them. After `join` we already have both.
+    const info = await lobbyApi.getSeat(matchID);
+    onJoined(seatFrom(info, myName));
+  }, [myName, onJoined]);
+
+  async function createMatch(options: { unlisted?: boolean; invitedDisplayName?: string } = {}) {
+    clearErrors();
+    setBusy(options.invitedDisplayName ? 'challenge' : 'create');
     try {
-      if (useCustom && !myDeckOk) {
-        setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile \u2192 Custom Deck.`);
-        return;
-      }
-      let wager = parseWager(wagerKind, wagerAmount);
-      if (wagerKind === 'master' && !wager) {
-        setError('Enter a valid $MASTER wager amount greater than 0.');
-        return;
-      }
-      // For $MASTER wagers, deposit into the server-held custodial escrow
-      // BEFORE creating the BG.io match so we never have a "ghost" wagered
-      // match the creator didn't actually back. Phantom prompts for the
-      // SPL-token transfer signature.
-      if (wager && wager.kind === 'master') {
-        const kind = await pickSolanaWallet();
-        const phantom = await getSolanaWallet(kind);
-        const conn = solConn();
-        const custId = matchIdToHex(newMatchId());
-        const intent = await requestWagerIntent({ matchID: custId, playerID: '0', amount: wager.amount });
-        await depositCustodialWager({ connection: conn, wallet: phantom, intent });
-        wager = { kind: 'master', amount: wager.amount, onchainId: custId, mode: 'custodial' };
-      }
-      await upsertProfileApi(myName);
-      // When using a custom deck, the color slot is null and the deck is passed
-      // via setupData.decks; the game derives a theme color from the deck.
-      const colors: Array<Color | null> = ['0', '1'].map(s =>
-        s === seatChoice ? (useCustom ? null : myColor) : null
-      ) as Array<Color | null>;
-      const decks: Array<string[] | null> = ['0', '1'].map(s =>
-        s === seatChoice && useCustom ? myDeck : null
-      ) as Array<string[] | null>;
-      const trimmedName = matchName.trim().slice(0, 40);
-      const created = await lobby.createMatch(GAME_NAME, {
-        numPlayers: 2,
-        setupData: { colors, names: ['Player 0', 'Player 1'], decks, wager, matchName: trimmedName || undefined },
+      // NO DECK IN THE BODY. The server attaches the caller's ACTIVE deck —
+      // that is the whole point of the migration, and a stray `deck` key is a
+      // 400 against the strict body schema.
+      const created = await lobbyApi.create({
+        mode: 'casual',
+        ...(options.unlisted !== undefined ? { unlisted: options.unlisted } : {}),
+        ...(options.invitedDisplayName ? { invitedDisplayName: options.invitedDisplayName } : {}),
       });
-      const joined = await lobby.joinMatch(GAME_NAME, created.matchID, {
-        playerID: seatChoice,
-        playerName: myName,
-      });
-      // Creator already picked, no pending color needed.
-      try { sessionStorage.removeItem('pendingPickColor'); } catch {}
-      try { sessionStorage.removeItem('pendingCustomDeck'); } catch {}
-      onJoined({ matchID: created.matchID, playerID: seatChoice, credentials: joined.playerCredentials, playerName: myName });
-    } catch (e: any) { setError(String(e?.message ?? e)); }
+      await enterMatch(created.matchID);
+    } catch (e) {
+      report(e);
+    } finally { setBusy(null); }
   }
 
-  /** Create a private match seeded for a direct opponent and notify them via the challenge inbox. */
-  async function sendChallenge() {
-    setError('');
-    const target = challengeTarget.trim();
-    if (!target) { setError('Enter the opponent\'s exact username.'); return; }
-    if (target.toLowerCase() === myName.trim().toLowerCase()) {
-      setError('You can\'t challenge yourself.'); return;
-    }
-    if (useCustom && !myDeckOk) {
-      setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile \u2192 Custom Deck.`);
-      return;
-    }
-    setChallengeBusy(true);
+  async function joinMatch(matchID: string) {
+    clearErrors();
+    setBusy(matchID);
     try {
-      // Verify the recipient exists before doing anything expensive.
-      const target_p = await getProfileApi(target);
-      if (!target_p) {
-        setError(`No player named "${target}" was found. Usernames are case-insensitive.`);
-        return;
-      }
-
-      let wager = parseWager(wagerKind, wagerAmount);
-      if (wagerKind === 'master' && !wager) {
-        setError('Enter a valid $MASTER wager amount greater than 0.');
-        return;
-      }
-      if (wager && wager.kind === 'master') {
-        const kind = await pickSolanaWallet();
-        const phantom = await getSolanaWallet(kind);
-        const conn = solConn();
-        const custId = matchIdToHex(newMatchId());
-        const intent = await requestWagerIntent({ matchID: custId, playerID: '0', amount: wager.amount });
-        await depositCustodialWager({ connection: conn, wallet: phantom, intent });
-        wager = { kind: 'master', amount: wager.amount, onchainId: custId, mode: 'custodial' };
-      }
-      await upsertProfileApi(myName);
-      const colors: Array<Color | null> = ['0', '1'].map(s =>
-        s === seatChoice ? (useCustom ? null : myColor) : null
-      ) as Array<Color | null>;
-      const decks: Array<string[] | null> = ['0', '1'].map(s =>
-        s === seatChoice && useCustom ? myDeck : null
-      ) as Array<string[] | null>;
-      const trimmedName = matchName.trim().slice(0, 40) || `${myName} vs ${target_p.name}`;
-      const created = await lobby.createMatch(GAME_NAME, {
-        numPlayers: 2,
-        setupData: {
-          colors, names: ['Player 0', 'Player 1'], decks, wager,
-          matchName: trimmedName,
-          // Mark the match private so only host + invitee see it in the lobby.
-          privateTo: target_p.name,
-          hostName: myName,
-        },
+      const joined = await lobbyApi.join(matchID);
+      onJoined({
+        matchID, seat: joined.seat, playerID: joined.playerID,
+        credentials: joined.credentials, playerName: myName,
       });
-      const joined = await lobby.joinMatch(GAME_NAME, created.matchID, {
-        playerID: seatChoice, playerName: myName,
-      });
-      try { sessionStorage.removeItem('pendingPickColor'); } catch {}
-      try { sessionStorage.removeItem('pendingCustomDeck'); } catch {}
-      // Post the challenge AFTER the match exists so the recipient can act on it immediately.
-      await createChallengeApi({
-        fromName: myName, toName: target_p.name, matchId: created.matchID,
-        wagerKind: wager?.kind ?? 'free',
-        wagerAmount: wager?.kind === 'master' ? wager.amount : null,
-        message: challengeMsg.trim() ? challengeMsg.trim().slice(0, 200) : null,
-      });
-      // Refresh outgoing list immediately so the UI updates without waiting for the next poll.
-      try { setOutgoingChallenges(await listOutgoingChallengesApi(myName)); } catch {}
-      setChallengeTarget(''); setChallengeMsg('');
-      // Drop the challenger straight into the waiting room.
-      onJoined({ matchID: created.matchID, playerID: seatChoice, credentials: joined.playerCredentials, playerName: myName });
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
-    } finally {
-      setChallengeBusy(false);
-    }
+    } catch (e) {
+      report(e);
+      void refresh();
+    } finally { setBusy(null); }
   }
 
-  /** Recipient accepts an incoming challenge — find the match in the lobby and route into the join flow. */
-  async function acceptChallenge(ch: Challenge) {
-    setError('');
+  /** Join the oldest match with a free seat, or open one if there are none. */
+  async function quickMatch() {
+    clearErrors();
+    setBusy('quick');
     try {
-      await respondChallengeApi(ch.id, 'accept', myName);
-      // Optimistically remove from incoming list.
-      setIncomingChallenges(prev => prev.filter(x => x.id !== ch.id));
-      // Pull a fresh match list so we can find the private match we were invited to.
-      const list = await lobby.listMatches(GAME_NAME);
-      const match = (list.matches as any[]).find(m => m.matchID === ch.matchId);
-      if (!match) {
-        setError('The challenger\'s match is no longer open. They may have cancelled.');
-        return;
-      }
-      openJoin(match);
-    } catch (e: any) { setError(String(e?.message ?? e)); }
-  }
-  async function declineChallenge(ch: Challenge) {
-    try {
-      await respondChallengeApi(ch.id, 'decline', myName);
-      setIncomingChallenges(prev => prev.filter(x => x.id !== ch.id));
-    } catch (e: any) { setError(String(e?.message ?? e)); }
-  }
-  async function cancelOutgoing(ch: Challenge) {
-    try {
-      await respondChallengeApi(ch.id, 'cancel', myName);
-      setOutgoingChallenges(prev => prev.filter(x => x.id !== ch.id));
-    } catch (e: any) { setError(String(e?.message ?? e)); }
-  }
-
-  function openJoin(m: any) {
-    // If we already have a saved seat for this match (e.g. tab closed + reopened),
-    // just rejoin directly using the stored credentials — do NOT pick a new open
-    // seat (which would be the wrong one and could clobber another player).
-    const existing = local.get<Seat | null>('seat', null);
-    if (existing && existing.matchID === m.matchID) {
-      onJoined(existing);
-      return;
-    }
-    // If our name is already claimed in this match but we don't have credentials,
-    // that means another tab still has the seat. Refuse rather than trying to
-    // grab the opponent's slot.
-    if ((m.players as Array<{ name?: string }>).some(p => p.name === myName)) {
-      setError('You are already in this match in another tab. Close that tab or use it to play.');
-      return;
-    }
-    // Confirm wagered matches BEFORE opening the deck-pick modal so the joiner
-    // is never surprised by stakes mid-flow.
-    const w = readWager(m.setupData);
-    if (w.kind === 'master') {
-      const ok = window.confirm(
-        `This is a WAGERED match.\n\nStakes: ${w.amount} $MASTER — winner takes 90% of the pot (10% burned).\n\n` +
-        `By continuing you will be prompted by Phantom to deposit ${w.amount} $MASTER into escrow. Continue?`
+      const open = await lobbyApi.getLobby({ limit: 50 });
+      // Our own matches are in this list too; joining one is a `self_challenge`.
+      const candidate = open.find(
+        m => m.seats.some(s => !s.filled) && !m.seats.some(s => s.displayName === myName),
       );
-      if (!ok) return;
-    }
-    const openSeat = (m.players as Array<{ id: number; name?: string }>).find(p => !p.name);
-    if (!openSeat) { setError('No open seat'); return; }
-    // Default the join-color to something different from the creator's color if known.
-    const creatorColor = (m.setupData?.colors ?? []).find((c: any) => !!c) as Color | undefined;
-    if (creatorColor && creatorColor === joinColor) {
-      const fallback = COLOR_ORDER.find(c => c !== creatorColor)!;
-      setJoinColor(fallback);
-    }
-    setJoinUseCustom(false);
-    setJoinTarget({ match: m, seat: String(openSeat.id) });
-  }
-
-  async function confirmJoin() {
-    if (!joinTarget) return;
-    setError('');
-    const { match: m, seat: pid } = joinTarget;
-    try {
-      if (joinUseCustom && !validateDeck(joinDeck).ok) {
-        setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile \u2192 Custom Deck.`);
+      if (candidate) {
+        const joined = await lobbyApi.join(candidate.matchID);
+        onJoined({
+          matchID: candidate.matchID, seat: joined.seat, playerID: joined.playerID,
+          credentials: joined.credentials, playerName: myName,
+        });
         return;
       }
-      await upsertProfileApi(myName);
-      // For $MASTER wagers, deposit BEFORE joining the BG.io match so we
-      // never "join" a match we haven't actually backed.
-      const w = readWager(m.setupData);
-      if (w.kind === 'master') {
-        if (!w.onchainId) {
-          setError('This wagered match was created without an escrow id; cannot join.');
-          return;
-        }
-        console.log('[join] picking wallet…');
-        const kind = await pickSolanaWallet();
-        console.log('[join] wallet kind selected =', kind);
-        let phantom: any;
-        try {
-          phantom = await Promise.race([
-            getSolanaWallet(kind),
-            new Promise((_, rej) => setTimeout(() => rej(new Error(
-              `${kind} did not respond to connect within 20s — extension is likely asleep or this page lost its provider bridge. Reload the page and try again.`
-            )), 20_000)),
-          ]);
-        } catch (err: any) {
-          console.error('[join] getSolanaWallet failed:', err);
-          throw err;
-        }
-        console.log('[join] wallet connected, publicKey =', phantom?.publicKey?.toBase58?.() ?? '<none>');
-        const conn = solConn();
-        console.log('[join] requesting wager intent', { matchID: w.onchainId, amount: w.amount });
-        const intent = await requestWagerIntent({ matchID: w.onchainId, playerID: '1', amount: w.amount ?? 0 });
-        console.log('[join] intent ok, depositing…');
-        await depositCustodialWager({ connection: conn, wallet: phantom, intent });
-        console.log('[join] deposit confirmed');
-      }
-      // Stash the joiner's choice; Board.tsx will auto-call chooseColor on mount.
-      try {
-        if (joinUseCustom) {
-          sessionStorage.setItem('pendingCustomDeck', JSON.stringify(joinDeck));
-          sessionStorage.removeItem('pendingPickColor');
-        } else {
-          sessionStorage.setItem('pendingPickColor', joinColor);
-          sessionStorage.removeItem('pendingCustomDeck');
-        }
-      } catch {}
-      const joined = await lobby.joinMatch(GAME_NAME, m.matchID, { playerID: pid, playerName: myName });
-      setJoinTarget(null);
-      onJoined({ matchID: m.matchID, playerID: pid, credentials: joined.playerCredentials, playerName: myName });
-    } catch (e: any) {
-      console.error('[join] confirmJoin failed:', e);
-      setError(String(e?.message ?? e));
-    }
+      const created = await lobbyApi.create({ mode: 'casual' });
+      await enterMatch(created.matchID);
+    } catch (e) {
+      report(e);
+    } finally { setBusy(null); }
   }
 
-  // Split available matches between the two side panels of the art frame.
-  // Hide private (challenge) matches from anyone who isn't the host or the invited player.
-  const openMatches = matches.filter(m => {
-    if (!(m.players as Array<{ name?: string }>).some(p => !p.name)) return false;
-    const sd: any = m.setupData ?? {};
-    if (sd.privateTo) {
-      const myKey = myName.trim().toLowerCase();
-      const allowed = String(sd.privateTo).trim().toLowerCase();
-      const host    = String(sd.hostName ?? '').trim().toLowerCase();
-      if (myKey !== allowed && myKey !== host) return false;
-    }
-    return true;
-  });
+  async function sendChallenge() {
+    const target = challengeTarget.trim();
+    if (!target) { setError("Enter the opponent's exact display name."); return; }
+    // The server rejects this too (`reason: 'self_challenge'`); catching it here
+    // saves a round trip and reads better.
+    if (target.toLowerCase() === myName.toLowerCase()) { setError('You cannot challenge yourself.'); return; }
+    // An invite is just a match addressed to one player: it is forced unlisted
+    // and shows up in their `GET /games/invites`.
+    await createMatch({ invitedDisplayName: target });
+    setChallengeTarget('');
+  }
 
-  // Stats for footer bar
-  const inProgressCount = matches.filter(m => (m.players as Array<{ name?: string }>).every(p => p.name)).length;
   const myGames = myProfile ? myProfile.wins + myProfile.losses + myProfile.draws : 0;
   const myWinPct = myGames ? Math.round((myProfile!.wins / myGames) * 100) : 0;
-  const myLevel = Math.max(1, Math.floor(Math.sqrt((myGames + 1) * 2.2)));
+  const myLevel = myProfile?.level ?? 1;
 
-  // Activity feed — synthesized from matches + leaderboard so the lobby feels alive.
+  // Everything in `matches` is already open and listed — the server filters
+  // both, so there is no client-side privacy filter to get wrong any more.
+  const openMatches = matches;
   const activity = useMemo(() => buildActivityFeed(matches, leaderboard), [matches, leaderboard]);
 
   return (
@@ -5379,13 +4377,11 @@ function Lobby({
       backgroundImage: 'url(/lobby-bg.png?v=2)',
       backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed',
     }}>
-      {/* Dark overlay so the UI floats above the scene */}
       <div aria-hidden style={{
         position: 'fixed', inset: 0, zIndex: 0,
         background: 'linear-gradient(180deg, rgba(7,9,15,0.78) 0%, rgba(7,9,15,0.55) 50%, rgba(7,9,15,0.88) 100%)',
         pointerEvents: 'none',
       }} />
-      {/* All content lives above the overlay */}
       <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
         <LobbyTopBar
           profile={myProfile} myName={myName}
@@ -5393,7 +4389,6 @@ function Lobby({
           onBack={onBack}
         />
 
-        {/* Floating button to open the WorkAdventure-style Memetic Plaza overlay. */}
         <button
           onClick={() => window.open('https://play.workadventu.re/@/asdasd-1775062076/asdasd/memetic-masters-hq', '_blank', 'noopener,noreferrer')}
           title="Enter Memetic Masters HQ on WorkAdventure"
@@ -5409,7 +4404,6 @@ function Lobby({
           }}
         ><span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Temple size={16} /> Enter Plaza</span></button>
 
-        {/* VS BOT — single-player launcher lives here now (was a separate landing button). */}
         <button
           onClick={onSolo}
           title="Play a single-player match against the bot"
@@ -5430,13 +4424,19 @@ function Lobby({
             matches={matches}
             myName={myName}
             onClose={() => setPlazaOpen(false)}
-            onJoinMatch={(m) => { setPlazaOpen(false); openJoin(m); }}
+            onJoinMatch={(m) => { setPlazaOpen(false); void joinMatch(m.matchID); }}
           />
+        )}
+
+        {deckProblem && (
+          <div style={{ maxWidth: 1480, margin: '12px auto 0', padding: '0 22px', width: '100%' }}>
+            <DeckBlockedBanner problem={deckProblem} onFix={onDeckScreen} />
+          </div>
         )}
 
         {error && (
           <div style={{ maxWidth: 1480, margin: '12px auto 0', padding: '0 22px', width: '100%' }}>
-            <div style={{
+            <div role="alert" style={{
               padding: '10px 14px', borderRadius: 10,
               background: 'rgba(255,107,107,0.10)', border: '1px solid rgba(255,107,107,0.45)',
               color: '#ffb4b4', fontSize: 13,
@@ -5444,37 +4444,30 @@ function Lobby({
           </div>
         )}
 
-        {incomingChallenges.length > 0 && (
+        {invites.length > 0 && (
           <div style={{ maxWidth: 1480, margin: '12px auto 0', padding: '0 22px', width: '100%' }}>
-            <IncomingChallengesBanner
-              challenges={incomingChallenges}
-              onAccept={acceptChallenge}
-              onDecline={declineChallenge}
+            <InvitesBanner
+              invites={invites}
+              busyId={typeof busy === 'string' ? busy : null}
+              onAccept={(m) => { void joinMatch(m.matchID); }}
+              onDismiss={(m) => setInvites(prev => prev.filter(x => x.matchID !== m.matchID))}
             />
           </div>
         )}
 
-        {walletPicker && (
-          <SolanaWalletPicker
-            onPick={k => { walletPicker.resolve(k); setWalletPicker(null); }}
-            onCancel={() => { walletPicker.reject(new Error('Wallet selection canceled.')); setWalletPicker(null); }}
-          />
-        )}
-
         <div style={{
           flex: 1, width: '100%', maxWidth: 1480, margin: '0 auto',
-          // Extra bottom room on mobile so the floating Plaza / VS Bot buttons never cover content.
           padding: mobile ? '14px 14px calc(150px + env(safe-area-inset-bottom))' : '22px 22px 100px',
           display: 'grid', gap: mobile ? 14 : 18,
           gridTemplateColumns: mobile ? '1fr' : 'minmax(280px, 340px) minmax(0, 1fr) minmax(280px, 340px)',
         }}>
           <OpenMatchesPanel
-            matches={openMatches} loading={loading}
-            onRefresh={refresh} onJoin={openJoin}
+            matches={openMatches} loading={loading} myName={myName}
+            busyId={typeof busy === 'string' ? busy : null}
+            onRefresh={() => { void refresh(); }} onJoin={(m) => { void joinMatch(m.matchID); }}
           />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
-            {/* Center action tabs — one dominant action at a time (Quick Match default). */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
               {([
                 { k: 'quick',     icon: 'swords', label: 'Quick Match' },
@@ -5484,7 +4477,7 @@ function Lobby({
                 const active = centerTab === t.k;
                 const gold = t.k === 'quick';
                 return (
-                  <button key={t.k} onClick={() => { setCenterTab(t.k); setError(''); }} style={{
+                  <button key={t.k} onClick={() => { setCenterTab(t.k); clearErrors(); }} style={{
                     padding: '12px 8px', borderRadius: 12, cursor: 'pointer', textAlign: 'center',
                     fontFamily: PROFILE_FONT, fontWeight: 800, fontSize: 13, letterSpacing: 0.3,
                     background: active
@@ -5502,38 +4495,22 @@ function Lobby({
               })}
             </div>
 
+            <ActiveDeckStrip deck={activeDeck} deckCount={myDecks.length} onOpenDecks={onDeckScreen} />
+
             {centerTab === 'quick' && (
-              <RankedQueuePanel
-                myName={myName}
-                decks={myDecks}
-                selectedDeckId={mySelectedDeckId}
-                setSelectedDeckId={setMySelectedDeckId}
-                selectedDeckCards={myDeck}
-                deckOk={myDeckOwnedOk}
-                onJoined={onJoined}
-                setError={setError}
-              />
+              <QuickMatchPanel busy={busy === 'quick'} onQuickMatch={() => { void quickMatch(); }} />
             )}
             {centerTab === 'create' && (
               <CreateMatchPanel
-                myColor={myColor} setMyColor={setMyColor}
-                useCustom={useCustom} setUseCustom={setUseCustom}
-                myDeck={myDeck} myDeckOk={myDeckOk}
-                myDecks={myDecks} selectedDeckId={mySelectedDeckId} onSelectDeck={setMySelectedDeckId}
-                seatChoice={seatChoice} setSeatChoice={setSeatChoice}
-                matchName={matchName} setMatchName={setMatchName}
-                wagerKind={wagerKind} setWagerKind={setWagerKind}
-                wagerAmount={wagerAmount} setWagerAmount={setWagerAmount}
-                onCreate={createAndJoin}
+                unlisted={unlisted} setUnlisted={setUnlisted}
+                busy={busy === 'create'}
+                onCreate={() => { void createMatch({ unlisted }); }}
               />
             )}
             {centerTab === 'challenge' && (
               <ChallengePanel
                 target={challengeTarget} setTarget={setChallengeTarget}
-                message={challengeMsg} setMessage={setChallengeMsg}
-                busy={challengeBusy} onSend={sendChallenge}
-                outgoing={outgoingChallenges} onCancel={cancelOutgoing}
-                wagerKind={wagerKind} wagerAmount={wagerAmount}
+                busy={busy === 'challenge'} onSend={() => { void sendChallenge(); }}
               />
             )}
           </div>
@@ -5548,104 +4525,120 @@ function Lobby({
         <FooterStatsBar
           playersOnline={leaderboard.length}
           openMatches={openMatches.length}
-          inProgress={inProgressCount}
+          inProgress={0}
           onBack={onBack}
         />
       </div>
+    </div>
+  );
+}
 
-      {joinTarget && (
-        <div onClick={() => setJoinTarget(null)} style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(6px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200,
+/**
+ * The server refused to seat the player because of their active deck.
+ *
+ * This is deliberately not a red error box: `no_active_deck` and
+ * `invalid_active_deck` are both fixed in exactly one place, and the banner's
+ * job is to get the player there. `invalid_active_deck` also carries per-issue
+ * detail saying what is wrong — show it rather than a summary.
+ */
+function DeckBlockedBanner({ problem, onFix }: {
+  problem: { message: string; issues: string[] }; onFix: () => void;
+}) {
+  return (
+    <div role="alert" style={{
+      padding: '14px 16px', borderRadius: 12,
+      background: 'rgba(217,184,95,0.10)', border: '1px solid rgba(217,184,95,0.55)',
+      color: '#f0e2b8', display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap',
+    }}>
+      <span aria-hidden style={{ color: '#d9b85f', display: 'inline-flex' }}><Warning size={20} /></span>
+      <div style={{ flex: 1, minWidth: 220 }}>
+        <div style={{ fontWeight: 800, fontSize: 13.5 }}>{problem.message}</div>
+        {problem.issues.length > 0 && (
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12.5, color: '#d9c98e', lineHeight: 1.6 }}>
+            {problem.issues.map((t, i) => <li key={i}>{t}</li>)}
+          </ul>
+        )}
+      </div>
+      <button onClick={onFix} style={LOBBY_GOLD_BTN}>Open deck builder</button>
+    </div>
+  );
+}
+
+/**
+ * Which deck the server will seat you with.
+ *
+ * The client no longer chooses at match time — `POST /games/create` and
+ * `/join` take no deck and attach the caller's ACTIVE one — so the lobby's job
+ * is to make it obvious which deck that is before the match starts.
+ */
+function ActiveDeckStrip({ deck, deckCount, onOpenDecks }: {
+  deck: DeckEntry | null; deckCount: number; onOpenDecks: () => void;
+}) {
+  const ok = deck !== null && deck.cards.length === DECK_SIZE;
+  return (
+    <div style={{
+      ...LOBBY_GLASS, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+    }}>
+      <span aria-hidden style={{
+        width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center', flex: 'none',
+        background: ok ? 'rgba(0,209,143,0.12)' : 'rgba(217,184,95,0.12)',
+        border: `1px solid ${ok ? LOBBY_TOKENS.green : LOBBY_TOKENS.gold}`,
+        color: ok ? LOBBY_TOKENS.green : LOBBY_TOKENS.gold,
+      }}>{ok ? <Check size={15} /> : <Warning size={15} />}</span>
+      <div style={{ flex: 1, minWidth: 160 }}>
+        <div style={{ fontSize: 10, letterSpacing: 2, color: LOBBY_TOKENS.gold, fontWeight: 800 }}>ACTIVE DECK</div>
+        <div style={{ fontSize: 14, fontWeight: 800, color: '#fff', marginTop: 2 }}>
+          {deck ? deck.name : deckCount > 0 ? 'None activated' : 'No decks yet'}
+        </div>
+        <div style={{ fontSize: 11.5, color: LOBBY_TOKENS.muted, marginTop: 2 }}>
+          {deck
+            ? `${deck.cards.length} / ${DECK_SIZE} cards · the server seats you with this deck`
+            : 'Build a 60-card deck and activate it to play'}
+        </div>
+      </div>
+      <button onClick={onOpenDecks} style={LOBBY_GHOST_BTN}>{deck ? 'Change' : 'Build a deck'}</button>
+    </div>
+  );
+}
+
+/** Join the first match with a free seat, or open one if the lobby is empty. */
+function QuickMatchPanel({ busy, onQuickMatch }: { busy: boolean; onQuickMatch: () => void }) {
+  return (
+    <div style={{ ...LOBBY_GLASS, padding: 18 }}>
+      <div style={{
+        fontFamily: '"Cinzel", serif', fontSize: 16, fontWeight: 800, letterSpacing: 1.2,
+        color: LOBBY_TOKENS.gold, display: 'flex', alignItems: 'center', gap: 10,
+      }}><Swords size={17} /> QUICK MATCH</div>
+      <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.muted, margin: '8px 0 14px', lineHeight: 1.6 }}>
+        Takes the first open seat in the lobby. If nobody is waiting, it opens a
+        match and waits for a challenger.
+      </div>
+      <button onClick={onQuickMatch} disabled={busy} className="ova-plate ova-plate--gold"
+        style={{ width: '100%', padding: '14px 18px', fontSize: 13.5, letterSpacing: '0.18em' }}>
+        <Swords size={16} /> {busy ? 'FINDING A MATCH…' : 'FIND A MATCH'}
+      </button>
+
+      {/* Ranked has no service behind it — say so instead of offering a queue
+          that would 404. See src/ranked-client.ts for what is missing. */}
+      {!RANKED_AVAILABLE && (
+        <div style={{
+          marginTop: 14, padding: '12px 14px', borderRadius: 10,
+          background: 'rgba(143,92,255,0.08)', border: '1px dashed rgba(143,92,255,0.45)',
         }}>
-          <div onClick={e => e.stopPropagation()} style={{
-            background: 'linear-gradient(180deg, #131826, #0a1020)',
-            border: '1px solid rgba(217,184,95,0.45)',
-            borderRadius: 14,
-            padding: 22, width: 'min(560px, calc(100vw - 24px))',
-            maxHeight: 'calc(100dvh - 24px - env(safe-area-inset-bottom))', overflowY: 'auto', color: '#e9eef7',
-            boxShadow: '0 30px 80px #000c',
-          }}>
-            <h2 style={{ margin: '0 0 6px', fontSize: 22, fontFamily: '"Cinzel", serif', letterSpacing: 1, color: '#d9b85f' }}>Accept Match</h2>
-            <p style={{ color: '#9faabf', marginTop: 0, fontSize: 13 }}>
-              You're joining as <b style={{ color: '#fff' }}>P{joinTarget.seat}</b>. Pick the deck you want to play with.
-            </p>
-            {(() => {
-              const mName = readMatchName(joinTarget.match.setupData);
-              if (!mName) return null;
-              return (
-                <div style={{
-                  fontSize: 13, marginBottom: 10, padding: '6px 10px',
-                  background: 'rgba(217,184,95,0.10)', border: '1px solid rgba(217,184,95,0.45)',
-                  borderRadius: 6, color: '#ffd66e', fontWeight: 700,
-                }}>Match: <span style={{ color: '#fff' }}>{mName}</span></div>
-              );
-            })()}
-            {(() => {
-              const otherSeat = joinTarget.seat === '0' ? '1' : '0';
-              const oppCol = (joinTarget.match.setupData?.colors ?? [])[Number(otherSeat)] as Color | null | undefined;
-              return oppCol ? (
-                <div style={{ fontSize: 13, color: '#bbb', marginBottom: 12 }}>
-                  Opponent is playing <span style={{ color: COLOR_META[oppCol].hex, fontWeight: 700 }}>{COLOR_META[oppCol].name}</span>.
-                </div>
-              ) : null;
-            })()}
-            {(() => {
-              const w = readWager(joinTarget.match.setupData);
-              if (w.kind === 'free') {
-                return <div style={{
-                  fontSize: 12, marginBottom: 12, padding: '6px 10px',
-                  background: 'rgba(217,184,95,0.10)', border: '1px solid rgba(217,184,95,0.45)',
-                  borderRadius: 6, color: '#d9c98e', fontWeight: 700, letterSpacing: 0.5,
-                }}>Stakes: FREE MATCH</div>;
-              }
-              return <div style={{
-                fontSize: 13, marginBottom: 12, padding: '8px 10px',
-                background: 'rgba(143,92,255,0.14)', border: '1px solid rgba(143,92,255,0.55)',
-                borderRadius: 6, color: '#e6d4ff',
-              }}>
-                <div style={{ fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase', fontSize: 11, color: '#c8a3ff' }}>Wagered Match</div>
-                <div style={{ marginTop: 2 }}>Accepting will agree to a <b style={{ color: '#fff' }}>{w.amount} $MASTER</b> wager — winner takes the pot.</div>
-              </div>;
-            })()}
-            <ColorChooser label="Your chain" value={joinColor} onChange={(c) => { setJoinUseCustom(false); setJoinColor(c); }} />
-            {validateDeck(joinDeck).ok && (
-              <div style={{ marginTop: 10 }}>
-                <button onClick={() => setJoinUseCustom(v => !v)} style={{
-                  width: '100%', padding: '8px 12px', fontWeight: 800, fontSize: 13,
-                  background: joinUseCustom ? 'linear-gradient(90deg,#7aa7ff,#5b6df5)' : 'rgba(10,12,20,0.78)',
-                  color: joinUseCustom ? '#0a0a18' : '#e9e4d0',
-                  border: `2px dashed ${joinUseCustom ? '#d9b85f' : 'rgba(120,170,255,0.45)'}`,
-                  borderRadius: 6, cursor: 'pointer',
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Tools size={14} /> Use Custom Deck</span>
-                  <span style={{ fontSize: 10, opacity: 0.85 }}>{joinUseCustom ? 'ON' : 'OFF'}</span>
-                </button>
-                {joinUseCustom && myDecks.length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    <DeckPicker decks={myDecks} selectedId={joinSelectedDeckId} onSelect={setJoinSelectedDeckId} />
-                  </div>
-                )}
-              </div>
-            )}
-            <div style={{ marginTop: 18, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => setJoinTarget(null)} style={LOBBY_GHOST_BTN}>Cancel</button>
-              <button onClick={confirmJoin} style={LOBBY_GOLD_BTN}>Accept &amp; enter match</button>
-            </div>
-            {error && (
-              <div style={{
-                marginTop: 12, padding: '8px 10px', borderRadius: 6,
-                background: 'rgba(217,75,75,0.14)', border: '1px solid rgba(217,75,75,0.55)',
-                color: '#ffb8b8', fontSize: 12, whiteSpace: 'pre-wrap',
-              }}>{error}</div>
-            )}
+          <div style={{
+            fontSize: 11, fontWeight: 800, letterSpacing: 1.6, color: '#c8a3ff',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}><Trophy size={14} /> RANKED LADDER · COMING SOON</div>
+          <div style={{ fontSize: 12, color: LOBBY_TOKENS.muted, marginTop: 6, lineHeight: 1.6 }}>
+            {RANKED_UNAVAILABLE_MESSAGE}
           </div>
         </div>
       )}
     </div>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LOBBY DESIGN TOKENS + REUSABLE BUTTONS
@@ -5753,9 +4746,9 @@ function LobbyTopBar({ profile, myName, level, winPct, wins, losses, onBack }: {
 // ─────────────────────────────────────────────────────────────────────────────
 // OPEN MATCHES PANEL (left column)
 // ─────────────────────────────────────────────────────────────────────────────
-function OpenMatchesPanel({ matches, loading, onRefresh, onJoin }: {
-  matches: any[]; loading: boolean;
-  onRefresh: () => void; onJoin: (m: any) => void;
+function OpenMatchesPanel({ matches, loading, myName, busyId, onRefresh, onJoin }: {
+  matches: LobbyEntry[]; loading: boolean; myName: string; busyId: string | null;
+  onRefresh: () => void; onJoin: (m: LobbyEntry) => void;
 }) {
   return (
     <section style={{ ...LOBBY_GLASS, display: 'flex', flexDirection: 'column', maxHeight: '78vh', overflow: 'hidden' }}>
@@ -5779,7 +4772,7 @@ function OpenMatchesPanel({ matches, loading, onRefresh, onJoin }: {
         {matches.length === 0 ? (
           <EmptyMatchesState />
         ) : matches.map(m => (
-          <MatchCard key={m.matchID} m={m} onJoin={() => onJoin(m)} />
+          <MatchCard key={m.matchID} m={m} myName={myName} busy={busyId === m.matchID} onJoin={() => onJoin(m)} />
         ))}
       </div>
     </section>
@@ -5802,18 +4795,24 @@ function EmptyMatchesState() {
   );
 }
 
-function MatchCard({ m, onJoin }: { m: any; onJoin: () => void }) {
-  const players = (m.players as Array<{ id: number; name?: string }>);
-  const filled = players.filter(p => p.name).length;
-  const colors = (m.setupData?.colors ?? [null, null]) as Array<Color | null>;
-  const creator = players.find(p => p.name);
-  const creatorCol = creator ? colors[creator.id] : null;
-  const meta = creatorCol ? COLOR_META[creatorCol] : null;
-  const inProgress = filled === players.length;
-  const w = readWager(m.setupData);
-  const mName = readMatchName(m.setupData);
-  const createdAt = (m as any).createdAt ?? (m as any).updatedAt ?? Date.now();
+/**
+ * One row of `GET /games/lobby`.
+ *
+ * The row is deliberately thin: `{matchID, mode, seats[{filled, displayName}],
+ * createdAt}` and an optional `wagerAmount`. No `setupData`, no decklists, no
+ * player ids, no credentials — so there is no chain colour to show any more,
+ * because the server does not tell the lobby what anyone is playing.
+ */
+function MatchCard({ m, myName, busy, onJoin }: {
+  m: LobbyEntry; myName: string; busy: boolean; onJoin: () => void;
+}) {
+  const filled = m.seats.filter(s => s.filled).length;
+  const host = m.seats.find(s => s.filled)?.displayName ?? null;
+  const isMine = m.seats.some(s => s.displayName === myName);
+  const full = filled >= m.seats.length;
+  const createdAt = Date.parse(m.createdAt) || Date.now();
   const waitMin = Math.max(0, Math.round((Date.now() - createdAt) / 60000));
+  const wagered = m.wagerAmount !== undefined;
   return (
     <div
       onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = LOBBY_TOKENS.borderHi; }}
@@ -5827,49 +4826,46 @@ function MatchCard({ m, onJoin }: { m: any; onJoin: () => void }) {
         padding: '12px 14px',
         transition: 'all 200ms ease',
       }}>
-      {/* Chain-color accent stripe */}
-      {meta && (
-        <div aria-hidden style={{
-          position: 'absolute', left: 0, top: 0, bottom: 0, width: 4,
-          background: meta.hex, boxShadow: `0 0 12px ${meta.hex}88`,
-        }} />
-      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{
             fontSize: 15, fontWeight: 800, color: '#fff', lineHeight: 1.2,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>{creator?.name ?? 'Open Seat'}</div>
+          }}>{host ?? 'Open Seat'}</div>
           <div style={{ fontSize: 11, color: LOBBY_TOKENS.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {mName ?? `Match ${m.matchID.slice(0, 6)}`}
+            Match {m.matchID.slice(0, 8)}
           </div>
         </div>
-        {meta && (
-          <span style={{
-            padding: '3px 9px', borderRadius: 999, fontSize: 10, fontWeight: 800,
-            background: `${meta.hex}26`, color: meta.hex, border: `1px solid ${meta.hex}66`,
-            letterSpacing: 1, textTransform: 'uppercase', flex: '0 0 auto',
-          }}>{meta.name}</span>
-        )}
+        <span style={{
+          padding: '3px 9px', borderRadius: 999, fontSize: 10, fontWeight: 800,
+          background: 'rgba(217,184,95,0.12)', color: '#d9c98e', border: '1px solid rgba(217,184,95,0.45)',
+          letterSpacing: 1, textTransform: 'uppercase', flex: '0 0 auto',
+        }}>{m.mode}</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-        <span style={{
-          padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 800,
-          background: w.kind === 'master' ? 'rgba(143,92,255,0.18)' : 'rgba(217,184,95,0.12)',
-          color: w.kind === 'master' ? '#c8a3ff' : '#d9c98e',
-          border: `1px solid ${w.kind === 'master' ? 'rgba(143,92,255,0.55)' : 'rgba(217,184,95,0.45)'}`,
-          letterSpacing: 0.5, textTransform: 'uppercase',
-        }}>{wagerLabel(w)}</span>
+        {wagered && (
+          <span style={{
+            padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 800,
+            background: 'rgba(143,92,255,0.18)', color: '#c8a3ff',
+            border: '1px solid rgba(143,92,255,0.55)',
+            letterSpacing: 0.5, textTransform: 'uppercase',
+          }}>Staked</span>
+        )}
         <span style={{ fontSize: 11, color: LOBBY_TOKENS.muted }}>
-          {filled}/{players.length} · {waitMin > 0 ? `${waitMin}m waiting` : 'just now'}
+          {filled}/{m.seats.length} · {waitMin > 0 ? `${waitMin}m waiting` : 'just now'}
         </span>
       </div>
-      <button onClick={onJoin} disabled={inProgress}
+      <button onClick={onJoin} disabled={full || isMine || busy}
         className="ova-plate ova-plate--gold"
         style={{
           marginTop: 12, width: '100%', padding: '10px 0',
           fontSize: 12, letterSpacing: '0.16em', borderRadius: 9,
-        }}>{inProgress ? 'IN PROGRESS' : <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>JOIN MATCH <ArrowRight size={13} /></span>}</button>
+        }}>{
+          isMine ? 'YOUR MATCH'
+          : full ? 'IN PROGRESS'
+          : busy ? 'JOINING…'
+          : <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>JOIN MATCH <ArrowRight size={13} /></span>
+        }</button>
     </div>
   );
 }
@@ -5877,588 +4873,132 @@ function MatchCard({ m, onJoin }: { m: any; onJoin: () => void }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // CREATE MATCH PANEL (center column)
 // ─────────────────────────────────────────────────────────────────────────────
-function CreateMatchPanel(props: {
-  myColor: Color; setMyColor: (c: Color) => void;
-  useCustom: boolean; setUseCustom: (b: boolean | ((p: boolean) => boolean)) => void;
-  myDeck: string[]; myDeckOk: boolean;
-  myDecks: DeckEntry[]; selectedDeckId: number | null; onSelectDeck: (id: number) => void;
-  seatChoice: '0' | '1'; setSeatChoice: (s: '0' | '1') => void;
-  matchName: string; setMatchName: (s: string) => void;
-  wagerKind: 'free' | 'master'; setWagerKind: (k: 'free' | 'master') => void;
-  wagerAmount: string; setWagerAmount: (s: string) => void;
-  onCreate: () => void;
-}) {
-  const { myColor, setMyColor, useCustom, setUseCustom, myDeck, myDeckOk,
-          myDecks, selectedDeckId, onSelectDeck,
-          seatChoice, setSeatChoice, matchName, setMatchName,
-          wagerKind, setWagerKind, wagerAmount, setWagerAmount, onCreate } = props;
-  const [isPrivate, setIsPrivate] = useState(false);
-  return (
-    <section style={{ ...LOBBY_GLASS, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '14px 20px 6px', borderBottom: `1px solid ${LOBBY_TOKENS.border}` }}>
-        <div style={{ fontSize: 10, color: LOBBY_TOKENS.gold, letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase' }}>Forge a Duel</div>
-        <div style={{ fontFamily: '"Cinzel", serif', fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: 1 }}>Create Match</div>
-      </div>
-      <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 22 }}>
-        {/* Step 1 — Chain selector */}
-        <CreateStep n={1} title="Choose Your Deck">
-          <ChainSelector
-            selected={!useCustom ? myColor : null}
-            useCustom={useCustom}
-            canCustom={myDeckOk}
-            onPickColor={c => { setUseCustom(false); setMyColor(c); }}
-            onPickCustom={() => setUseCustom(true)}
-          />
-          {useCustom && myDecks.length > 0 && (
-            <DeckPicker decks={myDecks} selectedId={selectedDeckId} onSelect={onSelectDeck} />
-          )}
-          <DeckPreview color={useCustom ? null : myColor} useCustom={useCustom} myDeck={myDeck} />
-        </CreateStep>
-
-        {/* Step 2 — Match type */}
-        <CreateStep n={2} title="Match Type">
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <SegBtn active={wagerKind === 'free'} onClick={() => setWagerKind('free')}><Gamepad size={14} /> Casual</SegBtn>
-            <SegBtn active={false} disabled title="Use the dedicated Ranked Hub"><Trophy size={14} /> Ranked</SegBtn>
-            <SegBtn active={false} disabled title="Coming soon"><MedalFirst size={14} /> Tournament</SegBtn>
-            <SegBtn active={wagerKind === 'master'} onClick={() => setWagerKind('master')}><Gem size={14} /> Wager</SegBtn>
-          </div>
-          {wagerKind === 'master' && (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.5, fontWeight: 700, marginBottom: 4 }}>STAKE ($MASTER)</div>
-              <input
-                type="number" min={1} value={wagerAmount}
-                onChange={e => setWagerAmount(e.target.value)}
-                style={{
-                  width: '100%', padding: '10px 12px',
-                  background: '#0a0f1c', color: '#fff',
-                  border: `1px solid ${LOBBY_TOKENS.borderHi}`,
-                  borderRadius: 8, fontSize: 14, fontWeight: 700, fontFamily: PROFILE_FONT,
-                }}
-              />
-            </div>
-          )}
-        </CreateStep>
-
-        {/* Step 3 — Settings */}
-        <CreateStep n={3} title="Settings">
-          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-            <div>
-              <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.5, fontWeight: 700, marginBottom: 4 }}>MATCH NAME</div>
-              <input
-                type="text" value={matchName}
-                onChange={e => setMatchName(e.target.value.slice(0, 40))}
-                placeholder="Optional…"
-                maxLength={40}
-                style={{
-                  width: '100%', padding: '8px 12px',
-                  background: '#0a0f1c', color: '#fff',
-                  border: `1px solid ${LOBBY_TOKENS.border}`,
-                  borderRadius: 8, fontSize: 13, fontFamily: PROFILE_FONT,
-                }}
-              />
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.5, fontWeight: 700, marginBottom: 4 }}>SEAT</div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {(['0','1'] as const).map(s => (
-                  <button key={s} onClick={() => setSeatChoice(s)} style={{
-                    flex: 1, padding: '8px 0',
-                    background: seatChoice === s ? `linear-gradient(180deg, ${LOBBY_TOKENS.gold}, #b78827)` : 'rgba(255,255,255,0.04)',
-                    color: seatChoice === s ? '#1a1408' : LOBBY_TOKENS.text,
-                    border: `1px solid ${seatChoice === s ? '#8a6d24' : LOBBY_TOKENS.border}`,
-                    borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer',
-                    fontFamily: PROFILE_FONT, letterSpacing: 0.5,
-                  }}>P{s}</button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.5, fontWeight: 700, marginBottom: 4 }}>VISIBILITY</div>
-              <button onClick={() => setIsPrivate(p => !p)} title="Public matches show in everyone's Open Matches list"
-                style={{
-                  width: '100%', padding: '8px 12px',
-                  background: 'rgba(255,255,255,0.04)',
-                  color: LOBBY_TOKENS.text,
-                  border: `1px solid ${LOBBY_TOKENS.border}`,
-                  borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer',
-                  fontFamily: PROFILE_FONT,
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>{isPrivate ? <><Lock size={13} /> Private</> : <><Globe size={13} /> Public</>}</span>
-                <span style={{ fontSize: 10, opacity: 0.7 }}>{isPrivate ? 'invite-only' : 'all players'}</span>
-              </button>
-            </div>
-          </div>
-        </CreateStep>
-
-        {/* Step 4 — CTA */}
-        <button onClick={onCreate} className="ova-plate ova-plate--gold"
-          style={{
-            width: '100%', padding: '17px 0', borderRadius: 12,
-            fontSize: 18, letterSpacing: '0.22em',
-            animation: 'lobbyCtaGlow 3.4s ease-in-out infinite',
-          }}>
-          <Diamond size={10} className="ova-orn" />
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}><Swords size={20} /> Create Match</span>
-          <Diamond size={10} className="ova-orn" />
-        </button>
-        <style>{`@keyframes lobbyCtaGlow{0%,100%{filter:drop-shadow(0 0 0px #d9b85f00)}50%{filter:drop-shadow(0 0 14px #d9b85f88)}}`}</style>
-      </div>
-    </section>
-  );
-}
-
-function CreateStep({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-        <span style={{
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          width: 24, height: 24, borderRadius: '50%',
-          background: `linear-gradient(180deg, ${LOBBY_TOKENS.gold}, #b78827)`,
-          color: '#1a1408', fontWeight: 900, fontSize: 12,
-          boxShadow: `0 0 10px ${LOBBY_TOKENS.gold}66`,
-        }}>{n}</span>
-        <span style={{ fontFamily: '"Cinzel", serif', fontSize: 16, fontWeight: 700, color: '#fff', letterSpacing: 1 }}>{title}</span>
-        <span style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${LOBBY_TOKENS.border}, transparent)` }} />
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function DeckPicker({ decks, selectedId, onSelect }: {
-  decks: DeckEntry[]; selectedId: number | null; onSelect: (id: number) => void;
+/**
+ * Opening a match is now a one-button affair.
+ *
+ * Everything this panel used to ask for is decided elsewhere or not at all:
+ * the DECK comes from your active deck (`POST /games/create` takes no deck),
+ * the CHAIN COLOUR is gone because the server seats both players with real
+ * decklists and `colors: [null, null]`, so nobody enters the colour-pick phase,
+ * and the SEAT is fixed — the creator is always seat 0.
+ *
+ * Stakes are a separate, currently-gated flow: see `WagerControls`.
+ */
+function CreateMatchPanel({ unlisted, setUnlisted, busy, onCreate }: {
+  unlisted: boolean; setUnlisted: (v: boolean) => void; busy: boolean; onCreate: () => void;
 }) {
   return (
-    <div style={{ marginTop: 10 }}>
+    <div style={{ ...LOBBY_GLASS, padding: 18 }}>
       <div style={{
-        fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.5,
-        fontWeight: 700, marginBottom: 4, textTransform: 'uppercase',
-      }}>Which deck?</div>
-      <select
-        value={selectedId ?? ''}
-        onChange={e => onSelect(Number(e.target.value))}
-        style={{
-          width: '100%', padding: '10px 12px',
-          background: '#0a0f1c', color: '#fff',
-          border: `1px solid ${LOBBY_TOKENS.borderHi}`,
-          borderRadius: 8, fontSize: 13, fontWeight: 700,
-          fontFamily: PROFILE_FONT, cursor: 'pointer',
-        }}
-      >
-        {decks.map(d => (
-          <option key={d.id} value={d.id}>
-            {d.isActive ? '\u2605 ' : ''}{d.name} ({d.cards.length} cards)
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
+        fontFamily: '"Cinzel", serif', fontSize: 16, fontWeight: 800, letterSpacing: 1.2,
+        color: LOBBY_TOKENS.gold, display: 'flex', alignItems: 'center', gap: 10,
+      }}><Plus size={17} /> CREATE MATCH</div>
+      <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.muted, margin: '8px 0 14px', lineHeight: 1.6 }}>
+        Opens a match with you in seat 0 and waits for a challenger. You can have
+        3 open matches at a time.
+      </div>
 
-function SegBtn({ active, disabled, onClick, title, children }: { active: boolean; disabled?: boolean; onClick?: () => void; title?: string; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick} disabled={disabled} title={title}
-      style={{
-        flex: '1 1 100px', padding: '10px 12px',
-        background: active
-          ? `linear-gradient(180deg, ${LOBBY_TOKENS.gold}, #b78827)`
-          : 'rgba(255,255,255,0.04)',
-        color: active ? '#1a1408' : (disabled ? '#5b6378' : LOBBY_TOKENS.text),
-        border: `1px solid ${active ? '#8a6d24' : LOBBY_TOKENS.border}`,
-        borderRadius: 10, cursor: disabled ? 'not-allowed' : 'pointer',
-        fontWeight: 800, fontSize: 13, letterSpacing: 0.5,
-        fontFamily: PROFILE_FONT,
-        opacity: disabled ? 0.5 : 1,
-        transition: '180ms ease',
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-      }}>{children}</button>
-  );
-}
-
-function ChainSelector({ selected, useCustom, canCustom, onPickColor, onPickCustom }: {
-  selected: Color | null; useCustom: boolean; canCustom: boolean;
-  onPickColor: (c: Color) => void; onPickCustom: () => void;
-}) {
-  return (
-    <div style={{
-      display: 'grid', gap: 8,
-      gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))',
-    }}>
-      {COLORS.map(c => {
-        const meta = COLOR_META[c];
-        const isOn = !useCustom && selected === c;
-        return (
-          <button key={c} onClick={() => onPickColor(c)}
-            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; }}
-            onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
-            style={{
-              padding: '12px 6px', cursor: 'pointer',
-              background: isOn
-                ? `radial-gradient(circle at 50% 0%, ${meta.hex}55, ${LOBBY_TOKENS.panelHi} 80%)`
-                : LOBBY_TOKENS.panelHi,
-              border: `2px solid ${isOn ? meta.hex : LOBBY_TOKENS.border}`,
-              borderRadius: 10,
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-              transition: '180ms ease',
-              boxShadow: isOn ? `0 0 18px ${meta.hex}66, inset 0 0 12px ${meta.hex}22` : 'none',
-              fontFamily: PROFILE_FONT,
-            }}>
-            <span style={{
-              width: 30, height: 30, borderRadius: '50%',
-              background: `radial-gradient(circle at 30% 30%, ${meta.hex}, #1a1a22 80%)`,
-              border: `2px solid ${meta.hex}88`,
-              boxShadow: `0 0 10px ${meta.hex}88`,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              color: meta.ink, fontWeight: 900, fontSize: 12,
-            }}>{c.toUpperCase().slice(0,1)}</span>
-            <span style={{ fontSize: 11, fontWeight: 800, color: isOn ? '#fff' : LOBBY_TOKENS.text, letterSpacing: 0.5 }}>{meta.name}</span>
-            <span style={{ fontSize: 9, color: LOBBY_TOKENS.muted, letterSpacing: 1, textTransform: 'uppercase' }}>{c}</span>
-          </button>
-        );
-      })}
-      <button onClick={onPickCustom} disabled={!canCustom}
-        title={canCustom ? 'Play your custom 60-card deck' : 'Build a custom deck in Profile first'}
-        onMouseEnter={e => { if (canCustom) e.currentTarget.style.transform = 'translateY(-2px)'; }}
-        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
-        style={{
-          padding: '12px 6px', cursor: canCustom ? 'pointer' : 'not-allowed',
-          background: useCustom
-            ? `radial-gradient(circle at 50% 0%, ${LOBBY_TOKENS.purple}55, ${LOBBY_TOKENS.panelHi} 80%)`
-            : LOBBY_TOKENS.panelHi,
-          border: `2px dashed ${useCustom ? LOBBY_TOKENS.purple : 'rgba(143,92,255,0.45)'}`,
-          borderRadius: 10,
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-          opacity: canCustom ? 1 : 0.5, transition: '180ms ease',
-          boxShadow: useCustom ? `0 0 18px ${LOBBY_TOKENS.purple}66, inset 0 0 12px ${LOBBY_TOKENS.purple}22` : 'none',
-          fontFamily: PROFILE_FONT,
-        }}>
-        <span style={{ display: 'inline-flex', color: useCustom ? '#fff' : LOBBY_TOKENS.text }}><Tools size={22} /></span>
-        <span style={{ fontSize: 11, fontWeight: 800, color: useCustom ? '#fff' : LOBBY_TOKENS.text, letterSpacing: 0.5 }}>Custom</span>
-        <span style={{ fontSize: 9, color: useCustom ? '#fff' : LOBBY_TOKENS.muted, letterSpacing: 1, textTransform: 'uppercase' }}>
-          {canCustom ? (useCustom ? 'Active' : '60 cards') : 'Locked'}
+      <label style={{
+        display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10,
+        background: 'rgba(0,0,0,0.3)', border: `1px solid ${LOBBY_TOKENS.border}`, cursor: 'pointer',
+      }}>
+        <input type="checkbox" checked={unlisted} onChange={e => setUnlisted(e.target.checked)}
+          style={{ width: 16, height: 16, accentColor: LOBBY_TOKENS.purple }} />
+        <span style={{ flex: 1 }}>
+          <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#fff' }}>Unlisted</span>
+          <span style={{ display: 'block', fontSize: 11.5, color: LOBBY_TOKENS.muted, marginTop: 2 }}>
+            Nobody else sees it in the lobby — share the invite link from the
+            waiting room. You will still see it in your own list.
+          </span>
         </span>
+      </label>
+
+      <WagerControls />
+
+      <button onClick={onCreate} disabled={busy} className="ova-plate ova-plate--gold"
+        style={{ width: '100%', marginTop: 14, padding: '14px 18px', fontSize: 13.5, letterSpacing: '0.18em' }}>
+        <Plus size={16} /> {busy ? 'CREATING…' : 'CREATE MATCH'}
       </button>
     </div>
   );
 }
 
-function DeckPreview({ color, useCustom, myDeck }: { color: Color | null; useCustom: boolean; myDeck: string[] }) {
-  const data = useMemo(() => {
-    if (useCustom && myDeck.length > 0) {
-      const counts: Record<string, number> = {};
-      for (const id of myDeck) counts[id] = (counts[id] ?? 0) + 1;
-      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-      return {
-        name: 'Custom Build',
-        flavor: `${myDeck.length} cards · your saved deck`,
-        accent: '#8f5cff',
-        topCards: sorted.slice(0, 4).map(([id, n]) => ({ name: CARDS[id]?.name ?? id, n })),
-      };
-    }
-    if (!color) return null;
-    const meta = COLOR_META[color];
-    const chainCards = BUILDABLE_CARDS.filter(c => c.color === color);
-    const top = chainCards.filter(c => c.type === 'meme' || c.type === 'move').slice(0, 4);
-    return {
-      name: `${meta.name} Standard`,
-      flavor: `60 cards · mono-${meta.name} theme deck`,
-      accent: meta.hex,
-      topCards: top.map(c => ({ name: c.name, n: 4 })),
-    };
-  }, [color, useCustom, myDeck]);
-
-  if (!data) return null;
-  return (
-    <div style={{
-      marginTop: 12, padding: 12, borderRadius: 10,
-      background: `linear-gradient(135deg, ${data.accent}1a, rgba(10,15,25,0.6))`,
-      border: `1px solid ${data.accent}55`,
-      boxShadow: `0 0 22px -8px ${data.accent}88`,
-      transition: '200ms ease',
-    }}>
-      <div style={{ fontSize: 9, color: data.accent, letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>Selected Deck</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ fontFamily: '"Cinzel", serif', fontSize: 16, fontWeight: 800, color: '#fff', letterSpacing: 1 }}>{data.name}</div>
-        <div style={{ fontSize: 11, color: LOBBY_TOKENS.muted }}>{data.flavor}</div>
-      </div>
-      <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-        {data.topCards.map((c, i) => (
-          <span key={i} style={{
-            padding: '3px 9px', borderRadius: 999, fontSize: 10, fontWeight: 700,
-            background: 'rgba(255,255,255,0.06)', color: '#cfd6e3',
-            border: `1px solid ${LOBBY_TOKENS.border}`,
-          }}>{c.name}{c.n > 1 && <span style={{ color: data.accent, marginLeft: 4 }}>×{c.n}</span>}</span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CHALLENGE PANEL (middle column, under Create Match)
-// ─────────────────────────────────────────────────────────────────────────────
-function ChallengePanel(props: {
-  target: string; setTarget: (s: string) => void;
-  message: string; setMessage: (s: string) => void;
-  busy: boolean; onSend: () => void;
-  outgoing: Challenge[]; onCancel: (c: Challenge) => void;
-  wagerKind: 'free' | 'master'; wagerAmount: string;
+/**
+ * Challenge a specific player by display name.
+ *
+ * This replaces the old `/api/challenges` inbox, which no longer exists. An
+ * invite IS a match: `POST /games/create {invitedDisplayName}` creates one that
+ * is forced unlisted and addressed to that player, who sees it in
+ * `GET /games/invites`. Accepting is just joining it.
+ *
+ * There is therefore no "decline" to send and no outgoing-challenge list to
+ * poll — declining is local, and cancelling is done from the waiting room.
+ */
+function ChallengePanel({ target, setTarget, busy, onSend }: {
+  target: string; setTarget: (s: string) => void; busy: boolean; onSend: () => void;
 }) {
-  const { target, setTarget, message, setMessage, busy, onSend, outgoing, onCancel, wagerKind, wagerAmount } = props;
-  const stakeLabel = wagerKind === 'master'
-    ? `Wager · ${Number(wagerAmount) || 0} $MASTER`
-    : 'Free Match';
   return (
-    <div style={{
-      ...glassPanelStyle(),
-      padding: 20, display: 'flex', flexDirection: 'column', gap: 12,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: '"Cinzel", serif', fontSize: 16, fontWeight: 800, color: '#fff', letterSpacing: 1.2 }}>
-          <Swords size={17} /> Challenge a Player
-        </div>
-        <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 2, textTransform: 'uppercase' }}>
-          Direct Invite
-        </div>
-      </div>
-      <div style={{ fontSize: 12, color: LOBBY_TOKENS.muted, lineHeight: 1.5 }}>
-        Invite a specific player by username. They'll see your challenge in their lobby and the match stays
-        private until accepted. Uses the deck, seat, and stakes you picked above.
-      </div>
-      <div>
-        <label style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.4, textTransform: 'uppercase' }}>
-          Opponent username
-        </label>
-        <input
-          type="text"
-          value={target}
-          onChange={e => setTarget(e.target.value.slice(0, 40))}
-          placeholder="ShmeegleTheMage"
-          spellCheck={false} autoCapitalize="none" autoCorrect="off"
-          style={challengeInputStyle()}
-        />
-      </div>
-      <div>
-        <label style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.4, textTransform: 'uppercase' }}>
-          Message (optional)
-        </label>
-        <input
-          type="text"
-          value={message}
-          onChange={e => setMessage(e.target.value.slice(0, 200))}
-          placeholder="gg let's go"
-          style={challengeInputStyle()}
-        />
-      </div>
+    <div style={{ ...LOBBY_GLASS, padding: 18 }}>
       <div style={{
-        fontSize: 11, color: LOBBY_TOKENS.muted,
-        background: 'rgba(255,255,255,0.04)', border: `1px solid ${LOBBY_TOKENS.border}`,
-        borderRadius: 8, padding: '8px 12px',
-      }}>
-        Stakes: <b style={{ color: wagerKind === 'master' ? '#c8a3ff' : '#fff' }}>{stakeLabel}</b>
+        fontFamily: '"Cinzel", serif', fontSize: 16, fontWeight: 800, letterSpacing: 1.2,
+        color: LOBBY_TOKENS.gold, display: 'flex', alignItems: 'center', gap: 10,
+      }}><Target size={17} /> CHALLENGE A PLAYER</div>
+      <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.muted, margin: '8px 0 14px', lineHeight: 1.6 }}>
+        Creates an unlisted match only they can see. It appears in their invites
+        the next time their lobby refreshes.
       </div>
-      <button
-        type="button" disabled={busy || !target.trim()} onClick={onSend}
-        style={{
-          padding: '12px 16px', borderRadius: 12, border: 'none', cursor: busy || !target.trim() ? 'not-allowed' : 'pointer',
-          background: busy || !target.trim()
-            ? 'rgba(255,255,255,0.08)'
-            : 'linear-gradient(135deg, #8f5cff 0%, #b285ff 100%)',
-          color: '#0a0414', fontFamily: '"Cinzel", serif', fontWeight: 800, fontSize: 13,
-          letterSpacing: 1.4, textTransform: 'uppercase',
-          boxShadow: busy ? 'none' : '0 0 20px rgba(143,92,255,0.35)',
-          transition: 'transform .15s ease, filter .15s ease',
-        }}
-        onMouseOver={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.01)'; }}
-        onMouseOut={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)'; }}
-      >
-        {busy ? 'Sending…' : 'Send Challenge'}
+
+      <label htmlFor="challenge-target" style={{ fontSize: 11, letterSpacing: 1.5, color: LOBBY_TOKENS.muted, fontWeight: 800 }}>
+        OPPONENT DISPLAY NAME
+      </label>
+      <input id="challenge-target" value={target} onChange={e => setTarget(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && target.trim() && !busy) onSend(); }}
+        placeholder="Exact display name" autoComplete="off"
+        style={challengeInputStyle()} />
+
+      <WagerControls />
+
+      <button onClick={onSend} disabled={busy || !target.trim()} className="ova-plate ova-plate--gold"
+        style={{ width: '100%', marginTop: 14, padding: '14px 18px', fontSize: 13.5, letterSpacing: '0.18em' }}>
+        <Target size={16} /> {busy ? 'SENDING…' : 'SEND CHALLENGE'}
       </button>
-
-      {outgoing.length > 0 && (
-        <div style={{ marginTop: 4 }}>
-          <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 6 }}>
-            Pending invites
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {outgoing.slice(0, 5).map(c => (
-              <div key={c.id} style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                gap: 8, padding: '8px 10px', borderRadius: 8,
-                background: 'rgba(255,255,255,0.04)', border: `1px solid ${LOBBY_TOKENS.border}`,
-              }}>
-                <div style={{ fontSize: 12 }}>
-                  <span style={{ color: LOBBY_TOKENS.muted, display: 'inline-flex', marginRight: 5 }}><ArrowRight size={12} /></span>
-                  <b style={{ color: '#fff' }}>{c.toName}</b>
-                  {c.wagerKind === 'master' && (
-                    <span style={{ color: '#c8a3ff', marginLeft: 6 }}>· {c.wagerAmount} $MASTER</span>
-                  )}
-                </div>
-                <button
-                  type="button" onClick={() => onCancel(c)}
-                  style={{
-                    padding: '4px 10px', borderRadius: 6, fontSize: 10, fontWeight: 700,
-                    background: 'transparent', color: '#ff8a8a',
-                    border: '1px solid rgba(255,107,107,0.45)', cursor: 'pointer',
-                  }}
-                >Cancel</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// INCOMING CHALLENGES BANNER
-// ─────────────────────────────────────────────────────────────────────────────
-function SolanaWalletPicker({ onPick, onCancel }: {
-  onPick: (kind: SolanaWalletKind) => void;
-  onCancel: () => void;
-}) {
-  const wallets = useMemo(() => detectSolanaWallets(), []);
-  const installLinks: Record<SolanaWalletKind, string> = {
-    phantom:  'https://phantom.app/',
-    solflare: 'https://solflare.com/',
-    backpack: 'https://backpack.app/',
-    jupiter:  'https://jup.ag/mobile',
-  };
-  return (
-    <div onClick={onCancel} style={{
-      position: 'fixed', inset: 0, zIndex: 300,
-      background: 'rgba(4,6,12,0.78)', backdropFilter: 'blur(6px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: 16,
-    }}>
-      <div onClick={e => e.stopPropagation()} style={{
-        ...glassPanelStyle(),
-        width: 'min(440px, 100%)', padding: 22,
-        borderColor: 'rgba(143,92,255,0.55)',
-        boxShadow: '0 0 32px rgba(143,92,255,0.25)',
-      }}>
-        <div style={{
-          fontFamily: '"Cinzel", serif', fontSize: 18, fontWeight: 800,
-          color: '#fff', letterSpacing: 1, marginBottom: 4,
-        }}>Choose Your Wallet</div>
-        <div style={{ fontSize: 12, color: LOBBY_TOKENS.muted, marginBottom: 16 }}>
-          Sign the $MASTER wager deposit with your preferred Solana wallet.
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {wallets.map(w => (
-            <button
-              key={w.kind}
-              onClick={() => w.installed ? onPick(w.kind) : window.open(installLinks[w.kind], '_blank', 'noopener')}
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '12px 16px', borderRadius: 10,
-                background: w.installed
-                  ? 'linear-gradient(135deg, rgba(143,92,255,0.18), rgba(143,92,255,0.06))'
-                  : 'rgba(255,255,255,0.03)',
-                border: `1px solid ${w.installed ? 'rgba(143,92,255,0.55)' : LOBBY_TOKENS.border}`,
-                color: '#fff', fontFamily: PROFILE_FONT, fontSize: 14, fontWeight: 700,
-                cursor: 'pointer', transition: 'all 180ms ease',
-              }}
-              onMouseEnter={e => { if (w.installed) e.currentTarget.style.transform = 'translateY(-1px)'; }}
-              onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ display: 'inline-flex' }}>
-                  {w.kind === 'phantom' ? <Ghost size={20} /> : w.kind === 'solflare' ? <Fire size={20} /> : <Backpack size={20} />}
-                </span>
-                <span>{w.label}</span>
-              </span>
-              <span style={{
-                fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase',
-                color: w.installed ? '#c8a3ff' : LOBBY_TOKENS.muted,
-              }}>{w.installed ? 'Connect' : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>Install <ArrowRight size={11} /></span>}</span>
-            </button>
-          ))}
-        </div>
-        <button onClick={onCancel} style={{
-          marginTop: 14, width: '100%', padding: '8px',
-          background: 'transparent', border: `1px solid ${LOBBY_TOKENS.border}`,
-          color: LOBBY_TOKENS.muted, borderRadius: 8, cursor: 'pointer',
-          fontSize: 12, fontWeight: 700, letterSpacing: 1,
-        }}>CANCEL</button>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-function IncomingChallengesBanner({ challenges, onAccept, onDecline }: {
-  challenges: Challenge[];
-  onAccept: (c: Challenge) => void;
-  onDecline: (c: Challenge) => void;
+/**
+ * Matches addressed to you (`GET /games/invites`).
+ *
+ * Accepting is a plain `join`. "Dismiss" is local only — there is no route that
+ * declines an invite, and pretending otherwise would leave the challenger
+ * waiting on a signal that never comes. Their match simply stays open until
+ * they cancel it.
+ */
+function InvitesBanner({ invites, busyId, onAccept, onDismiss }: {
+  invites: LobbyEntry[]; busyId: string | null;
+  onAccept: (m: LobbyEntry) => void; onDismiss: (m: LobbyEntry) => void;
 }) {
   return (
     <div style={{
-      ...glassPanelStyle(),
-      padding: 14,
-      borderColor: 'rgba(217,184,95,0.45)',
-      boxShadow: '0 0 24px rgba(217,184,95,0.18)',
-      display: 'flex', flexDirection: 'column', gap: 10,
+      ...glassPanelStyle(), padding: '12px 14px',
+      border: '1px solid rgba(143,92,255,0.55)', background: 'rgba(143,92,255,0.10)',
     }}>
-      <div style={{
-        fontFamily: '"Cinzel", serif', fontSize: 14, color: LOBBY_TOKENS.gold,
-        letterSpacing: 1.6, fontWeight: 800, textTransform: 'uppercase',
-        display: 'flex', alignItems: 'center', gap: 9,
-      }}>
-        <Swords size={15} /> {challenges.length} Incoming Challenge{challenges.length === 1 ? '' : 's'}
+      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.6, color: '#c8a3ff', marginBottom: 8 }}>
+        {invites.length} CHALLENGE{invites.length === 1 ? '' : 'S'} WAITING
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {challenges.slice(0, 5).map(c => {
-          const ageMin = Math.max(0, Math.floor((Date.now() - c.createdAt) / 60000));
-          const expiresMin = Math.max(0, Math.ceil((c.expiresAt - Date.now()) / 60000));
+        {invites.map(m => {
+          const from = m.seats.find(s => s.filled)?.displayName ?? 'Someone';
           return (
-            <div key={c.id} style={{
-              display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-              padding: '10px 12px', borderRadius: 10,
-              background: 'rgba(217,184,95,0.06)', border: '1px solid rgba(217,184,95,0.25)',
-            }}>
-              <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-                <div style={{ fontSize: 13 }}>
-                  <b style={{ color: '#fff' }}>{c.fromName}</b>
-                  <span style={{ color: LOBBY_TOKENS.muted }}> challenges you</span>
-                  {c.wagerKind === 'master' && (
-                    <span style={{ color: '#c8a3ff', marginLeft: 6, fontWeight: 700 }}>
-                      · {c.wagerAmount} $MASTER
-                    </span>
-                  )}
-                </div>
-                {c.message && (
-                  <div style={{ fontSize: 12, color: '#cfd6e3', marginTop: 3, fontStyle: 'italic' }}>"{c.message}"</div>
-                )}
-                <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, marginTop: 3, letterSpacing: 0.4 }}>
-                  Sent {ageMin}m ago · Expires in {expiresMin}m
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button
-                  type="button" onClick={() => onAccept(c)}
-                  style={{
-                    padding: '8px 14px', borderRadius: 8, border: 'none', cursor: 'pointer',
-                    background: 'linear-gradient(135deg, #d9b85f 0%, #f1d27a 100%)',
-                    color: '#1a0f00', fontFamily: '"Cinzel", serif', fontWeight: 800,
-                    fontSize: 11, letterSpacing: 1.2, textTransform: 'uppercase',
-                    boxShadow: '0 0 12px rgba(217,184,95,0.4)',
-                  }}
-                >Accept</button>
-                <button
-                  type="button" onClick={() => onDecline(c)}
-                  style={{
-                    padding: '8px 14px', borderRadius: 8, fontSize: 11, fontWeight: 700,
-                    background: 'transparent', color: '#ff8a8a',
-                    border: '1px solid rgba(255,107,107,0.45)', cursor: 'pointer',
-                    letterSpacing: 1, textTransform: 'uppercase',
-                  }}
-                >Decline</button>
-              </div>
+            <div key={m.matchID} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ flex: 1, minWidth: 160, fontSize: 13.5, color: '#e9eef7' }}>
+                <b style={{ color: '#fff' }}>{from}</b> challenged you
+                {m.wagerAmount !== undefined && <span style={{ color: '#c8a3ff' }}> · staked</span>}
+              </span>
+              <button onClick={() => onAccept(m)} disabled={busyId === m.matchID} style={LOBBY_GOLD_BTN}>
+                {busyId === m.matchID ? 'Joining…' : 'Accept'}
+              </button>
+              <button onClick={() => onDismiss(m)} style={LOBBY_GHOST_BTN}>Dismiss</button>
             </div>
           );
         })}
@@ -6466,7 +5006,6 @@ function IncomingChallengesBanner({ challenges, onAccept, onDecline }: {
     </div>
   );
 }
-
 function glassPanelStyle(): React.CSSProperties {
   return {
     background: LOBBY_TOKENS.panel,
@@ -6490,16 +5029,17 @@ function challengeInputStyle(): React.CSSProperties {
 // ─────────────────────────────────────────────────────────────────────────────
 type ActivityItem = { id: string; icon: IconKey; text: React.ReactNode; ts?: number };
 
-function buildActivityFeed(matches: any[], leaderboard: Profile[]): ActivityItem[] {
+function buildActivityFeed(matches: LobbyEntry[], leaderboard: Profile[]): ActivityItem[] {
   const items: ActivityItem[] = [];
   for (const m of matches.slice(0, 6)) {
-    const creator = (m.players as Array<{ name?: string }>).find(p => p.name)?.name ?? 'Someone';
-    const w = readWager(m.setupData);
-    const isWager = w.kind === 'master';
+    const creator = m.seats.find(s => s.filled)?.displayName ?? 'Someone';
+    // `wagerAmount` is ABSENT (not null) on a match with no stake. It is
+    // advisory metadata for display — it does not mean an escrow exists.
+    const staked = m.wagerAmount !== undefined;
     items.push({
       id: `m-${m.matchID}`,
-      icon: isWager ? 'gem' : 'swords',
-      text: <><b style={{ color: '#fff' }}>{creator}</b> opened {isWager ? <span style={{ color: '#c8a3ff' }}>a {w.amount} $MASTER wager</span> : 'a casual match'}</>,
+      icon: staked ? 'gem' : 'swords',
+      text: <><b style={{ color: '#fff' }}>{creator}</b> opened {staked ? <span style={{ color: '#c8a3ff' }}>a staked match</span> : `a ${m.mode} match`}</>,
     });
   }
   const topPlayer = leaderboard[0];
@@ -6706,34 +5246,69 @@ function FooterStat({ label, value, color }: { label: string; value: number | st
 }
 
 // ── In-match seat (waits if opponent not yet present) ───────────────────────
-function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
+function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLeave: () => void }) {
   const mobile = useIsMobile(860);
+  // The socket transport is the ONLY boardgame.io surface left on the server;
+  // it lives on the same gateway origin as the API (`SOCKET_URL`). Its lobby
+  // REST API is not mounted, which is why every other call here is `lobbyApi`.
   const ChainsClient = useMemo(() => Client({
     game: ChainsTCG,
     board: ChainsBoard,
     numPlayers: 2,
-    multiplayer: SocketIO({ server: SERVER_BASE || undefined }),
+    multiplayer: SocketIO({ server: SOCKET_URL }),
     debug: false,
   }), []);
 
-  // Poll match state to show "waiting for opponent" until both seats filled.
-  const [match, setMatch] = useState<any>(null);
+  /**
+   * `GET /games/:id/seat` is the whole waiting room.
+   *
+   * While `status === 'open'` it returns `credentials: null` and no
+   * `playerID` — the boardgame.io match does not exist yet, so there is
+   * nothing to connect to. The moment someone joins, the server materialises
+   * it and the same call starts returning both. So: poll until the
+   * credentials arrive, then stop and mount the client.
+   */
+  const [info, setInfo] = useState<SeatInfo | null>(null);
+  const [seatError, setSeatError] = useState('');
+  const credentials = info?.credentials ?? seat.credentials;
+  const playerID = info?.playerID ?? seat.playerID;
+  const status = info?.status ?? (credentials ? 'live' : 'open');
+  const isFull = status !== 'open' && credentials !== null && playerID !== null;
+
   useEffect(() => {
     let alive = true;
+    let timer: ReturnType<typeof setInterval> | null = null;
     async function tick() {
       try {
-        const m = await lobby.getMatch(GAME_NAME, seat.matchID);
-        if (alive) setMatch(m);
-      } catch { /* ignore */ }
+        const next = await lobbyApi.getSeat(seat.matchID);
+        if (!alive) return;
+        setInfo(next);
+        setSeatError('');
+        // Terminal or playable: nothing further to learn by asking again.
+        if (next.status !== 'open' && timer) { clearInterval(timer); timer = null; }
+      } catch (e) {
+        // 404 here means the match is gone (cancelled, or never ours).
+        if (alive && e instanceof ApiError && e.isNotFound) {
+          setSeatError('This match no longer exists.');
+          if (timer) { clearInterval(timer); timer = null; }
+        }
+      }
     }
-    tick();
-    const t = setInterval(tick, 2000);
-    return () => { alive = false; clearInterval(t); };
+    void tick();
+    timer = setInterval(() => { void tick(); }, 2000);
+    return () => { alive = false; if (timer) clearInterval(timer); };
   }, [seat.matchID]);
 
-  const players = (match?.players as Array<{ id: number; name?: string }>) ?? [];
-  const filled = players.filter(p => p.name).length;
-  const isFull = filled === 2 && players.length === 2;
+  // The lobby row is the only place the opponent's name is exposed while the
+  // match is open; once it is live the board gets both names from the game
+  // state. Nothing in the seat response names the other player.
+  const players: Array<{ id: number; name?: string }> = useMemo(() => {
+    const mine = seat.seat;
+    const out: Array<{ id: number; name?: string }> = [{ id: 0 }, { id: 1 }];
+    out[mine] = { id: mine, name: myName };
+    if (isFull) out[mine === 0 ? 1 : 0] = { id: mine === 0 ? 1 : 0, name: 'Opponent' };
+    return out;
+  }, [seat.seat, myName, isFull]);
 
   // "Opponent joined -> entering the arena" interstitial before the game mounts.
   // Guarded so it fires exactly once (prevents duplicate navigation/starts).
@@ -6771,12 +5346,20 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
     if (leaving) return;
     setLeaving(true); setLeaveErr('');
     try {
-      await lobby.leaveMatch(GAME_NAME, seat.matchID, { playerID: seat.playerID, credentials: seat.credentials });
-      onLeave();
-    } catch {
-      setLeaveErr('Could not leave the match. Please try again.');
-      setLeaving(false);
+      // `POST /games/:id/cancel` only works on YOUR OWN still-open match; it is
+      // a 404 for anything else, including a match already in progress. There
+      // is no "leave a live match" route — conceding is an in-game move, and
+      // the game service writes the result itself. So: cancel if we can, and
+      // either way stop occupying the seat locally.
+      await lobbyApi.cancel(seat.matchID);
+    } catch (e) {
+      if (!(e instanceof ApiError && e.isNotFound)) {
+        setLeaveErr(errorText(e));
+        setLeaving(false);
+        return;
+      }
     }
+    onLeave();
   }
 
   // Invite link (unchanged logic) + copy/share.
@@ -6827,12 +5410,11 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
   );
 
   // Once the interstitial elapses and both seats are filled, mount the game.
-  if (entered && isFull) {
+  if (entered && isFull && playerID !== null && credentials !== null) {
     return (
       <div style={{ background: '#000', minHeight: '100vh' }}>
         <BattleMusic />
-        <WagerStatusBadge matchID={seat.matchID} compact />
-        <ChainsClient matchID={seat.matchID} playerID={seat.playerID} credentials={seat.credentials} />
+        <ChainsClient matchID={seat.matchID} playerID={playerID} credentials={credentials} />
         {/* In-game exit. Before this the only way out of a live match was the
             browser's back button. It reuses the waiting room's confirmLeave /
             doLeave path exactly — same lobby API call, same in-flight guard.
@@ -6858,9 +5440,9 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
     );
   }
 
-  const youAt = Number(seat.playerID);
-  const p0 = players[0]?.name ?? (youAt === 0 ? seat.playerName : undefined);
-  const p1 = players[1]?.name ?? (youAt === 1 ? seat.playerName : undefined);
+  const youAt = seat.seat;
+  const p0 = players[0]?.name;
+  const p1 = players[1]?.name;
   const opponentJoined = isFull;
 
   return (
@@ -6936,7 +5518,9 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
             <SeatCard seat="P1" role={p1 ? 'CHALLENGER' : 'OPEN'} name={p1} avatar={p1 ? avatars[p1] : undefined} isYou={youAt === 1} joined={!!p1} mobile={mobile} />
           </div>
 
-          <WagerStatusBadge matchID={seat.matchID} />
+          {seatError && (
+            <div role="alert" style={{ marginTop: 16, color: HUB.red, fontSize: 13, textAlign: 'center' }}>{seatError}</div>
+          )}
 
           {/* Invitation */}
           {!opponentJoined && (
@@ -7073,75 +5657,6 @@ function SeatCard({ seat, role, name, avatar, isYou, joined, mobile }: {
   );
 }
 
-/** Tiny widget that polls /api/wager/status. Renders nothing if the match has
- *  no custodial wager row (the bg.io matchID differs from the custId; we look
- *  up the match's setupData first to find the custId). */
-function WagerStatusBadge({ matchID, compact }: { matchID: string; compact?: boolean }) {
-  const [custId, setCustId] = useState<string | null>(null);
-  const [amount, setAmount] = useState<number | null>(null);
-  const [status, setStatus] = useState<null | { p0Funded: boolean; p1Funded: boolean; settled: boolean; refunded: boolean }>(null);
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const m = await lobby.getMatch(GAME_NAME, matchID);
-        const w = readWager((m as any).setupData);
-        if (w.kind === 'master' && w.mode === 'custodial' && w.onchainId) {
-          if (alive) { setCustId(w.onchainId); setAmount(w.amount); }
-        }
-      } catch { /* ignore */ }
-    })();
-    return () => { alive = false; };
-  }, [matchID]);
-
-  useEffect(() => {
-    if (!custId) return;
-    let alive = true;
-    const poll = async () => {
-      try {
-        const r = await fetch(`${SERVER_BASE}/api/wager/status?matchID=${encodeURIComponent(custId)}`);
-        const j = await r.json();
-        if (alive && j?.status) setStatus(j.status);
-      } catch { /* ignore */ }
-    };
-    poll();
-    const t = setInterval(poll, 4000);
-    return () => { alive = false; clearInterval(t); };
-  }, [custId]);
-
-  if (!custId || !status) return null;
-  const label: React.ReactNode =
-    status.refunded ? <><ArrowLeft size={13} /> Refunded</>
-    : status.settled ? <><Check size={13} /> Settled</>
-    : status.p0Funded && status.p1Funded ? <><Coins size={13} /> Both deposited — match live</>
-    : status.p0Funded || status.p1Funded ? <><Hourglass size={13} /> Waiting for opponent deposit ({amount} $MASTER each)</>
-    : <><Hourglass size={13} /> Waiting for deposits ({amount} $MASTER each)</>;
-  const color =
-    status.refunded ? '#aaa'
-    : status.settled ? '#22c55e'
-    : status.p0Funded && status.p1Funded ? '#22c55e'
-    : '#f0b90b';
-  if (compact) {
-    return (
-      <div style={{
-        position: 'fixed', left: 16, top: 16, zIndex: 50,
-        background: '#15192a', color, border: `1px solid ${color}`,
-        borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700,
-        fontFamily: 'Inter, sans-serif', display: 'inline-flex', alignItems: 'center', gap: 6,
-      }}>{label}</div>
-    );
-  }
-  return (
-    <div style={{
-      display: 'inline-flex', alignItems: 'center', gap: 7, marginBottom: 16,
-      background: '#15192a', color, border: `1px solid ${color}`,
-      borderRadius: 6, padding: '8px 14px', fontSize: 13, fontWeight: 700,
-      fontFamily: 'Inter, sans-serif',
-    }}>{label}</div>
-  );
-}
-
 // ── Root ────────────────────────────────────────────────────────────────────
 type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile' | 'ranked' | 'solo' | 'boosters' | 'masterquest' | 'settings';
 
@@ -7185,7 +5700,8 @@ function SoloSetupModal({
   const [mode, setMode] = useState<SoloMode>('casual');
   const [color, setColor] = useState<Color>('sol');
   // null = use one of the 5 starter decks; otherwise the chosen saved deck id.
-  const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
+  // Deck ids are bigint-safe decimal strings.
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [decks, setDecks] = useState<DeckEntry[]>([]);
   const [decksLoading, setDecksLoading] = useState<boolean>(true);
   const dateKey = todayKey();
@@ -7197,7 +5713,7 @@ function SoloSetupModal({
     (async () => {
       setDecksLoading(true);
       try {
-        const list = await listDecksApi(myName);
+        const list = await listDecksApi();
         if (cancelled) return;
         setDecks(list);
         // Single-player requires an owned custom deck — default to the first valid one.
@@ -7444,6 +5960,51 @@ function InstallPrompt() {
   );
 }
 
+/**
+ * Fired on `window` after a successful `PATCH /api/profiles/me` so the root can
+ * re-read the profile. The display name is server state now, and several
+ * screens can change it, so a broadcast beats threading a callback through six
+ * levels of props.
+ */
+export const PROFILE_CHANGED_EVENT = 'ocva:profile-changed';
+
+/** Tell the app the signed-in player's profile has changed server-side. */
+export function announceProfileChanged() {
+  try { window.dispatchEvent(new CustomEvent(PROFILE_CHANGED_EVENT)); } catch { /* SSR / no DOM */ }
+}
+
+/**
+ * Shown while the signed-in player's profile is loading, and when that load
+ * failed for a reason that is not "your session is dead" — a network blip, a
+ * 5xx, a rate limit. Anything auth-shaped has already cleared the session and
+ * the login screen is mounting instead.
+ */
+function SessionBootstrap({ error, onRetry, onSignOut }: {
+  error: string; onRetry: () => void; onSignOut: () => void;
+}) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, display: 'grid', placeItems: 'center',
+      background: '#07060f', color: '#e9eef7', fontFamily: F.body, padding: 24,
+    }}>
+      <div style={{ textAlign: 'center', maxWidth: 460 }}>
+        <LoginEmblem size={64} />
+        {error ? (
+          <>
+            <div role="alert" style={{ marginTop: 18, fontSize: 14, color: '#ffb4b4', lineHeight: 1.6 }}>{error}</div>
+            <div style={{ marginTop: 18, display: 'flex', gap: 10, justifyContent: 'center' }}>
+              <button onClick={onRetry} style={LOBBY_GOLD_BTN}>Try again</button>
+              <button onClick={onSignOut} style={LOBBY_GHOST_BTN}>Sign out</button>
+            </div>
+          </>
+        ) : (
+          <div style={{ marginTop: 18, fontSize: 14, color: '#9faabf', letterSpacing: 1 }}>Loading your profile…</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   // Print mode: render every card as a 280×400 CardPreview in a grid for offline
   // capture by scripts/render-cards.mjs. Triggered by `#print` or `?print`.
@@ -7453,14 +6014,64 @@ export default function App() {
   );
   if (printMode) return <PrintAllCards />;
 
-  const [name, setName] = useState<string>(() => local.get<string>('myName', ''));
-  const [seat, setSeat] = useState<Seat | null>(() => local.get<Seat | null>('seat', null));
+  // ── Session ───────────────────────────────────────────────────────────────
+  // `signedIn` is driven by `onSessionChange`, which fires on sign-in, on
+  // explicit sign-out, AND when a 401 could not be recovered by refreshing
+  // (`SessionExpiredError`). That last case is why this is a subscription and
+  // not a boolean set once at login: a token can die while the player is deep
+  // in a screen, and the app has to land back on the login page rather than
+  // render half-broken pages against a dead session.
+  const [signedIn, setSignedIn] = useState<boolean>(() => sessionApi.isSignedIn());
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profileError, setProfileError] = useState<string>('');
+
+  const [seat, setSeat] = useState<Seat | null>(() => sess.get<Seat | null>('seat', null));
   const [view, setView] = useState<View>(() => sess.get<View>('view', 'landing'));
-  const [pendingWallet, setPendingWallet] = useState<ConnectedWallet | null>(null);
   const [viewedProfile, setViewedProfile] = useState<string | null>(null);
   const [soloSetup, setSoloSetup] = useState<boolean>(false);
   const [soloCfg, setSoloCfg] = useState<{ difficulty: Difficulty; mode: SoloMode; color: Color; customDeck: string[] | null } | null>(null);
   const soloStartRef = useRef<number>(0);
+
+  useEffect(() => sessionApi.onSessionChange((s) => {
+    setSignedIn(s !== null);
+    if (s === null) {
+      // Signed out, or the refresh chain failed. Drop every scrap of per-player
+      // state so the next player on this machine starts clean.
+      setProfile(null);
+      setSeat(null);
+      setViewedProfile(null);
+      setSoloCfg(null);
+      setSoloSetup(false);
+      setView('landing');
+      sess.del('seat'); sess.del('view');
+    }
+  }), []);
+
+  // The display name lives on the SERVER now. First-time players are given a
+  // default derived from their address; they rename it in Settings -> Edit
+  // profile, which calls `PATCH /api/profiles/me`.
+  const reloadProfile = useCallback(async () => {
+    if (!sessionApi.isSignedIn()) return;
+    try {
+      setProfile(await getMyProfileApi());
+      setProfileError('');
+    } catch (e) {
+      // A 401 here has already cleared the session and fired onSessionChange,
+      // so there is nothing to show — the login screen is about to mount.
+      if (e instanceof ApiError && e.isAuthError) return;
+      setProfileError(errorText(e));
+    }
+  }, []);
+  useEffect(() => { if (signedIn) void reloadProfile(); }, [signedIn, reloadProfile]);
+
+  // Any screen can ask for a profile re-read after renaming.
+  useEffect(() => {
+    const onChanged = () => { void reloadProfile(); };
+    window.addEventListener(PROFILE_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(PROFILE_CHANGED_EVENT, onChanged);
+  }, [reloadProfile]);
+
+  const name = profile?.name ?? '';
 
   // Track solo match start/end for daily-best recording. Board fires
   // `mmtcg:solo-end` when a solo match resolves.
@@ -7482,87 +6093,95 @@ export default function App() {
     return () => window.removeEventListener('mmtcg:solo-end', onEnd);
   }, [soloCfg]);
 
-  // On boot: if we have a saved seat from a previous tab, verify the match
-  // still exists and our seat is still claimed by us. Otherwise clear it so
-  // we don't try to reconnect to a dead match.
+  // On boot: re-verify a saved seat against the server. `GET /games/:id/seat`
+  // is the authority on whether we are still in that match — and a
+  // non-participant gets 404 (never 403), so any error means "drop it".
   useEffect(() => {
-    if (!seat) return;
+    if (!seat || !signedIn) return;
     let cancelled = false;
     (async () => {
       try {
-        const m = await lobby.getMatch(GAME_NAME, seat.matchID);
+        const info = await lobbyApi.getSeat(seat.matchID);
         if (cancelled) return;
-        const slot = (m.players as Array<{ id: number; name?: string }>).find(p => String(p.id) === seat.playerID);
-        // If our seat was somehow freed (e.g. server restart) or claimed by someone else
-        // with a different name, drop the stale seat.
-        if (!slot || (slot.name && slot.name !== seat.playerName)) {
-          local.del('seat'); setSeat(null);
+        if (info.status === 'finished' || info.status === 'void') {
+          sess.del('seat'); setSeat(null);
+        } else {
+          setSeat(seatFrom(info, seat.playerName));
         }
       } catch {
-        // Match no longer exists.
-        local.del('seat'); setSeat(null);
+        sess.del('seat'); setSeat(null);
       }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [signedIn]);
 
-  // Deep-link: ?match=ID auto-joins (or shows lobby with prefill).
+  // Deep-link: `#match=ID` joins that match. The server decides the seat — the
+  // client cannot name one, and cannot send a deck either.
   useEffect(() => {
-    if (seat || !name) return;
-    const hash = window.location.hash;
-    const m = hash.match(/match=([\w-]+)/);
+    if (seat || !signedIn || !name) return;
+    const m = window.location.hash.match(/match=([\w-]+)/);
     if (!m) return;
     const matchID = m[1];
     (async () => {
       try {
-        const info = await lobby.getMatch(GAME_NAME, matchID);
-        const players = info.players as Array<{ id: number; name?: string }>;
-        // If we're already seated in this match, reuse the saved seat instead of
-        // grabbing a new (potentially wrong) one.
-        const existingSeat = local.get<Seat | null>('seat', null);
-        if (existingSeat && existingSeat.matchID === matchID) {
-          sess.set('seat', existingSeat); local.set('seat', existingSeat); setSeat(existingSeat);
+        // Already seated? `getSeat` tells us, and hands back our credentials.
+        try {
+          const mine = await lobbyApi.getSeat(matchID);
           window.history.replaceState(null, '', window.location.pathname);
+          joinedSeat(seatFrom(mine, name));
+          return;
+        } catch (e) {
+          // 404 means "not seated in it" — fall through and try to join.
+          if (!(e instanceof ApiError && e.isNotFound)) throw e;
+        }
+        const joined = await lobbyApi.join(matchID);
+        window.history.replaceState(null, '', window.location.pathname);
+        joinedSeat({
+          matchID, seat: joined.seat, playerID: joined.playerID,
+          credentials: joined.credentials, playerName: name,
+        });
+      } catch (e) {
+        window.history.replaceState(null, '', window.location.pathname);
+        if (isDeckBlocked(e)) {
+          // No legal active deck — the deck screen is the only useful place.
+          try { window.location.hash = 'decks'; } catch {}
+          goto('profile');
           return;
         }
-        const mineByName = players.find(p => p.name === name);
-        if (mineByName) {
-          throw new Error('You are already in this match in another tab; close it first or use that tab.');
-        }
-        const open = players.find(p => !p.name);
-        if (!open) throw new Error('Match full');
-        await upsertProfileApi(name);
-        const joined = await lobby.joinMatch(GAME_NAME, matchID, { playerID: String(open.id), playerName: name });
-        const s: Seat = { matchID, playerID: String(open.id), credentials: joined.playerCredentials, playerName: name };
-        sess.set('seat', s); local.set('seat', s); setSeat(s);
-        window.history.replaceState(null, '', window.location.pathname);
-      } catch (e) { console.warn('auto-join failed', e); }
+        console.warn('auto-join failed:', errorText(e));
+      }
     })();
-  }, [name, seat]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedIn, name, seat]);
 
-  function login(n: string) {
-    sess.set('myName', n); sess.set('lastName', n); local.set('myName', n); local.set('lastName', n); setName(n);
-    setPendingWallet(null);
-    upsertProfileApi(n).catch(() => {});
-    goto('landing');
+  async function logout() {
+    sess.del('seat'); sess.del('view');
+    // `auth.logout()` revokes the family server-side and always clears locally,
+    // even if the network call fails. `onSessionChange` does the UI reset.
+    try { await auth.logout(); } catch { sessionApi.clearSession(); }
   }
-  function logout() { sess.del('myName'); sess.del('seat'); sess.del('view'); local.del('myName'); local.del('seat'); setName(''); setSeat(null); setPendingWallet(null); setView('landing'); }
-  function joinedSeat(s: Seat) { sess.set('seat', s); local.set('seat', s); setSeat(s); }
-  function leftSeat() { sess.del('seat'); local.del('seat'); setSeat(null); goto('landing'); }
+  function joinedSeat(s: Seat) { sess.set('seat', s); setSeat(s); }
+  function leftSeat() { sess.del('seat'); setSeat(null); goto('landing'); }
   function goto(v: View) { sess.set('view', v); setView(v); }
 
-  if (!name) {
-    if (pendingWallet) {
-      return <FirstTimeProfile
-        wallet={pendingWallet}
-        onCreated={login}
-        onCancel={() => setPendingWallet(null)}
-      />;
-    }
-    return <Login onLogin={login} onFirstTime={setPendingWallet} />;
+  // Signed out is a real app state, not an absence of one. It is also where an
+  // expired session lands, because `onSessionChange` fires for that too.
+  if (!signedIn) return <Login onSignedIn={() => { setView('landing'); void reloadProfile(); }} />;
+
+  // Signed in but the profile has not arrived: hold rather than render screens
+  // that all take a display name we do not have yet.
+  if (!profile) {
+    return (
+      <SessionBootstrap
+        error={profileError}
+        onRetry={() => { setProfileError(''); void reloadProfile(); }}
+        onSignOut={logout}
+      />
+    );
   }
-  if (seat) return <MatchSeat seat={seat} onLeave={leftSeat} />;
+
+  if (seat) return <MatchSeat seat={seat} myName={name} onLeave={leftSeat} />;
 
   // Landing + Profile share the same audio element so music keeps playing
   // (and the user's mute state is preserved) when switching between them.
@@ -7617,596 +6236,37 @@ export default function App() {
               ? <MasterquestPage myName={name} onBack={() => goto('landing')} />
             : view === 'view-profile' && viewedProfile
               ? <PublicProfile name={viewedProfile} onBack={() => goto('lobby')} />
-              : view === 'ranked'
-                ? <Lobby
-                    myName={name}
-                    onJoined={joinedSeat}
-                    onBack={() => goto('landing')}
-                    onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
-                    onSolo={() => setSoloSetup(true)}
-                  />
-                : view === 'lobby'
+              : view === 'lobby' || view === 'ranked'
+                  // `ranked` is kept only so old deep-links resolve; there is no
+                  // ranked service to route to, so both land in the lobby.
                   ? <Lobby
                       myName={name}
                       onJoined={joinedSeat}
                       onBack={() => goto('landing')}
                       onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
                       onSolo={() => setSoloSetup(true)}
+                      onDeckScreen={() => { try { window.location.hash = 'decks'; } catch {} goto('profile'); }}
                     />
-                  : <Landing myName={name} onPlay={() => goto('lobby')} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onSettings={() => goto('settings')} />}
+                  : <Landing myName={name} profile={profile} onPlay={() => goto('lobby')} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onSettings={() => goto('settings')} />}
     </>
   );
 }
 
-// ── Ranked Queue Panel ─────────────────────────────────────────────────────
-// Embedded inside the Lobby so casual + ranked matchmaking live on one page.
-// Reuses the Lobby's loaded deck library + selection state.
-function RankedQueuePanel({
-  myName, decks, selectedDeckId, setSelectedDeckId, selectedDeckCards,
-  deckOk, onJoined, setError,
-}: {
-  myName: string;
-  decks: DeckEntry[];
-  selectedDeckId: number | null;
-  setSelectedDeckId: (id: number) => void;
-  selectedDeckCards: string[];
-  deckOk: boolean;
-  onJoined: (s: Seat) => void;
-  setError: (msg: string) => void;
-}) {
-  const [profile, setProfile] = useState<PublicRankedProfile | null>(null);
-  const [region, setRegion] = useState<string>(() => {
-    try { return localStorage.getItem('rankedRegion') || 'global'; } catch { return 'global'; }
-  });
-  const [queued, setQueued] = useState<{ queuedAt: number } | null>(null);
-  const [waitMs, setWaitMs] = useState(0);
-  const [busy, setBusy] = useState(false);
+// ── Ranked ─────────────────────────────────────────────────────────────────
+//
+// `RankedQueuePanel`, `RankBadge` and `RankedHub` lived here. All three read
+// `/api/ranked/*` — profile, season, leaderboard, queue join/leave/status —
+// and every one of those routes is a 404 on the new backend (verified against
+// production). `RankedHub` was already unreachable before this migration; the
+// queue panel was the lobby's "Quick Match" tab.
+//
+// They are deleted rather than stubbed: a rank badge with nothing to render,
+// or a queue button with nothing to queue against, is worse than an honest
+// absence. `QuickMatchPanel` (above) took the tab, and `src/ranked-client.ts`
+// documents exactly what would have to be built server-side to bring the
+// ladder back.
 
-  // Load profile once on mount (and again whenever the player name changes).
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const p = await RankedAPI.profile(myName);
-        if (!cancelled) setProfile(p);
-      } catch { /* leave profile null — the panel still renders the queue button */ }
-    })();
-    return () => { cancelled = true; };
-  }, [myName]);
 
-  // Poll queue status every 2s while queued. On match-found, auto-join the
-  // boardgame.io match and bubble the seat up to the Lobby via onJoined.
-  useEffect(() => {
-    if (!queued) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const s = await RankedAPI.queueStatus(myName);
-        if (cancelled) return;
-        setWaitMs(Date.now() - (s.queuedAt ?? Date.now()));
-        if (s.match) {
-          try {
-            const joined = await lobby.joinMatch(GAME_NAME, s.match.matchId, {
-              playerID: s.match.seat, playerName: myName,
-            });
-            setQueued(null);
-            onJoined({
-              matchID: s.match.matchId,
-              playerID: s.match.seat,
-              credentials: joined.playerCredentials,
-              playerName: myName,
-            });
-          } catch (e: any) {
-            setError(`Ranked match join failed: ${e?.message ?? e}`);
-            setQueued(null);
-          }
-        } else if (!s.queued) {
-          setQueued(null);
-        }
-      } catch (e: any) {
-        if (!cancelled) setError(String(e?.message ?? e));
-      }
-    };
-    const id = setInterval(tick, 2000);
-    void tick();
-    return () => { cancelled = true; clearInterval(id); };
-  }, [queued, myName, onJoined, setError]);
-
-  async function joinQueue() {
-    if (!deckOk) { setError('Ranked needs a 60-card custom deck built only from cards you own. Open Boosters to unlock more.'); return; }
-    setBusy(true); setError('');
-    try {
-      const deckPayload = selectedDeckCards.length > 0 ? JSON.stringify(selectedDeckCards) : undefined;
-      const r = await RankedAPI.queueJoin(myName, region, deckPayload);
-      if (!('ok' in r) || !r.ok) {
-        setError((r as any).error || 'queue failed');
-      } else {
-        setQueued({ queuedAt: r.queuedAt ?? Date.now() });
-        try { localStorage.setItem('rankedRegion', region); } catch {}
-      }
-    } catch (e: any) { setError(String(e?.message ?? e)); }
-    finally { setBusy(false); }
-  }
-  async function leaveQueue() {
-    setBusy(true);
-    try { await RankedAPI.queueLeave(myName); } catch {}
-    setQueued(null); setBusy(false);
-  }
-
-  const placementRemaining = profile?.placementMatchesRemaining ?? 10;
-  const inPlacements = placementRemaining > 0;
-  const totalGames = (profile?.wins ?? 0) + (profile?.losses ?? 0);
-  const wr = totalGames > 0 ? Math.round(((profile?.wins ?? 0) / totalGames) * 100) : 0;
-
-  return (
-    <div style={{
-      padding: 16, borderRadius: 12,
-      background: 'linear-gradient(135deg, #161025 0%, #1a1238 100%)',
-      border: '1px solid rgba(192,132,252,0.45)',
-      boxShadow: '0 0 24px rgba(123,44,191,0.18)',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <div style={{
-          fontFamily: '"Cinzel", "Times New Roman", serif',
-          fontSize: 16, fontWeight: 800, letterSpacing: 1.2, color: '#c084fc',
-          display: 'flex', alignItems: 'center', gap: 10,
-        }}><Trophy size={17} /> RANKED LADDER</div>
-        {profile && <RankBadge p={profile} size="sm" />}
-      </div>
-
-      {profile ? (
-        <div style={{ marginBottom: 12, fontSize: 12, color: '#cfc4ff' }}>
-          {inPlacements
-            ? <span>Placement matches remaining: <b style={{ color: '#ffb347' }}>{placementRemaining}</b></span>
-            : <span><b>{rankLabel(profile)}</b> · {profile.wins}W / {profile.losses}L · {wr}% WR</span>}
-        </div>
-      ) : (
-        <div style={{ marginBottom: 12, fontSize: 12, color: '#888' }}>Loading rank…</div>
-      )}
-
-      {!queued ? (
-        <>
-          {decks.length > 0 && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-              <label style={{ fontSize: 11, color: '#aaa', minWidth: 50 }}>Deck:</label>
-              <select
-                value={selectedDeckId ?? ''}
-                onChange={e => setSelectedDeckId(Number(e.target.value))}
-                style={{ flex: 1, minWidth: 0, padding: '10px', minHeight: 44, background: '#14121f', color: '#eee', border: '1px solid #3a3550', borderRadius: 8, fontSize: 13 }}
-              >
-                {decks.map(d => {
-                  const valid = validateOwnedDeck(myName, d.cards).ok;
-                  return (
-                    <option key={d.id} value={d.id}>
-                      {d.name} ({d.cards.length}) {d.isActive ? '\u2605' : ''} {valid ? '' : '\u26a0'}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
-            <label style={{ fontSize: 11, color: '#aaa', minWidth: 50 }}>Region:</label>
-            <select value={region} onChange={e => setRegion(e.target.value)}
-              style={{ flex: 1, minWidth: 0, padding: '10px', minHeight: 44, background: '#14121f', color: '#eee', border: '1px solid #3a3550', borderRadius: 8, fontSize: 13 }}>
-              <option value="global">Global</option>
-              <option value="na">North America</option>
-              <option value="eu">Europe</option>
-              <option value="ap">Asia Pacific</option>
-            </select>
-          </div>
-          <button
-            onClick={joinQueue}
-            disabled={busy || !deckOk}
-            className="ova-plate ova-plate--gold"
-            style={{ width: '100%', padding: '14px 18px', fontSize: 13.5, letterSpacing: '0.18em' }}
-          ><Trophy size={16} /> ENTER RANKED QUEUE</button>
-          {!deckOk && (
-            <div style={{ marginTop: 8, fontSize: 11, color: '#f99', fontStyle: 'italic' }}>
-              {decks.length === 0
-                ? 'Build a 60-card deck from your collection (Profile › Decks) to queue ranked.'
-                : 'This deck needs 60 cards you own — open Boosters to unlock more, then rebuild it.'}
-            </div>
-          )}
-        </>
-      ) : (
-        <div style={{ textAlign: 'center', padding: '6px 0' }}>
-          <div style={{ fontSize: 11, color: '#aaa', marginBottom: 4, fontFamily: 'serif', letterSpacing: 1.5, textTransform: 'uppercase' }}>Searching for opponent…</div>
-          <div style={{
-            fontSize: 28, fontWeight: 800, color: '#c084fc',
-            fontVariantNumeric: 'tabular-nums',
-            fontFamily: '"Cinzel", "Times New Roman", serif',
-            textShadow: '0 0 16px rgba(192,132,252,0.5)',
-          }}>
-            {Math.floor(waitMs / 60000)}:{String(Math.floor((waitMs / 1000) % 60)).padStart(2, '0')}
-          </div>
-          <div style={{ fontSize: 10, color: '#888', marginTop: 4, fontStyle: 'italic' }}>
-            MMR window expands ±50 every 10s
-          </div>
-          <button onClick={leaveQueue} disabled={busy}
-            style={{ marginTop: 10, padding: '10px 16px', minHeight: 44, background: '#222', color: '#ddd', border: '1px solid #444', borderRadius: 8, cursor: 'pointer', fontSize: 12 }}>
-            Leave Queue
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Ranked Hub (legacy, kept for /ranked deep-links) ──────────────────────
-function RankBadge({ p, size = 'md' }: { p: { visibleRank: PublicRankedProfile['visibleRank']; division: PublicRankedProfile['division'] }; size?: 'sm'|'md'|'lg' }) {
-  const c = tierColors(p.visibleRank);
-  const dim = size === 'lg' ? 80 : size === 'sm' ? 32 : 50;
-  const fs  = size === 'lg' ? 16 : size === 'sm' ? 9 : 12;
-  const roman = p.visibleRank === 'Mythic' ? '' : (['', 'I','II','III','IV'][p.division as number]);
-  return (
-    <div style={{
-      width: dim, height: dim, borderRadius: '50%',
-      background: c.bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      color: c.fg, fontWeight: 900, lineHeight: 1,
-      boxShadow: `0 0 ${size === 'lg' ? 24 : 12}px ${c.glow}`,
-      border: '2px solid rgba(0,0,0,0.4)',
-      flex: '0 0 auto',
-      fontFamily: '"Cinzel", "Times New Roman", serif',
-    }}>
-      <div style={{ fontSize: fs, letterSpacing: 0.5 }}>{p.visibleRank.slice(0, size === 'sm' ? 3 : 99).toUpperCase()}</div>
-      {roman && <div style={{ fontSize: fs - 2, opacity: 0.85, marginTop: 1 }}>{roman}</div>}
-    </div>
-  );
-}
-
-function RankedHub({
-  myName, onBack, onJoined, onViewProfile,
-}: { myName: string; onBack: () => void; onJoined: (s: Seat) => void; onViewProfile: (n: string) => void }) {
-  const mobile = useIsMobile();
-  const [profile, setProfile] = useState<PublicRankedProfile | null>(null);
-  const [season, setSeason] = useState<{ id: string; name: string; startedAt: number; endsAt: number } | null>(null);
-  const [leaders, setLeaders] = useState<LeaderboardEntry[]>([]);
-  const [region, setRegion] = useState<string>(() => {
-    try { return localStorage.getItem('rankedRegion') || 'global'; } catch { return 'global'; }
-  });
-  const [queued, setQueued] = useState<{ queuedAt: number } | null>(null);
-  const [waitMs, setWaitMs] = useState(0);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [deckOk, setDeckOk] = useState(false);
-  const [decks, setDecks] = useState<DeckEntry[]>([]);
-  const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const [p, s, lb] = await Promise.all([
-        RankedAPI.profile(myName),
-        RankedAPI.season(),
-        RankedAPI.leaderboard(50),
-      ]);
-      setProfile(p);
-      setSeason({ id: s.id, name: s.name, startedAt: s.startedAt, endsAt: s.endsAt });
-      setLeaders(lb);
-    } catch (e: any) { setError(String(e?.message ?? e)); }
-  }, [myName]);
-
-  useEffect(() => { refresh(); }, [refresh]);
-
-  // Validate deck up front so we don't let a player queue with an invalid one.
-  // Also load the full deck library so the player can pick which deck to queue
-  // with BEFORE entering the queue (rather than always using the active deck).
-  useEffect(() => {
-    (async () => {
-      try {
-        const list = await listDecksApi(myName);
-        setDecks(list);
-        const active = list.find(d => d.isActive) ?? list[0];
-        if (active) {
-          setSelectedDeckId(active.id);
-          setDeckOk(validateDeck(active.cards).ok);
-        } else {
-          // Legacy fallback — no library rows yet, ask the old endpoint.
-          const d = await getDeckApi(myName);
-          setDeckOk(validateDeck(d).ok);
-        }
-      } catch { setDeckOk(false); }
-    })();
-  }, [myName]);
-
-  // Queue status poll — every 2s while in queue.
-  useEffect(() => {
-    if (!queued) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const s = await RankedAPI.queueStatus(myName);
-        if (cancelled) return;
-        setWaitMs(Date.now() - (s.queuedAt ?? Date.now()));
-        if (s.match) {
-          // Match found — auto-join the boardgame.io match.
-          try {
-            const joined = await lobby.joinMatch(GAME_NAME, s.match.matchId, {
-              playerID: s.match.seat, playerName: myName,
-            });
-            setQueued(null);
-            onJoined({
-              matchID: s.match.matchId,
-              playerID: s.match.seat,
-              credentials: joined.playerCredentials,
-              playerName: myName,
-            });
-          } catch (e: any) {
-            setError(`Match join failed: ${e?.message ?? e}`);
-            setQueued(null);
-          }
-        } else if (!s.queued) {
-          setQueued(null);
-        }
-      } catch (e: any) {
-        if (!cancelled) setError(String(e?.message ?? e));
-      }
-    };
-    const id = setInterval(tick, 2000);
-    void tick();
-    return () => { cancelled = true; clearInterval(id); };
-  }, [queued, myName, onJoined]);
-
-  async function joinQueue() {
-    if (!deckOk) { setError('Save a valid 60-card deck on your profile before queueing.'); return; }
-    setBusy(true); setError('');
-    try {
-      // Use the user's pre-queue deck selection. Falls back to active/getDeck.
-      let deckPayload: string | undefined;
-      try {
-        const chosen = decks.find(d => d.id === selectedDeckId);
-        const cards = chosen ? chosen.cards : await getDeckApi(myName);
-        if (Array.isArray(cards) && cards.length > 0) {
-          deckPayload = JSON.stringify(cards);
-        }
-      } catch { /* server will fall back to stored deck */ }
-      const r = await RankedAPI.queueJoin(myName, region, deckPayload);
-      if (!('ok' in r) || !r.ok) {
-        setError((r as any).error || 'queue failed');
-      } else {
-        setQueued({ queuedAt: r.queuedAt ?? Date.now() });
-        try { localStorage.setItem('rankedRegion', region); } catch {}
-      }
-    } catch (e: any) { setError(String(e?.message ?? e)); }
-    finally { setBusy(false); }
-  }
-  async function leaveQueue() {
-    setBusy(true);
-    try { await RankedAPI.queueLeave(myName); } catch {}
-    setQueued(null); setBusy(false);
-  }
-
-  const placementRemaining = profile?.placementMatchesRemaining ?? 10;
-  const inPlacements = placementRemaining > 0;
-  const totalGames = (profile?.wins ?? 0) + (profile?.losses ?? 0);
-  const wr = totalGames > 0 ? Math.round(((profile?.wins ?? 0) / totalGames) * 100) : 0;
-  const seasonDaysLeft = season ? Math.max(0, Math.ceil((season.endsAt - Date.now()) / 86400000)) : 0;
-
-  return (
-    <Screen
-      title="Ranked Ladder"
-      right={<button onClick={onBack} style={ghostBtn}><ArrowLeft size={13} /> Back</button>}
-    >
-      {error && <Banner kind="error">{error}</Banner>}
-
-      <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : '1fr 1fr', gap: 14, marginTop: 14 }}>
-        {/* Profile card */}
-        <div style={{
-          padding: 18, borderRadius: 10,
-          background: 'linear-gradient(135deg, #161025 0%, #1a1238 100%)',
-          border: '1px solid rgba(192,132,252,0.35)',
-        }}>
-          {profile ? (
-            <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-              <RankBadge p={profile} size="lg" />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, color: '#aaa', textTransform: 'uppercase', letterSpacing: 1.5, fontFamily: 'serif', fontWeight: 700 }}>{myName}</div>
-                <div style={{
-                  fontSize: 22, fontWeight: 800, color: '#fff', marginTop: 4,
-                  fontFamily: '"Cinzel", "Times New Roman", serif',
-                  letterSpacing: 1, textShadow: '0 0 12px rgba(192,132,252,0.4)',
-                }}>
-                  {inPlacements ? 'Placement' : rankLabel(profile)}
-                </div>
-                {!inPlacements && profile.visibleRank !== 'Mythic' && (
-                  <div style={{ marginTop: 8, height: 8, background: '#222', borderRadius: 4, overflow: 'hidden' }}>
-                    <div style={{
-                      width: `${profile.rankedPoints}%`, height: '100%',
-                      background: tierColors(profile.visibleRank).bg,
-                    }} />
-                  </div>
-                )}
-                <div style={{ marginTop: 8, fontSize: 13, color: '#ccc' }}>
-                  {inPlacements
-                    ? <span>Placement matches remaining: <b style={{ color: '#ffb347' }}>{placementRemaining}</b></span>
-                    : <span>{profile.wins}W / {profile.losses}L · {wr}% WR</span>}
-                </div>
-              </div>
-            </div>
-          ) : <div style={{ color: '#888' }}>Loading profile…</div>}
-
-          {/* Queue panel */}
-          <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #2a2240' }}>
-            {!queued ? (
-              <>
-                {decks.length > 0 && (
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
-                    <label style={{ fontSize: 12, color: '#aaa' }}>Deck:</label>
-                    <select
-                      value={selectedDeckId ?? ''}
-                      onChange={e => {
-                        const id = Number(e.target.value);
-                        setSelectedDeckId(id);
-                        const chosen = decks.find(d => d.id === id);
-                        setDeckOk(chosen ? validateDeck(chosen.cards).ok : false);
-                      }}
-                      style={{ flex: 1, padding: '6px 10px', background: '#1a1a1a', color: '#eee', border: '1px solid #444', borderRadius: 4, fontSize: 13 }}
-                    >
-                      {decks.map(d => {
-                        const valid = validateDeck(d.cards).ok;
-                        return (
-                          <option key={d.id} value={d.id}>
-                            {d.name} ({d.cards.length}) {d.isActive ? '\u2605' : ''} {valid ? '' : '\u26a0'}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
-                  <label style={{ fontSize: 12, color: '#aaa' }}>Region:</label>
-                  <select value={region} onChange={e => setRegion(e.target.value)} style={{ padding: '6px 10px', background: '#1a1a1a', color: '#eee', border: '1px solid #444', borderRadius: 4, fontSize: 13 }}>
-                    <option value="global">Global</option>
-                    <option value="na">North America</option>
-                    <option value="eu">Europe</option>
-                    <option value="ap">Asia Pacific</option>
-                  </select>
-                </div>
-                <button
-                  onClick={joinQueue}
-                  disabled={busy || !deckOk}
-                  className="ova-plate ova-plate--gold"
-                  style={{ width: '100%', padding: '14px 18px', fontSize: 14, letterSpacing: '0.18em' }}
-                ><Trophy size={17} /> ENTER RANKED QUEUE</button>
-                {!deckOk && (
-                  <div style={{ marginTop: 8, fontSize: 12, color: '#f99', fontStyle: 'italic' }}>
-                    You need a valid 60-card deck on your Profile before queueing.
-                  </div>
-                )}
-              </>
-            ) : (
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 13, color: '#aaa', marginBottom: 6, fontFamily: 'serif', letterSpacing: 1.5, textTransform: 'uppercase' }}>Searching for opponent…</div>
-                <div style={{
-                  fontSize: 32, fontWeight: 800, color: '#c084fc',
-                  fontVariantNumeric: 'tabular-nums',
-                  fontFamily: '"Cinzel", "Times New Roman", serif',
-                  textShadow: '0 0 16px rgba(192,132,252,0.5)',
-                }}>
-                  {Math.floor(waitMs / 60000)}:{String(Math.floor((waitMs / 1000) % 60)).padStart(2, '0')}
-                </div>
-                <div style={{ fontSize: 11, color: '#888', marginTop: 4, fontStyle: 'italic' }}>
-                  MMR window expands ±50 every 10s
-                </div>
-                <button onClick={leaveQueue} disabled={busy}
-                  style={{ ...ghostBtn, marginTop: 12, padding: '8px 16px' }}>Leave Queue</button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Season + info */}
-        <div style={{
-          padding: 18, borderRadius: 10,
-          background: 'linear-gradient(135deg, #0e1825 0%, #122035 100%)',
-          border: '1px solid #2a3a5a',
-        }}>
-          <div style={{ fontSize: 12, color: '#7fb', textTransform: 'uppercase', letterSpacing: 1.5, fontFamily: 'serif', fontWeight: 700 }}>Current Season</div>
-          <div style={{
-            fontSize: 20, fontWeight: 800, color: '#fff', marginTop: 4,
-            fontFamily: '"Cinzel", "Times New Roman", serif',
-            letterSpacing: 1,
-          }}>{season?.name ?? '—'}</div>
-          <div style={{ fontSize: 13, color: '#aaa', marginTop: 4, fontStyle: 'italic' }}>
-            {seasonDaysLeft} days remaining
-          </div>
-          <div style={{ marginTop: 14, fontSize: 12, color: '#bbb', lineHeight: 1.7 }}>
-            <div><b style={{ color: '#fff' }}>Hidden MMR:</b> The matchmaker uses a hidden Glicko-2 rating you never see.</div>
-            <div style={{ marginTop: 4 }}><b style={{ color: '#fff' }}>Placements:</b> 10 games to lock in your starting rank.</div>
-            <div style={{ marginTop: 4 }}><b style={{ color: '#fff' }}>Soft Reset:</b> Each season your MMR collapses halfway toward 1500.</div>
-            <div style={{ marginTop: 4 }}><b style={{ color: '#fff' }}>Rewards:</b> Cosmetics only — no gameplay advantages.</div>
-          </div>
-
-          {/* Season prize callout */}
-          <div style={{
-            marginTop: 14, padding: 12, borderRadius: 8,
-            background: 'linear-gradient(135deg, rgba(255,179,71,0.16) 0%, rgba(192,132,252,0.18) 100%)',
-            border: '1px solid rgba(255,179,71,0.55)',
-            boxShadow: '0 0 18px rgba(255,179,71,0.18)',
-          }}>
-            <div style={{
-              fontSize: 11, color: '#ffd86a', textTransform: 'uppercase', letterSpacing: 2,
-              fontFamily: 'serif', fontWeight: 800, marginBottom: 6,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9,
-            }}>
-              <Crown size={14} /> Season Champion Prize
-            </div>
-            <div style={{
-              fontFamily: '"Cinzel", "Times New Roman", serif',
-              fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: 0.5,
-              textShadow: '0 0 12px rgba(255,179,71,0.45)',
-            }}>
-              $1,000 of $MASTER
-            </div>
-            <div style={{
-              fontFamily: '"Cinzel", "Times New Roman", serif',
-              fontSize: 14, fontWeight: 700, color: '#ffd86a', marginTop: 2,
-            }}>
-              + Season Champion Title
-            </div>
-            <div style={{ fontSize: 11, color: '#bbb', marginTop: 6, fontStyle: 'italic' }}>
-              Awarded to the #1 player on the Season Leaderboard at season end.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Leaderboard */}
-      <Section title="Season Leaderboard" right={<button onClick={refresh} style={ghostBtn} aria-label="Refresh leaderboard"><Refresh size={14} /></button>}>
-        {leaders.length === 0
-          ? <div style={{ color: '#888', fontSize: 13, fontStyle: 'italic' }}>No ranked players yet — be the first.</div>
-          : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead>
-                  <tr style={{ color: '#888', textAlign: 'left', fontFamily: 'serif', textTransform: 'uppercase', letterSpacing: 1.2, fontSize: 11 }}>
-                    <th style={{ padding: '6px 8px', width: 40 }}>#</th>
-                    <th style={{ padding: '6px 8px' }}>Player</th>
-                    <th style={{ padding: '6px 8px' }}>Rank</th>
-                    <th style={{ padding: '6px 8px', textAlign: 'right' }}>W/L</th>
-                    <th style={{ padding: '6px 8px', textAlign: 'right' }}>WR</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {leaders.map(l => {
-                    const games = l.wins + l.losses;
-                    const lwr = games > 0 ? Math.round((l.wins / games) * 100) : 0;
-                    const isMe = l.playerId === myName;
-                    return (
-                      <tr key={l.playerId}
-                          onClick={() => onViewProfile(l.playerId)}
-                          style={{
-                            cursor: 'pointer',
-                            background: isMe ? 'rgba(192,132,252,0.12)' : (l.rank % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent'),
-                            borderTop: '1px solid #1a1a1a',
-                          }}>
-                        <td style={{ padding: '8px', fontWeight: 800, color: l.rank <= 3 ? '#ffd86a' : '#888', fontFamily: '"Cinzel", "Times New Roman", serif' }}>
-                          {l.rank}
-                        </td>
-                        <td style={{ padding: '8px', color: '#fff', fontWeight: 600 }}>
-                          {l.playerId}{isMe && <span style={{ color: '#c084fc', marginLeft: 6, fontStyle: 'italic', fontWeight: 400 }}>(you)</span>}
-                        </td>
-                        <td style={{ padding: '8px' }}>
-                          <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-                            <RankBadge p={l} size="sm" />
-                            <span style={{ fontFamily: '"Cinzel", "Times New Roman", serif', fontSize: 12, letterSpacing: 0.5 }}>{rankLabel(l)}</span>
-                          </span>
-                        </td>
-                        <td style={{ padding: '8px', textAlign: 'right', color: '#ccc', fontVariantNumeric: 'tabular-nums' }}>{l.wins}/{l.losses}</td>
-                        <td style={{ padding: '8px', textAlign: 'right', color: '#ccc', fontVariantNumeric: 'tabular-nums' }}>{lwr}%</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-      </Section>
-    </Screen>
-  );
-}
-
-// ── Tiny UI primitives ──────────────────────────────────────────────────────
 function Screen({ title, right, children, fullBleed }: { title: string; right?: React.ReactNode; children: React.ReactNode; fullBleed?: boolean }) {
   const mobile = useIsMobile();
   const pad = fullBleed ? 0 : (mobile ? 12 : 24);
@@ -8257,93 +6317,72 @@ function Banner({ kind, children }: { kind: 'error' | 'info'; children: React.Re
     </div>
   );
 }
-// ── Wager helpers ───────────────────────────────────────────────────────────
-// Wagers are denominated in $MASTER (Solana SPL token).
-export const MASTER_TOKEN_ADDRESS = 'DpPowzjETiU6421ReuwBB8XmDB7sMyB2JGzFLssYpump';
-export const SOLANA_RPC_URL =
-  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SOLANA_RPC) ||
-  'https://api.mainnet-beta.solana.com';
+// ── Wager UI ────────────────────────────────────────────────────────────────
+//
+// ═══════════════════════════════════════════════════════════════════════════
+// STAKED MATCHES ARE GATED OFF. THE BACKEND CANNOT SETTLE THEM.
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `src/api/wager.ts` is a complete, correct client for `/wager/*` — stakes,
+// escrows, deposits — and the escrow database is genuinely well built. What is
+// NOT there is anything that gets a player their money back out
+// (INTEGRATION.md §7, §9):
+//
+//   • THERE IS NO DEPLOYED ESCROW CONTRACT. `depositAddress` is an EOA whose
+//     key is a plain env var inside a container. Funds sit in a hot wallet.
+//   • NO PAYOUT HAS EVER RUN ON A REAL CHAIN. The sign → persist → broadcast →
+//     reconcile path is unit-tested against a `noop` settlement and has never
+//     executed. The first real payout would be its first execution.
+//   • DEPOSIT VERIFICATION HAS NEVER SEEN A REAL ERC-20 TRANSFER either.
+//   • There is no settlement endpoint at all — payouts are decided by a
+//     background worker, and the client has no way to trigger or observe one
+//     beyond polling `wager.getEscrow()`.
+//
+// A stake button here would take a real ERC-20 transfer from a player and
+// promise a payout that has never once been delivered. So it is disabled with
+// a stated reason rather than left to fail — that is the whole instruction.
+//
+// TO TURN THIS ON, in order:
+//   1. deploy an escrow contract (or put the hot key behind a KMS/HSM with a
+//      withdrawal policy) so stakes are not one `docker exec` from gone;
+//   2. exercise deposit → funded → settle → payout end to end on a testnet,
+//      including a forced crash between broadcast and record;
+//   3. then build the picker below against `wager.getStakes()` — it returns
+//      `{tiers: [{tier, amountBase}], token, decimals}` and the escrow body
+//      takes the TIER INDEX (`{matchId, tier}`). There is no `amount` field
+//      and sending `amountBase` is a 400, because a client that names its own
+//      amount can name a smaller one than its opponent's.
+//
+// Production's live tier list, for reference:
+//   tiers [{tier:0, amountBase:"1000000"}, {tier:1,"5000000"}, {tier:2,"25000000"}]
+//   token 0x1c7d…7238, decimals 6
 
-type Wager = { kind: 'free' } | { kind: 'master'; amount: number; onchainId?: string; mode?: 'custodial' };
+/** Can a match carry a real stake? Not until a payout has ever run. */
+export const WAGERS_AVAILABLE = false as const;
 
-function parseWager(kind: 'free' | 'master', raw: string): Wager | null {
-  if (kind === 'free') return { kind: 'free' };
-  const n = Number(raw);
-  if (!isFinite(n) || n <= 0) return null;
-  // $MASTER amounts are whole tokens (no fractional UI for now).
-  return { kind: 'master', amount: Math.round(n) };
-}
+export const WAGERS_UNAVAILABLE_MESSAGE =
+  'Staked matches are not available yet: there is no escrow contract, and no payout has ever been executed on-chain.';
 
-function readWager(setupData: any): Wager {
-  const w = setupData?.wager;
-  if (w && w.kind === 'free') return { kind: 'free' };
-  if (w && w.kind === 'master' && typeof w.amount === 'number') {
-    return { kind: 'master', amount: w.amount, onchainId: w.onchainId, mode: 'custodial' };
-  }
-  // Back-compat: legacy 'sol' wagers map to the new 'master' kind so that
-  // matches created before the rebrand still display correctly.
-  if (w && w.kind === 'sol' && typeof w.amount === 'number') {
-    return { kind: 'master', amount: w.amount };
-  }
-  return { kind: 'free' };
-}
-
-function readMatchName(setupData: any): string {
-  const n = setupData?.matchName;
-  return typeof n === 'string' ? n.trim().slice(0, 40) : '';
-}
-
-function wagerLabel(w: Wager): string {
-  return w.kind === 'free' ? 'Free Match' : `Wager · ${w.amount} $MASTER`;
-}
-
-function WagerControls({
-  kind, amount, onKind, onAmount, compact,
-}: {
-  kind: 'free' | 'master'; amount: string;
-  onKind: (k: 'free' | 'master') => void; onAmount: (s: string) => void;
-  compact?: boolean;
-}) {
-  const Btn = ({ k, label }: { k: 'free' | 'master'; label: string }) => {
-    const sel = kind === k;
-    return (
-      <button type="button" onClick={() => onKind(k)} style={{
-        flex: 1, padding: compact ? '4px 6px' : '6px 8px', fontSize: 11, fontWeight: 800,
-        background: sel ? '#f1e3a8' : 'transparent',
-        color: sel ? '#1a1408' : '#e9e4d0',
-        border: '1px solid rgba(180,150,80,0.55)', borderRadius: 3, cursor: 'pointer',
-        letterSpacing: 0.5, textTransform: 'uppercase',
-      }}>{label}</button>
-    );
-  };
+/**
+ * The stakes control, in its only honest state.
+ *
+ * Deliberately not an input the player can fill in and then be told "no" — the
+ * feature is off, the reason is stated, and there is nothing to click.
+ */
+function WagerControls() {
   return (
     <div style={{
-      display: 'flex', flexDirection: 'column', gap: 6, marginTop: compact ? 6 : 10,
-      background: 'rgba(10,12,20,0.7)', padding: '6px 10px',
-      border: '1px solid rgba(180,150,80,0.35)', borderRadius: 4,
+      marginTop: 12, padding: '12px 14px', borderRadius: 10,
+      background: 'rgba(143,92,255,0.06)', border: '1px dashed rgba(143,92,255,0.4)',
+      opacity: 0.95,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 11, color: '#c9b97a', minWidth: 50 }}>STAKES</span>
-        <Btn k="free"   label="Free" />
-        <Btn k="master" label="Wager · $MASTER" />
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        fontSize: 11, fontWeight: 800, letterSpacing: 1.6, color: '#c8a3ff',
+      }}><Coins size={14} /> STAKES · COMING SOON</div>
+      <div style={{ fontSize: 12, color: LOBBY_TOKENS.muted, marginTop: 6, lineHeight: 1.6 }}>
+        {WAGERS_UNAVAILABLE_MESSAGE} Every match is free to play in the meantime.
       </div>
-      {kind === 'master' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 11, color: '#c9b97a', minWidth: 50 }}>AMOUNT</span>
-          <input
-            type="number" inputMode="numeric" min={0} step={1}
-            value={amount}
-            onChange={e => onAmount(e.target.value)}
-            placeholder="1000"
-            style={{
-              flex: 1, padding: '4px 8px', fontSize: 12, fontWeight: 700,
-              background: '#000', color: '#f1e3a8',
-              border: '1px solid rgba(180,150,80,0.55)', borderRadius: 3,
-            }}
-          />
-          <span style={{ fontSize: 11, color: '#c9b97a', fontWeight: 700 }}>$MASTER</span>
-        </div>
-      )}
     </div>
   );
 }

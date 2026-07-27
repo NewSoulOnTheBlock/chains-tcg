@@ -5,7 +5,9 @@
 // - API, lobby, and socket.io:    bypass cache entirely (real-time).
 // Bump CACHE_VERSION when shipping a breaking change to evict old assets.
 
-const CACHE_VERSION = 'mmtcg-v31';
+// v32: fonts moved from fonts.gstatic.com to same-origin /fonts/*.woff2 and the
+// index.html shell lost its inline <style>; bump so old caches are evicted.
+const CACHE_VERSION = 'mmtcg-v32';
 const SHELL_URL = '/index.html';
 
 self.addEventListener('install', (event) => {

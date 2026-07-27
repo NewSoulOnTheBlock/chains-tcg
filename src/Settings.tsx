@@ -12,7 +12,8 @@
 // NavDock / PlayerHUD gear and from the profile hub top nav.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { getProfileApi, type Profile } from './profiles';
+import { getMyProfileApi, type Profile } from './profiles';
+import { RANKED_UNAVAILABLE_MESSAGE } from './ranked-client';
 import { color as C, font as F, surface as SURF, edge as EDGE, depth as DEPTH } from './theme';
 import { engravedPanel } from './ui';
 import { hapticsSupported, HAPTICS_KEY, Haptics } from './haptics';
@@ -39,8 +40,8 @@ export const PREF_KEYS = {
   /** In-app reduce-motion, applied as data-reduced-motion on <html>. */
   reduceMotion: 'ocva.reduceMotion',
   /** Default matchmaking mode on the hub. */
+  /** Kept only so "clear local data" still removes the legacy ranked prefs. */
   queueMode: 'ocva.queueMode',
-  /** Preferred ranked queue region. */
   rankedRegion: 'rankedRegion',
   /** "Install the app" prompt snooze (7 days). */
   installDismissed: 'mmtcg.installDismissedUntil',
@@ -282,11 +283,11 @@ function ClearDataDialog({ onCancel, onConfirm }: { onCancel: () => void; onConf
         <ul style={{ margin: '0 0 12px', paddingLeft: 20, fontSize: 13, lineHeight: 1.7, color: S.text2 }}>
           <li>your signed-in identity on this device (you will need to sign in again);</li>
           <li>cached match credentials for any match you are seated in;</li>
-          <li>every preference on this page — mute flags, reduce motion, queue mode, region;</li>
+          <li>every preference on this page — mute flags, reduce motion;</li>
           <li>dismissed prompts and locally-stored daily-challenge results.</li>
         </ul>
         <p style={{ margin: '0 0 14px', fontSize: 12.5, lineHeight: 1.55, color: S.muted }}>
-          Your profile, saved decks, collection and ranked record live on the server and are
+          Your profile, saved decks and match history live on the server and are
           <strong style={{ color: S.text2 }}> not</strong> affected.
         </p>
 
@@ -344,10 +345,6 @@ export function SettingsPage({
   // Display
   const [reduceMotion, setReduceMotion] = useState(() => readFlag(PREF_KEYS.reduceMotion, false));
   // Gameplay
-  const [queueMode, setQueueMode] = useState<'ranked' | 'casual'>(
-    () => (readStr(PREF_KEYS.queueMode, 'ranked') === 'casual' ? 'casual' : 'ranked'),
-  );
-  const [region, setRegion] = useState(() => readStr(PREF_KEYS.rankedRegion, 'global'));
   // Account
   const [prof, setProf] = useState<Profile | null>(null);
   const [copied, setCopied] = useState(false);
@@ -360,9 +357,11 @@ export function SettingsPage({
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  // Settings always shows the SIGNED-IN player, and the wallet row needs an
+  // address — `GET /api/profiles/me` is the only route that returns one.
   useEffect(() => {
     let alive = true;
-    getProfileApi(myName).then((p) => { if (alive) setProf(p); }).catch(() => {});
+    getMyProfileApi().then((p) => { if (alive) setProf(p); }).catch(() => {});
     return () => { alive = false; };
   }, [myName]);
 
@@ -422,17 +421,6 @@ export function SettingsPage({
     applyReducedMotion();
     announce();
   }
-  function chooseQueueMode(v: 'ranked' | 'casual') {
-    setQueueMode(v);
-    try { localStorage.setItem(PREF_KEYS.queueMode, v); } catch {}
-    announce();
-  }
-  function chooseRegion(v: string) {
-    setRegion(v);
-    try { localStorage.setItem(PREF_KEYS.rankedRegion, v); } catch {}
-    announce();
-  }
-
   async function copyWallet() {
     if (!prof?.walletAddress) return;
     try {
@@ -549,40 +537,15 @@ export function SettingsPage({
         {/* ── Gameplay ──────────────────────────────────────────────────── */}
         <SectionHead icon={<Swords size={15} />} label="Gameplay" />
         <Section>
+          {/* The queue-mode and region preferences configured `/api/ranked/*`,
+              which does not exist on this backend. Rather than keep dead
+              switches that quietly do nothing, say what is actually true. */}
           <Row
-            title="Default queue"
-            hint="Which mode the hub matchmaking panel is set to when you arrive."
-            control={
-              <Segmented
-                label="Default queue"
-                value={queueMode}
-                onChange={chooseQueueMode}
-                options={[{ value: 'ranked', label: 'Ranked' }, { value: 'casual', label: 'Casual' }]}
-              />
-            }
+            title="Ranked ladder"
+            hint={RANKED_UNAVAILABLE_MESSAGE}
+            control={<span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1, color: S.muted }}>COMING SOON</span>}
           />
-          <Row
-            title="Ranked region"
-            hint="Used when you join the ranked queue."
-            control={
-              <select
-                value={region}
-                onChange={(e) => chooseRegion(e.currentTarget.value)}
-                aria-label="Ranked region"
-                style={{
-                  minHeight: 44, padding: '10px 12px', borderRadius: 10,
-                  background: SURF.obsidianWell, color: S.text,
-                  border: `1px solid rgba(217,180,90,0.22)`, fontSize: 14, fontFamily: F.body,
-                  boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.5)',
-                }}
-              >
-                <option value="global">Global</option>
-                <option value="na">North America</option>
-                <option value="eu">Europe</option>
-                <option value="ap">Asia Pacific</option>
-              </select>
-            }
-          />
+
           <Row
             title="Replay the tutorial"
             hint="Opens the interactive rulebook, including the tutorial video."
@@ -605,8 +568,8 @@ export function SettingsPage({
               <>
                 <span style={{ color: S.text, fontWeight: 700 }}>{prof?.name ?? myName}</span>
                 <span style={{ display: 'block', marginTop: 2 }}>
-                  Your name is your account handle and is fixed. Edit opens your profile,
-                  where you can change your avatar and bio.
+                  Your account is your wallet; this is just how other players see you.
+                  Edit opens your profile, where you can change your name, avatar and bio.
                 </span>
               </>
             }

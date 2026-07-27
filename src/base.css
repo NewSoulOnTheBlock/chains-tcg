@@ -1,0 +1,59 @@
+/*
+ * Global base styles for the app shell.
+ *
+ * These used to live in an inline <style> block in index.html. The production
+ * gateway ships `default-src 'self'` with no `style-src` override, which blocks
+ * inline <style> elements, so they are compiled into a same-origin stylesheet
+ * instead (imported from src/index.tsx).
+ */
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { margin: 0; padding: 0; }
+html, body { min-height: 100dvh; }
+body {
+  /* Obsidian field with a faint violet zenith and gold horizon — the
+     foreground panels sit on this rather than on flat black. */
+  background:
+    radial-gradient(100% 60% at 50% -10%, rgba(124, 92, 255, 0.10), transparent 60%),
+    radial-gradient(80% 50% at 50% 108%, rgba(217, 180, 90, 0.06), transparent 62%),
+    #06050f;
+  background-attachment: fixed;
+  color: #f3f1fb;
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+  /* Honor iOS safe-area at the bottom (home indicator) and sides. */
+  padding-bottom: env(safe-area-inset-bottom);
+}
+/* Warm brand selection instead of the OS default blue. */
+::selection { background: rgba(217, 180, 90, 0.32); color: #fff8e4; }
+/* Headings use the medieval display face wherever raw tags are used. */
+h1, h2, h3 { font-family: "Cinzel", "EB Garamond", Georgia, serif; letter-spacing: 0.02em; }
+/* Prevent iOS auto-zoom on input focus */
+input, select, textarea, button { font-size: 16px; }
+/* Kill 300ms tap delay & double-tap zoom on every interactive element. */
+button, [role="button"], a, [data-tap] { touch-action: manipulation; }
+img { max-width: 100%; }
+/* Thin, dark, gold-tinted scrollbars (WebKit + Firefox) */
+* { scrollbar-width: thin; scrollbar-color: rgba(190,160,110,0.30) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(190,160,110,0.30); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(217,180,90,0.5); }
+/* Respect users who prefer reduced motion: neutralize all animation/transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+/* Leave room for the mobile bottom action bar so nothing hides behind it. */
+@media (max-width: 720px) {
+  body { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+}
