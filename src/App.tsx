@@ -353,6 +353,29 @@ function LoginStat(_: { label: string; value: string; color: string }) { return 
 void LoginStat;
 
 // ── First-time profile creation (after wallet connect with no existing profile) ─
+const OVP = {
+  bg: '#060711', panel: 'rgba(10,12,26,0.90)', input: '#090D19',
+  gold: '#E5B84B', goldHi: '#FFD86A', purple: '#8E4DFF', violet: '#C45CFF',
+  cyan: '#19D3D2', green: '#39E879', text: '#F4F2EA', muted: '#989BB0',
+  border: 'rgba(229,184,75,0.35)',
+};
+
+/** One node in the Connect Wallet → Create Profile → Enter Arena stepper. */
+function ProfileStep({ n, label, state }: { n: React.ReactNode; label: string; state: 'done' | 'active' | 'todo' }) {
+  const ring = state === 'done' ? OVP.gold : state === 'active' ? OVP.purple : '#3a3f55';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+      <span aria-hidden style={{
+        flex: '0 0 auto', width: 34, height: 34, borderRadius: '50%', display: 'grid', placeItems: 'center',
+        border: `2px solid ${ring}`, background: state === 'active' ? OVP.purple : 'transparent',
+        color: state === 'todo' ? OVP.muted : '#fff', fontWeight: 800, fontSize: 14,
+        boxShadow: state === 'active' ? `0 0 16px ${OVP.purple}88` : 'none',
+      }}>{n}</span>
+      <span style={{ fontSize: 12, letterSpacing: 1.4, fontWeight: 700, color: state === 'todo' ? OVP.muted : OVP.text, whiteSpace: 'nowrap' }}>{label}</span>
+    </div>
+  );
+}
+
 function FirstTimeProfile({ wallet, onCreated, onCancel }: {
   wallet: ConnectedWallet;
   onCreated: (name: string) => void;
@@ -363,10 +386,21 @@ function FirstTimeProfile({ wallet, onCreated, onCancel }: {
   const [avatarUrl, setAvatarUrl] = useState('');
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
+  const [nameStatus, setNameStatus] = useState<'idle' | 'checking' | 'ok' | 'taken'>('idle');
+
+  async function checkName() {
+    const t = name.trim();
+    if (t.length < 3) { setNameStatus('idle'); return; }
+    setNameStatus('checking');
+    try {
+      const taken = await getProfileApi(t);
+      setNameStatus(taken && (taken.walletAddress || '').toLowerCase() !== wallet.address.toLowerCase() ? 'taken' : 'ok');
+    } catch { setNameStatus('idle'); }
+  }
 
   function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
-    if (f.size > 600 * 1024) { setErr('Image too large — must be under 600 KB.'); return; }
+    if (f.size > 5 * 1024 * 1024) { setErr('Image too large — must be under 5 MB.'); return; }
     const reader = new FileReader();
     reader.onload = () => setAvatarUrl(String(reader.result || ''));
     reader.readAsDataURL(f);
@@ -396,60 +430,150 @@ function FirstTimeProfile({ wallet, onCreated, onCancel }: {
     } finally { setSaving(false); }
   }
 
+  const nameOk = name.trim().length >= 3 && name.trim().length <= 20;
+  const canSubmit = nameOk && !saving;
+  const FIELD: React.CSSProperties = {
+    width: '100%', padding: '13px 14px', fontSize: 14, fontFamily: F.body,
+    color: OVP.text, background: OVP.input, border: '1px solid #2a3350', borderRadius: 10,
+  };
   return (
-    <Screen title="Welcome — Create your profile"
-      right={<button onClick={onCancel} style={ghostBtn}>Cancel</button>}>
-      <Banner kind="info">
-        Wallet connected: <b style={{ color: '#fff' }}>{shortAddr(wallet.address)}</b>{' '}
-        <span style={{ color: '#888' }}>({wallet.chain.toUpperCase()})</span>. Set up your profile to continue.
-      </Banner>
+    <div style={{ position: 'fixed', inset: 0, overflow: 'auto', background: OVP.bg, color: OVP.text, fontFamily: F.body }}>
+      <style>{`
+        .ovp-field { transition: border-color .15s ease, box-shadow .15s ease; }
+        .ovp-field:focus { outline: none; border-color: ${OVP.purple}; box-shadow: 0 0 0 3px rgba(142,77,255,0.28); }
+        .ovp-field::placeholder { color: ${OVP.muted}; }
+        .ovp-primary { transition: filter .15s ease, transform .1s ease, box-shadow .15s ease; }
+        .ovp-primary:hover:not(:disabled) { filter: brightness(1.06); }
+        .ovp-primary:active:not(:disabled) { transform: translateY(1px); }
+        .ovp-link:hover { color: ${OVP.goldHi}; }
+        .ovp-primary:focus-visible, .ovp-link:focus-visible, .ovp-upload:focus-within { outline: 2px solid ${OVP.goldHi}; outline-offset: 2px; }
+        @media (max-width: 760px) { .ovp-grid { grid-template-columns: 1fr !important; } }
+        @media (prefers-reduced-motion: reduce) { .ovp-field, .ovp-primary { transition: none; } }
+      `}</style>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(200px,260px) 1fr', gap: 24, marginTop: 20 }}>
-        <div>
-          <div style={{
-            width: '100%', aspectRatio: '1', borderRadius: 12, overflow: 'hidden',
-            background: '#181820', border: '1px solid #2a2a32',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            {avatarUrl
-              ? <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              : <div style={{ fontSize: 56, color: '#444' }}>👤</div>}
+      {/* Arena backdrop */}
+      <img src="/hub-bg.png?v=2" alt="" aria-hidden style={{ position: 'fixed', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0, filter: 'blur(2px)' }} />
+      <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 1,
+        background: 'radial-gradient(70% 60% at 50% 40%, rgba(6,7,17,0.72), rgba(6,7,17,0.94)), linear-gradient(180deg, rgba(6,7,17,0.6), rgba(6,7,17,0.92))' }} />
+
+      <div style={{ position: 'relative', zIndex: 2, minHeight: '100dvh', display: 'flex', flexDirection: 'column', padding: '18px clamp(14px, 4vw, 40px) 28px' }}>
+        {/* header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <LoginEmblem size={38} />
+            <div style={{ lineHeight: 1.05 }}>
+              <div style={{ fontSize: 9, letterSpacing: 4, color: OVP.gold }}>ON-CHAIN</div>
+              <div style={{ fontFamily: '"Cinzel", serif', fontWeight: 700, fontSize: 15, color: '#fff' }}>VIRTUAL ARENA</div>
+            </div>
           </div>
-          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label style={{ ...ghostBtn, display: 'inline-block', textAlign: 'center', cursor: 'pointer' }}>
-              Upload picture
-              <input type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} />
-            </label>
-            <input value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)}
-              placeholder="...or paste image URL" style={inputStyle} />
-          </div>
+          <button className="ovp-link" onClick={onCancel} style={{ background: 'none', border: 'none', color: OVP.muted, fontSize: 14, cursor: 'pointer', fontFamily: F.body }}>Cancel</button>
         </div>
 
-        <div>
-          <div style={labelStyle}>DISPLAY NAME *</div>
-          <input value={name} onChange={e => setName(e.target.value)} autoFocus
-            placeholder="how others see you"
-            style={{ ...inputStyle, fontSize: 16 }} />
+        {/* stepper */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'clamp(8px,2vw,20px)', margin: '10px 0 22px', flexWrap: 'wrap' }}>
+          <ProfileStep n="✓" label="CONNECT WALLET" state="done" />
+          <span aria-hidden style={{ width: 'clamp(20px,6vw,80px)', height: 1, background: 'rgba(229,184,75,0.4)' }} />
+          <ProfileStep n="2" label="CREATE PROFILE" state="active" />
+          <span aria-hidden style={{ width: 'clamp(20px,6vw,80px)', height: 1, background: 'rgba(255,255,255,0.14)' }} />
+          <ProfileStep n="3" label="ENTER ARENA" state="todo" />
+        </div>
 
-          <div style={{ marginTop: 14 }}>
-            <div style={labelStyle}>BIO</div>
-            <textarea value={bio} onChange={e => setBio(e.target.value.slice(0, 500))} rows={5}
-              placeholder="Tell the chain about yourself…"
-              style={{ ...inputStyle, width: '100%', resize: 'vertical', minHeight: 100, fontFamily: 'system-ui' }} />
-            <div style={{ fontSize: 11, color: '#666', textAlign: 'right' }}>{bio.length}/500</div>
+        {/* panel */}
+        <div style={{
+          position: 'relative', width: 'min(1100px, 100%)', margin: '0 auto',
+          background: OVP.panel, border: `1px solid ${OVP.border}`, borderRadius: 16,
+          padding: 'clamp(20px, 3vw, 34px)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)',
+          boxShadow: '0 30px 90px rgba(0,0,0,0.6), 0 0 40px rgba(142,77,255,0.12)',
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <h1 style={{ margin: 0, fontFamily: '"Cinzel", serif', fontWeight: 800, fontSize: 'clamp(26px, 4vw, 40px)', letterSpacing: 2,
+              background: `linear-gradient(180deg, ${OVP.goldHi}, ${OVP.gold})`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>CREATE YOUR PROFILE</h1>
+            <div style={{ color: OVP.muted, fontSize: 14, marginTop: 8 }}>Choose how other players will see you in the arena.</div>
           </div>
 
-          {err && <Banner kind="error">{err}</Banner>}
+          {/* wallet strip */}
+          <div style={{ margin: '18px auto 0', maxWidth: 760, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, flexWrap: 'wrap',
+            padding: '11px 18px', borderRadius: 10, background: 'rgba(25,211,210,0.06)', border: `1px solid ${OVP.cyan}55` }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span aria-hidden style={{ width: 9, height: 9, borderRadius: '50%', background: OVP.green, boxShadow: `0 0 8px ${OVP.green}` }} />
+              <span style={{ color: '#cfe8df', fontSize: 13 }}>Wallet connected</span>
+            </span>
+            <b style={{ color: '#fff', fontFamily: 'ui-monospace, monospace', fontSize: 14 }}>{shortAddr(wallet.address)}</b>
+            <span style={{ fontSize: 11, fontWeight: 800, color: OVP.cyan, background: 'rgba(25,211,210,0.12)', border: `1px solid ${OVP.cyan}66`, borderRadius: 6, padding: '2px 8px' }}>{wallet.chain.toUpperCase()}</span>
+            <button className="ovp-link" onClick={onCancel} style={{ background: 'none', border: 'none', color: OVP.cyan, cursor: 'pointer', fontSize: 13, fontFamily: F.body }}>Change wallet</button>
+          </div>
 
-          <div style={{ marginTop: 14 }}>
-            <button onClick={create} disabled={saving || !name.trim()}
-              style={primaryBtn(!saving && !!name.trim())}>
-              {saving ? 'Creating…' : 'Create profile & enter game'}
-            </button>
+          {/* two-column form */}
+          <div className="ovp-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 280px) 1fr', gap: 'clamp(20px, 3vw, 40px)', marginTop: 26 }}>
+            {/* left: avatar */}
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 12, letterSpacing: 3, color: OVP.gold, fontWeight: 800, marginBottom: 14 }}>PROFILE IMAGE</div>
+              <div style={{ width: 180, height: 180, borderRadius: '50%', margin: '0 auto', overflow: 'hidden',
+                border: `2px solid ${OVP.gold}`, boxShadow: '0 0 26px rgba(142,77,255,0.4)',
+                background: 'radial-gradient(circle at 50% 38%, #3a2a6a, #14102a)', display: 'grid', placeItems: 'center' }}>
+                {avatarUrl
+                  ? <img src={avatarUrl} alt="Profile preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : <span aria-hidden style={{ fontSize: 66, color: OVP.violet }}>👤</span>}
+              </div>
+              <label className="ovp-upload" style={{ display: 'block', marginTop: 16, padding: '12px', borderRadius: 9,
+                background: 'rgba(9,13,25,0.85)', border: `1px solid ${OVP.gold}66`, color: OVP.text, fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
+                ⬆ UPLOAD IMAGE
+                <input type="file" accept="image/png,image/jpeg,image/webp" onChange={onPickFile} style={{ display: 'none' }} aria-label="Upload profile image" />
+              </label>
+              {avatarUrl && (
+                <button onClick={() => setAvatarUrl('')} style={{ marginTop: 8, background: 'none', border: 'none', color: OVP.muted, cursor: 'pointer', fontSize: 12, textDecoration: 'underline' }}>Remove image</button>
+              )}
+              <div style={{ color: OVP.muted, fontSize: 12, margin: '12px 0 6px' }}>or</div>
+              <label htmlFor="ovp-img-url" style={{ display: 'block', fontSize: 11, letterSpacing: 2, color: OVP.muted, fontWeight: 700, marginBottom: 6 }}>IMAGE URL</label>
+              <input id="ovp-img-url" className="ovp-field" value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)} placeholder="Paste image URL" style={FIELD} />
+              <div style={{ color: OVP.muted, fontSize: 11, marginTop: 8 }}>PNG, JPG or WebP · Max 5 MB</div>
+            </div>
+
+            {/* right: fields */}
+            <div>
+              <label htmlFor="ovp-name" style={{ display: 'block', fontSize: 12, letterSpacing: 2, color: '#cdd2e2', fontWeight: 800 }}>DISPLAY NAME <span style={{ color: OVP.violet }}>*</span></label>
+              <input id="ovp-name" className="ovp-field" value={name} autoFocus maxLength={20}
+                onChange={e => { setName(e.target.value); setNameStatus('idle'); }}
+                onBlur={checkName}
+                placeholder="Enter your display name" style={{ ...FIELD, fontSize: 16, marginTop: 6 }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                <span style={{ fontSize: 12, color: OVP.muted }}>3–20 characters</span>
+                <button className="ovp-link" onClick={checkName} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontFamily: F.body,
+                  color: nameStatus === 'ok' ? OVP.green : nameStatus === 'taken' ? '#ff6b6b' : OVP.muted }}>
+                  {nameStatus === 'checking' ? '… Checking' : nameStatus === 'ok' ? '✓ Available' : nameStatus === 'taken' ? '✗ Taken' : '◇ Check availability'}
+                </button>
+              </div>
+
+              <div style={{ marginTop: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label htmlFor="ovp-bio" style={{ fontSize: 12, letterSpacing: 2, color: '#cdd2e2', fontWeight: 800 }}>BIO</label>
+                <span style={{ fontSize: 10, color: OVP.muted, border: '1px solid #2a3350', borderRadius: 5, padding: '2px 7px', letterSpacing: 1 }}>OPTIONAL</span>
+              </div>
+              <textarea id="ovp-bio" className="ovp-field" value={bio} onChange={e => setBio(e.target.value.slice(0, 500))} rows={6}
+                placeholder="Tell the arena about yourself..." style={{ ...FIELD, marginTop: 6, minHeight: 150, resize: 'vertical', fontFamily: F.body }} />
+              <div style={{ textAlign: 'right', fontSize: 11, color: OVP.muted, marginTop: 2 }}>{bio.length} / 500</div>
+            </div>
+          </div>
+
+          {err && (
+            <div role="alert" style={{ marginTop: 16, padding: '10px 14px', borderRadius: 8,
+              background: 'rgba(255,107,107,0.1)', border: '1px solid rgba(255,107,107,0.45)', color: '#ffb4b4', fontSize: 13 }}>{err}</div>
+          )}
+
+          {/* footer */}
+          <div style={{ marginTop: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: OVP.muted, fontSize: 13 }}>
+              <span aria-hidden style={{ color: OVP.purple }}>🛡</span> You can update your profile later in Settings.
+            </div>
+            <button className="ovp-primary" onClick={create} disabled={!canSubmit} style={{
+              padding: '16px 30px', borderRadius: 10, border: '1px solid #8a6d24', cursor: canSubmit ? 'pointer' : 'not-allowed',
+              background: canSubmit ? `linear-gradient(180deg, ${OVP.goldHi}, #c69533)` : 'rgba(120,100,40,0.4)',
+              color: '#1a1408', fontWeight: 900, fontSize: 15, letterSpacing: 1, fontFamily: '"Cinzel", serif',
+              boxShadow: canSubmit ? '0 8px 24px -6px rgba(229,184,75,0.6)' : 'none',
+            }}>⚔ {saving ? 'CREATING PROFILE…' : 'CREATE PROFILE & ENTER ARENA'}</button>
           </div>
         </div>
       </div>
-    </Screen>
+    </div>
   );
 }
 
