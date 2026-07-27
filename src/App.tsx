@@ -572,7 +572,7 @@ function BgMusic({ src, storageKey }: { src: string; storageKey: string }) {
   );
 }
 
-function MenuMusic()   { return <BgMusic src="/menu-music.mp3"   storageKey="musicMuted" />; }
+function MenuMusic()   { return <BgMusic src="/menu-music.mp3?v=2"   storageKey="musicMuted" />; }
 function BattleMusic() { return <BgMusic src="/battle-music.mp3" storageKey="battleMuted" />; }
 
 // ── Rules page (Interactive Rulebook) ──────────────────────────────────────

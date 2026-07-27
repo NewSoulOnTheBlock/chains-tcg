@@ -82,6 +82,21 @@ if (typeof document !== 'undefined' && !document.getElementById('ocva-theme')) {
   document.head.appendChild(el);
 }
 
+// Global menu click SFX: play a short sound whenever a menu / UI button is pressed.
+// Scoped to our UI-primitive classes so in-game board controls stay silent.
+if (typeof document !== 'undefined' && !(window as any).__ocvaClickSfx) {
+  (window as any).__ocvaClickSfx = true;
+  document.addEventListener('pointerdown', (e) => {
+    const el = (e.target as HTMLElement | null)?.closest?.('.ova-menu-item, .ova-hot, .ocva-btn');
+    if (!el || (el as HTMLButtonElement).disabled) return;
+    try {
+      const a = new Audio('/click.mp3');
+      a.volume = 0.45;
+      a.play().catch(() => {});
+    } catch { /* noop */ }
+  }, true);
+}
+
 type BtnVariant = 'primary' | 'gold' | 'secondary' | 'ghost';
 
 export function Button(
