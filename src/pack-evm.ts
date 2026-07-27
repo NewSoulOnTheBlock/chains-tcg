@@ -15,6 +15,9 @@ export const ROBINHOOD_RPC =
 export const CARD_PACK = ((import.meta.env.VITE_CARD_PACK as string) ||
   '0x57200fb533b33823f8bd2ac8f3649e3b643830b3') as Address;
 export const PACK_PRICE_ETH = '0.0035';
+export const ROBINHOOD_CHAIN_ID = 4663;
+// Gas limit we submit mintPack with (this chain's estimateGas is unreliable).
+export const MINT_GAS_LIMIT = 1_500_000n;
 
 export const robinhoodChain = defineChain({
   id: 4663, name: 'Robinhood Chain',
@@ -60,22 +63,47 @@ export async function fetchPackPrice(): Promise<bigint> {
   catch { return parseEther(PACK_PRICE_ETH); }
 }
 
-/** Buy one booster pack; resolves to the 5 cards + 1 foil that were minted. */
-export async function mintPack(): Promise<RevealedCard[]> {
+/** Native ETH balance of an address on Robinhood Chain. */
+export function getEthBalance(addr: Address): Promise<bigint> {
+  return pub.getBalance({ address: addr });
+}
+
+/** The currently connected account (silent — no popup), or null. */
+export async function getConnectedAccount(): Promise<Address | null> {
+  const eth = (window as any).ethereum;
+  if (!eth) return null;
+  try {
+    const accts: string[] = await eth.request({ method: 'eth_accounts' });
+    return (accts?.[0] as Address) ?? null;
+  } catch { return null; }
+}
+
+/** The wallet's current chain id (decimal), or null. */
+export async function getWalletChainId(): Promise<number | null> {
+  const eth = (window as any).ethereum;
+  if (!eth) return null;
+  try { return parseInt(await eth.request({ method: 'eth_chainId' }), 16); }
+  catch { return null; }
+}
+
+/** Ask the wallet to switch to Robinhood Chain (adds it if unknown). Never silent. */
+export async function switchToRobinhood(): Promise<void> {
   await ensureChain();
-  const wc = walletClient();
-  const [account] = await wc.getAddresses();
+}
+
+/** Authoritative cost estimate: contract price + a gas allowance at live gas price. */
+export async function packCostEstimate(): Promise<{ price: bigint; gasCost: bigint; total: bigint }> {
   const price = await fetchPackPrice();
+  let gasCost = 0n;
+  try { gasCost = (await pub.getGasPrice()) * MINT_GAS_LIMIT; } catch { /* leave 0 if RPC can't price */ }
+  return { price, gasCost, total: price + gasCost };
+}
 
-  // Explicit gas limit: this chain's estimateGas can return a bogus huge value for
-  // value-bearing calls, which then exceeds the per-tx cap. mintPack is ~430k gas.
-  const hash = await wc.writeContract({ account, address: CARD_PACK, abi: packAbi, functionName: 'mintPack', value: price, gas: 1_500_000n });
-  const rcpt = await pub.waitForTransactionReceipt({ hash });
-
-  for (const log of rcpt.logs) {
+function decodePackFromReceipt(logs: readonly { address: string; data: `0x${string}`; topics: [`0x${string}`, ...`0x${string}`[]] | [] }[]): RevealedCard[] {
+  for (const log of logs) {
     if (log.address.toLowerCase() !== CARD_PACK.toLowerCase()) continue;
     try {
-      const ev = decodeEventLog({ abi: packAbi, data: log.data, topics: log.topics });
+      const ev = decodeEventLog({ abi: packAbi, data: log.data, topics: log.topics as any });
       if (ev.eventName === 'PackMinted') {
         const a = ev.args as any;
         const idxs = a.cardIndexes as bigint[];
@@ -90,4 +118,30 @@ export async function mintPack(): Promise<RevealedCard[]> {
     } catch { /* not our event */ }
   }
   return [];
+}
+
+/**
+ * Buy one booster pack. Submits the tx, invokes `onHash` as soon as the wallet
+ * returns the hash (so the UI can advance to the pending state), then waits for
+ * the on-chain receipt and decodes the authoritative PackMinted result.
+ * Card results always come from the confirmed receipt — never the client.
+ */
+export async function mintPack(onHash?: (hash: `0x${string}`) => void): Promise<RevealedCard[]> {
+  await ensureChain();
+  const wc = walletClient();
+  const [account] = await wc.getAddresses();
+  const price = await fetchPackPrice(); // recheck price immediately before submit
+
+  const hash = await wc.writeContract({ account, address: CARD_PACK, abi: packAbi, functionName: 'mintPack', value: price, gas: MINT_GAS_LIMIT });
+  onHash?.(hash);
+  const rcpt = await pub.waitForTransactionReceipt({ hash });
+  if (rcpt.status !== 'success') throw new Error('Transaction reverted on-chain.');
+  return decodePackFromReceipt(rcpt.logs as any);
+}
+
+/** Resume a pending mint after a refresh: wait for the known hash and decode. */
+export async function resumePack(hash: `0x${string}`): Promise<RevealedCard[]> {
+  const rcpt = await pub.waitForTransactionReceipt({ hash });
+  if (rcpt.status !== 'success') throw new Error('Transaction reverted on-chain.');
+  return decodePackFromReceipt(rcpt.logs as any);
 }
