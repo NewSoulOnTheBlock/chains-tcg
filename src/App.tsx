@@ -8,7 +8,7 @@ import { LobbyClient } from 'boardgame.io/client';
 import { Plaza } from './Plaza';
 import { ChainsTCG } from './Game';
 import { ChainsBoard } from './Board';
-import { CARDS, COLOR_META, COLORS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MAX_COPIES_NONBASIC, isBasicNode, type Color } from './cards';
+import { CARDS, COLOR_META, COLORS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MAX_COPIES_NONBASIC, isBasicNode, type Color, type CardType, type CardDef, type DeckIssue, type DeckValidation } from './cards';
 import {
   listProfilesApi, getProfileApi, getProfileByWalletApi, upsertProfileApi, updateProfileApi, getLibraryApi,
   getDeckApi, saveDeckApi, formatRecord, type Profile, type LibraryCard,
@@ -1569,13 +1569,43 @@ function MenuRow({ icon, label, desc, onClick, primary }: {
 }
 
 // ── Profile page ────────────────────────────────────────────────────────────
+// ── On-Chain Virtual Arena profile hub ──────────────────────────────────────
+// A compact, app-style profile with four tabs (Overview / Decks / Collection /
+// Achievements) that replaces the old long vertical scroll. Wired entirely to
+// live data: profile, ranked stats, and the multi-deck backend.
+const HUB = {
+  bg: '#050711', surface: '#080D18', raised: '#0C1220',
+  gold: '#E5B84B', goldHi: '#FFD86A', purple: '#8E4DFF', violet: '#C45CFF',
+  cyan: '#19D3D2', green: '#39E879', red: '#E0525E', text: '#F4F2EA', muted: '#989BB0',
+  border: '#1b2540', borderHi: '#2b3a5c',
+};
+const HUB_SERIF = "'Cinzel', 'EB Garamond', Georgia, serif";
+const HUB_SANS = "'Inter', system-ui, -apple-system, sans-serif";
+
+type HubTab = 'overview' | 'decks' | 'collection' | 'achievements';
+const HUB_TABS: HubTab[] = ['overview', 'decks', 'collection', 'achievements'];
+
+function readHubTab(): HubTab {
+  const h = (typeof window !== 'undefined' ? window.location.hash : '').replace('#', '').toLowerCase();
+  return (HUB_TABS as string[]).includes(h) ? (h as HubTab) : 'overview';
+}
+
+function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
+  return v;
+}
+
 function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void }) {
-  const mobile = useIsMobile();
+  const mobile = useIsMobile(920);
   const [prof, setProf] = useState<Profile | null>(null);
   const [ranked, setRanked] = useState<any | null>(null);
-  const [deck, setDeck] = useState<string[]>([]);
+  const [decks, setDecks] = useState<DeckEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState<HubTab>(readHubTab);
+  const [muted, setMuted] = useState<boolean>(() => { try { return localStorage.getItem('ocva.muted') === '1'; } catch { return false; } });
+  const [copied, setCopied] = useState(false);
 
   const reload = useCallback(async () => {
     let p = await getProfileApi(myName);
@@ -1583,109 +1613,953 @@ function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void })
     setProf(p);
   }, [myName]);
 
+  const reloadDecks = useCallback(async () => {
+    try { setDecks(await listDecksApi(myName)); } catch { setDecks([]); }
+  }, [myName]);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
         await reload();
-        try {
-          const r = await RankedAPI.profile(myName).catch(() => null);
-          setRanked(r);
-        } catch { setRanked(null); }
-        try { setDeck(await getDeckApi(myName)); } catch { setDeck([]); }
+        try { setRanked(await RankedAPI.profile(myName).catch(() => null)); } catch { setRanked(null); }
+        await reloadDecks();
       } finally { setLoading(false); }
     })();
-  }, [myName, reload]);
+  }, [myName, reload, reloadDecks]);
+
+  // Persist active tab in the URL hash so it survives refresh and is linkable.
+  useEffect(() => { try { if (readHubTab() !== tab) window.history.replaceState(null, '', `#${tab}`); } catch {} }, [tab]);
+  useEffect(() => {
+    const onHash = () => setTab(readHubTab());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem('ocva.muted', muted ? '1' : '0'); } catch {}
+    document.querySelectorAll('audio').forEach((a) => { (a as HTMLAudioElement).muted = muted; });
+  }, [muted]);
+
+  const activeDeck = decks.find((d) => d.isActive) ?? null;
+  const favoriteCards = activeDeck?.cards ?? [];
 
   const games  = prof ? prof.wins + prof.losses + prof.draws : 0;
   const winPct = games ? Math.round((prof!.wins / games) * 100) : 0;
   const level  = Math.max(1, Math.floor(Math.sqrt((games + 1) * 2.2)));
   const xpForNextLevel = (lvl: number) => Math.round((lvl + 1) * (lvl + 1) / 2.2);
-  const xpCur  = games;
   const xpPrev = xpForNextLevel(level - 1);
   const xpNext = xpForNextLevel(level);
-  const xpPct  = Math.max(0, Math.min(100, Math.round(((xpCur - xpPrev) / Math.max(1, xpNext - xpPrev)) * 100)));
+  const xpPct  = Math.max(0, Math.min(100, Math.round(((games - xpPrev) / Math.max(1, xpNext - xpPrev)) * 100)));
 
-  const achievements = useMemo(() => computeAchievements({ prof, deck, ranked }), [prof, deck, ranked]);
+  const copyAddr = async () => {
+    if (!prof?.walletAddress) return;
+    try { await navigator.clipboard.writeText(prof.walletAddress); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  };
 
   return (
-    <div style={{ fontFamily: PROFILE_FONT, background: PROFILE_TOKENS.bg, minHeight: '100vh', color: '#e9eef7', position: 'relative' }}>
-      {/* Iridescent gold-purple shimmer background. Fixed full-bleed, z=0,
-          pointer-events: none, dimmed via opacity so the page UI on top
-          stays readable. Tint biases R+B high, G mid so the rainbow shader
-          biases toward gold highlights and purple shadows. */}
-      <div style={{
-        position: 'fixed', inset: 0, zIndex: 0,
-        pointerEvents: 'none',
-        opacity: 0.32,
-        mixBlendMode: 'screen',
-      }}>
-        <Iridescence
-          color={[1.0, 0.62, 0.95]}
-          speed={0.6}
-          amplitude={0.08}
-          mouseReact={false}
-        />
-      </div>
+    <div style={{ position: 'fixed', inset: 0, height: '100dvh', display: 'flex', flexDirection: 'column',
+      overflow: mobile ? 'auto' : 'hidden', background: HUB.bg, color: HUB.text, fontFamily: HUB_SANS }}>
+      <style>{`
+        @media (prefers-reduced-motion: reduce) { .hub-anim { transition: none !important; animation: none !important; } }
+        .hub-scroll::-webkit-scrollbar { width: 9px; height: 9px; }
+        .hub-scroll::-webkit-scrollbar-thumb { background: ${HUB.borderHi}; border-radius: 5px; }
+      `}</style>
+      <HubBackdrop />
 
-      <div style={{ position: 'relative', zIndex: 1 }}>
-        <ProfileTopBar onBack={onBack} onEdit={() => setEditing(true)} />
+      <HubTopNav
+        tab={tab} setTab={(t) => setTab(t)} onBack={onBack} onEdit={() => setEditing(true)}
+        walletAddress={prof?.walletAddress ?? null} copied={copied} onCopy={copyAddr}
+        muted={muted} onToggleMute={() => setMuted((m) => !m)}
+      />
 
       {loading ? (
-        <ProfileSkeleton />
+        <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: HUB.muted, position: 'relative', zIndex: 1 }}>Loading profile…</div>
       ) : (
-        <div style={{ maxWidth: 1180, margin: '0 auto', padding: mobile ? '16px 14px 60px' : '24px 28px 80px', display: 'flex', flexDirection: 'column', gap: 22 }}>
-          <ProfileHero
-            name={prof?.name ?? myName}
-            avatarUrl={prof?.avatarUrl ?? null}
-            bio={prof?.bio ?? null}
-            rankLabel={ranked ? formatRankLabel(ranked) : 'Unranked'}
-            rankGlow={ranked ? rankGlow(ranked.visibleRank) : '#7c5cff'}
-            level={level}
-            xpPct={xpPct}
-            xpCur={xpCur - xpPrev}
-            xpRange={xpNext - xpPrev}
-            winPct={winPct}
-            wins={prof?.wins ?? 0}
-            losses={prof?.losses ?? 0}
+        <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
+          gap: 12, padding: mobile ? '12px 12px 32px' : '14px 22px 18px', maxWidth: 1680, width: '100%', margin: '0 auto' }}>
+          <IdentityBar
+            name={prof?.name ?? myName} avatarUrl={prof?.avatarUrl ?? null}
             placement={ranked?.placementMatchesRemaining ?? 0}
+            rankLabel={ranked ? formatRankLabel(ranked) : 'Unranked'}
+            level={level} xpPct={xpPct} xpInto={games - xpPrev} xpRange={xpNext - xpPrev}
+            wins={prof?.wins ?? 0} losses={prof?.losses ?? 0} winPct={winPct} games={games}
+            favoriteDeckName={activeDeck?.name ?? null} favoriteFaction={deriveFavoriteFaction(favoriteCards)}
+            onOpenDecks={() => setTab('decks')}
           />
 
-          <PlayerStats
-            wins={prof?.wins ?? 0}
-            losses={prof?.losses ?? 0}
-            draws={prof?.draws ?? 0}
-            winPct={winPct}
-            currentStreak={0}
-            bestStreak={Math.max(1, Math.round((prof?.wins ?? 0) / 3))}
-            favoriteFaction={deriveFavoriteFaction(deck)}
-          />
-
-          <AchievementGrid achievements={achievements} />
-
-          <FavoriteDeck deck={deck} myName={myName} />
-
-          <SectionShell title="Collection" eyebrow="NFT Showcase" accent={PROFILE_TOKENS.accent}>
-            <SprotoGremlinShowcase walletAddress={prof?.walletAddress ?? null} />
-            <LibrarySection prof={prof} />
-          </SectionShell>
-
-          <SectionShell title="Deck Builder" eyebrow="Forge Your 60-Card Deck" accent={PROFILE_TOKENS.secondary}>
-            <DeckbuilderPanel myName={myName} />
-          </SectionShell>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            {tab === 'overview' && (
+              <OverviewTab prof={prof} ranked={ranked} winPct={winPct} games={games} level={level}
+                xpPct={xpPct} favoriteDeck={activeDeck} favoriteFaction={deriveFavoriteFaction(favoriteCards)}
+                onBuildDeck={() => setTab('decks')} mobile={mobile} />
+            )}
+            {tab === 'decks' && (
+              <DeckWorkspace myName={myName} mobile={mobile} onDecksChanged={reloadDecks} />
+            )}
+            {tab === 'collection' && (
+              <CollectionTab walletAddress={prof?.walletAddress ?? null} mobile={mobile} />
+            )}
+            {tab === 'achievements' && (
+              <AchievementsTab prof={prof} ranked={ranked} deck={favoriteCards} mobile={mobile} />
+            )}
+          </div>
         </div>
       )}
 
       {editing && prof && (
-        <ProfileEditModal
-          prof={prof}
-          onClose={() => setEditing(false)}
-          onSaved={async () => { await reload(); setEditing(false); }}
-        />
+        <ProfileEditModal prof={prof} onClose={() => setEditing(false)}
+          onSaved={async () => { await reload(); setEditing(false); }} />
       )}
+    </div>
+  );
+}
+
+function HubBackdrop() {
+  return (
+    <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', inset: 0, background:
+        `radial-gradient(60% 45% at 50% 0%, rgba(142,77,255,0.10), transparent 70%),
+         radial-gradient(120% 90% at 50% 0%, #0a0d1c 0%, ${HUB.bg} 60%)` }} />
+      <div style={{ position: 'absolute', inset: 0, opacity: 0.4, background:
+        'repeating-linear-gradient(90deg, transparent 0 14%, rgba(229,184,75,0.03) 14% 14.3%, transparent 14.3% 28%)' }} />
+      <div style={{ position: 'absolute', inset: 0, boxShadow: 'inset 0 0 200px 40px rgba(0,0,0,0.7)' }} />
+    </div>
+  );
+}
+
+// ── Top navigation (~60px) ──────────────────────────────────────────────────
+function HubTopNav({ tab, setTab, onBack, onEdit, walletAddress, copied, onCopy, muted, onToggleMute }: {
+  tab: HubTab; setTab: (t: HubTab) => void; onBack: () => void; onEdit: () => void;
+  walletAddress: string | null; copied: boolean; onCopy: () => void; muted: boolean; onToggleMute: () => void;
+}) {
+  const connected = !!walletAddress;
+  const isEvm = !!walletAddress?.startsWith('0x');
+  const dot = connected ? HUB.cyan : HUB.red;
+  const net = connected ? (isEvm ? 'Robinhood Chain' : 'Solana') : 'Disconnected';
+  return (
+    <div style={{ position: 'relative', zIndex: 5, height: 60, flex: '0 0 60px', display: 'flex', alignItems: 'center',
+      gap: 14, padding: '0 18px', background: 'rgba(6,8,18,0.75)', backdropFilter: 'blur(10px)', borderBottom: `1px solid ${HUB.border}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+        <HubEmblem size={28} />
+        <div style={{ lineHeight: 1 }}>
+          <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 10, letterSpacing: '0.2em', color: HUB.muted }}>ON-CHAIN</div>
+          <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 13, letterSpacing: '0.1em', color: HUB.goldHi }}>VIRTUAL ARENA</div>
+        </div>
+        <button onClick={onBack} style={{ marginLeft: 8, background: 'none', border: 'none', color: HUB.muted, cursor: 'pointer', fontWeight: 700, letterSpacing: '0.08em', fontSize: 12 }}>← LOBBY</button>
+      </div>
+
+      <nav style={{ display: 'flex', alignItems: 'center', gap: 4 }} aria-label="Profile sections">
+        {HUB_TABS.map((t) => {
+          const active = tab === t;
+          return (
+            <button key={t} onClick={() => setTab(t)} aria-current={active ? 'page' : undefined}
+              className="hub-anim"
+              style={{ position: 'relative', background: 'none', border: 'none', cursor: 'pointer',
+                padding: '18px 14px', fontFamily: HUB_SANS, fontWeight: 800, fontSize: 12.5, letterSpacing: '0.1em',
+                color: active ? HUB.text : HUB.muted, transition: 'color .18s ease', textTransform: 'uppercase' }}>
+              {t}
+              {active && <span aria-hidden style={{ position: 'absolute', left: 10, right: 10, bottom: 10, height: 2, borderRadius: 2,
+                background: `linear-gradient(90deg, ${HUB.gold}, ${HUB.violet})`, boxShadow: `0 0 12px ${HUB.violet}aa` }} />}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, justifyContent: 'flex-end', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 11px', borderRadius: 999, background: HUB.raised, border: `1px solid ${HUB.border}` }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: dot, boxShadow: `0 0 8px ${dot}` }} />
+          <span style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>{net}</span>
+        </div>
+        {walletAddress && (
+          <button onClick={onCopy} title="Copy wallet address" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 11px',
+            borderRadius: 999, background: HUB.raised, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: 'pointer', fontFamily: F.mono, fontSize: 12 }}>
+            {shortAddr(walletAddress)} <span style={{ color: copied ? HUB.green : HUB.muted }}>{copied ? '✓' : '⧉'}</span>
+          </button>
+        )}
+        <button onClick={onToggleMute} aria-label={muted ? 'Unmute' : 'Mute'} style={{ width: 34, height: 34, display: 'grid', placeItems: 'center',
+          borderRadius: 9, background: HUB.raised, border: `1px solid ${HUB.gold}44`, color: HUB.goldHi, cursor: 'pointer', fontSize: 14 }}>{muted ? '🔇' : '🔊'}</button>
+        <button onClick={onEdit} style={{ padding: '8px 14px', borderRadius: 9, background: 'transparent', border: `1px solid ${HUB.gold}`,
+          color: HUB.goldHi, cursor: 'pointer', fontWeight: 800, letterSpacing: '0.06em', fontSize: 11.5 }}>EDIT PROFILE</button>
       </div>
     </div>
   );
+}
+
+function HubEmblem({ size = 28 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" aria-hidden>
+      <defs><linearGradient id="hub-emb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor={HUB.goldHi} /><stop offset="1" stopColor="#b98f34" /></linearGradient></defs>
+      <path d="M50 6 L86 28 V72 L50 94 L14 72 V28 Z" stroke="url(#hub-emb)" strokeWidth="5" />
+      <path d="M50 30 L66 42 L50 54 L34 42 Z" fill="url(#hub-emb)" />
+      <path d="M50 56 L66 68 L50 80 L34 68 Z" fill={HUB.purple} opacity="0.85" />
+    </svg>
+  );
+}
+
+// ── Identity bar (~140px) ───────────────────────────────────────────────────
+function IdentityBar(props: {
+  name: string; avatarUrl: string | null; placement: number; rankLabel: string;
+  level: number; xpPct: number; xpInto: number; xpRange: number;
+  wins: number; losses: number; winPct: number; games: number;
+  favoriteDeckName: string | null; favoriteFaction: { name: string; color: string } | null; onOpenDecks: () => void;
+}) {
+  const { name, avatarUrl, placement, level, xpPct, xpInto, xpRange, wins, losses, winPct, games, favoriteDeckName, favoriteFaction, onOpenDecks } = props;
+  const stats: Array<{ label: string; value: string; color?: string }> = [
+    { label: 'WINS', value: String(wins), color: HUB.green },
+    { label: 'LOSSES', value: String(losses), color: HUB.red },
+    { label: 'WIN RATE', value: `${winPct}%`, color: HUB.violet },
+    { label: 'GAMES', value: String(games) },
+  ];
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '14px 18px', borderRadius: 14,
+      background: `linear-gradient(180deg, ${HUB.surface}, ${HUB.raised})`, border: `1px solid ${HUB.gold}33`,
+      minHeight: 120, flexWrap: 'wrap' }}>
+      <div style={{ position: 'relative', width: 84, height: 84, borderRadius: '50%', flex: 'none',
+        background: `conic-gradient(from 0deg, ${HUB.gold}, ${HUB.violet}, ${HUB.gold})`, padding: 3 }}>
+        <div style={{ width: '100%', height: '100%', borderRadius: '50%', overflow: 'hidden', background: HUB.bg, display: 'grid', placeItems: 'center' }}>
+          {avatarUrl ? <img src={avatarUrl} alt={`${name} avatar`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            : <span style={{ fontSize: 30, fontWeight: 800, color: HUB.violet }}>{name.slice(0, 1).toUpperCase()}</span>}
+        </div>
+      </div>
+
+      <div style={{ minWidth: 220, flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 26, color: HUB.text }}>{name}</span>
+          <span style={{ padding: '4px 10px', borderRadius: 999, background: `${HUB.gold}1c`, border: `1px solid ${HUB.gold}66`,
+            color: HUB.goldHi, fontSize: 11, fontWeight: 700, letterSpacing: '0.05em' }}>
+            {placement > 0 ? `PLACEMENT · ${placement} LEFT` : props.rankLabel.toUpperCase()}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+          <span style={{ fontSize: 12, fontWeight: 800, color: HUB.goldHi, letterSpacing: '0.06em' }}>LEVEL {level}</span>
+          <div style={{ flex: 1, maxWidth: 260, height: 6, borderRadius: 999, background: HUB.raised, border: `1px solid ${HUB.border}`, overflow: 'hidden' }}>
+            <div className="hub-anim" style={{ width: `${xpPct}%`, height: '100%', background: `linear-gradient(90deg, ${HUB.gold}, ${HUB.violet})`, transition: 'width .3s ease' }} />
+          </div>
+          <span style={{ fontSize: 11, color: HUB.muted }}>{xpInto} / {xpRange} XP</span>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {stats.map((s) => (
+          <div key={s.label} style={{ minWidth: 84, textAlign: 'center', padding: '10px 14px', borderRadius: 12,
+            background: HUB.raised, border: `1px solid ${HUB.border}` }}>
+            <div style={{ fontSize: 24, fontWeight: 800, color: s.color ?? HUB.text, lineHeight: 1 }}>{s.value}</div>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: HUB.muted, marginTop: 5 }}>{s.label}</div>
+          </div>
+        ))}
+        <button onClick={onOpenDecks} title="Open deck builder" style={{ minWidth: 150, textAlign: 'left', padding: '10px 14px', borderRadius: 12,
+          background: HUB.raised, border: `1px solid ${favoriteDeckName ? HUB.gold + '55' : HUB.border}`, cursor: 'pointer', color: HUB.text,
+          display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 20 }} aria-hidden>{favoriteDeckName ? '⭐' : '🂠'}</span>
+          <span>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: HUB.muted }}>{favoriteDeckName ? 'FAVORITE DECK' : 'NO FAVORITE DECK'}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: favoriteDeckName ? HUB.text : HUB.muted, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {favoriteDeckName ?? 'Build one →'}{favoriteFaction && favoriteDeckName ? ` · ${favoriteFaction.name}` : ''}
+            </div>
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Overview tab ────────────────────────────────────────────────────────────
+function OverviewTab({ prof, ranked, winPct, games, favoriteDeck, favoriteFaction, onBuildDeck, mobile }: {
+  prof: Profile | null; ranked: any | null; winPct: number; games: number; level: number; xpPct: number;
+  favoriteDeck: DeckEntry | null; favoriteFaction: { name: string; color: string } | null; onBuildDeck: () => void; mobile: boolean;
+}) {
+  const placementLeft = ranked?.placementMatchesRemaining ?? 0;
+  const placementDone = Math.max(0, 10 - placementLeft);
+  const career = [
+    { label: 'Wins', value: prof?.wins ?? 0 }, { label: 'Losses', value: prof?.losses ?? 0 },
+    { label: 'Draws', value: prof?.draws ?? 0 }, { label: 'Games', value: games },
+    { label: 'Win rate', value: `${winPct}%` },
+  ];
+  return (
+    <div className="hub-scroll" style={{ height: '100%', overflow: 'auto', display: 'grid', gap: 14,
+      gridTemplateColumns: mobile ? '1fr' : '1.4fr 1fr', alignContent: 'start' }}>
+      <HubCard title="CAREER STATISTICS">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px,1fr))', gap: 10 }}>
+          {career.map((c) => (
+            <div key={c.label} style={{ padding: '12px 10px', borderRadius: 10, background: HUB.surface, border: `1px solid ${HUB.border}`, textAlign: 'center' }}>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>{c.value}</div>
+              <div style={{ fontSize: 10.5, color: HUB.muted, letterSpacing: '0.06em', marginTop: 4 }}>{c.label}</div>
+            </div>
+          ))}
+        </div>
+      </HubCard>
+
+      <HubCard title="PLACEMENT PROGRESS">
+        {placementLeft > 0 ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontSize: 28, fontWeight: 800, color: HUB.goldHi }}>{placementDone}</span>
+              <span style={{ color: HUB.muted }}>/ 10 placement matches</span>
+            </div>
+            <div style={{ height: 8, borderRadius: 999, background: HUB.surface, border: `1px solid ${HUB.border}`, overflow: 'hidden', marginTop: 10 }}>
+              <div style={{ width: `${(placementDone / 10) * 100}%`, height: '100%', background: `linear-gradient(90deg, ${HUB.gold}, ${HUB.violet})` }} />
+            </div>
+            <div style={{ fontSize: 12, color: HUB.muted, marginTop: 8 }}>Finish {placementLeft} more to earn your rank.</div>
+          </>
+        ) : (
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: HUB.goldHi }}>{ranked ? formatRankLabel(ranked) : 'Unranked'}</div>
+            <div style={{ fontSize: 12, color: HUB.muted, marginTop: 6 }}>{ranked ? 'Placement complete.' : 'Play ranked matches to earn a rank.'}</div>
+          </div>
+        )}
+      </HubCard>
+
+      <HubCard title="FAVORITE DECK">
+        {favoriteDeck ? (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 18 }} aria-hidden>⭐</span>
+              <span style={{ fontFamily: HUB_SERIF, fontSize: 18, fontWeight: 700 }}>{favoriteDeck.name}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+              <Pill>{favoriteDeck.cards.length} cards</Pill>
+              {favoriteFaction && <Pill color={favoriteFaction.color}>{favoriteFaction.name}</Pill>}
+              <Pill color={validateDeck(favoriteDeck.cards).ok ? HUB.green : HUB.red}>{validateDeck(favoriteDeck.cards).ok ? 'Legal' : 'Illegal'}</Pill>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div style={{ color: HUB.muted, fontSize: 13 }}>No favorite deck yet.</div>
+            <button onClick={onBuildDeck} style={hubGoldBtn(false)}>BUILD A DECK</button>
+          </div>
+        )}
+      </HubCard>
+
+      <HubCard title="RECENT MATCHES">
+        <div style={{ color: HUB.muted, fontSize: 13 }}>Match history isn’t tracked yet — your win/loss totals above reflect all games played.</div>
+      </HubCard>
+    </div>
+  );
+}
+
+function HubCard({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
+  return (
+    <div style={{ padding: 16, borderRadius: 14, background: HUB.raised, border: `1px solid ${HUB.border}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{ fontFamily: HUB_SANS, fontWeight: 800, fontSize: 12, letterSpacing: '0.12em', color: HUB.muted }}>{title}</div>
+        {right}
+      </div>
+      {children}
+    </div>
+  );
+}
+function Pill({ children, color }: { children: React.ReactNode; color?: string }) {
+  return <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700,
+    background: `${color ?? HUB.violet}1c`, border: `1px solid ${color ?? HUB.violet}66`, color: color ?? HUB.violet }}>{children}</span>;
+}
+function hubGoldBtn(disabled: boolean): React.CSSProperties {
+  return { marginTop: 12, padding: '10px 16px', borderRadius: 10, cursor: disabled ? 'not-allowed' : 'pointer',
+    fontFamily: HUB_SANS, fontWeight: 800, letterSpacing: '0.06em', fontSize: 12, color: disabled ? '#efe6c9aa' : '#20170a',
+    background: disabled ? 'linear-gradient(180deg,#5a4c28,#3a3018)' : `linear-gradient(180deg,${HUB.goldHi},${HUB.gold} 55%,#b98f34)`,
+    border: `1px solid ${disabled ? '#6a5a30' : '#8a6d24'}`, opacity: disabled ? 0.85 : 1 };
+}
+
+// ── Collection tab ──────────────────────────────────────────────────────────
+function CollectionTab({ walletAddress, mobile }: { walletAddress: string | null; mobile: boolean }) {
+  const [chain, setChain] = useState<Color | 'all'>('all');
+  const [type, setType] = useState<'all' | CardType>('all');
+  const cards = useMemo(() => BUILDABLE_CARDS.filter((c) =>
+    (chain === 'all' || c.color === chain) && (type === 'all' || c.type === type)), [chain, type]);
+  const connected = !!walletAddress;
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ padding: '10px 14px', borderRadius: 12, background: HUB.raised, border: `1px solid ${HUB.border}`,
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ width: 9, height: 9, borderRadius: '50%', background: connected ? HUB.cyan : HUB.muted }} />
+        <span style={{ fontSize: 13, color: HUB.text }}>
+          {connected
+            ? `Card archive · every card in the set is available to build with. On-chain booster mints land in your wallet ${shortAddr(walletAddress!)}.`
+            : 'Wallet not linked. You can still browse and build with the full card archive; link a wallet from the home screen to track on-chain booster mints.'}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <ChainChips value={chain} onChange={setChain} />
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <TypeChips value={type} onChange={setType} />
+        <span style={{ marginLeft: 'auto', alignSelf: 'center', fontSize: 12, color: HUB.muted }}>{cards.length} cards</span>
+      </div>
+
+      <div className="hub-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'grid',
+        gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 150 : 190}px, 1fr))`, gap: 12, alignContent: 'start', paddingBottom: 8 }}>
+        {cards.map((def) => (
+          <HubCardTile key={def.id} def={def} inDeck={0} cap={isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC}
+            deckFull={false} onAdd={undefined} showAdd={false} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Achievements tab ────────────────────────────────────────────────────────
+function AchievementsTab({ prof, ranked, deck, mobile }: { prof: Profile | null; ranked: any | null; deck: string[]; mobile: boolean }) {
+  const achievements = useMemo(() => computeAchievements({ prof, deck, ranked }), [prof, deck, ranked]);
+  const earned = achievements.filter((a) => a.earned).length;
+  return (
+    <div className="hub-scroll" style={{ height: '100%', overflow: 'auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <div style={{ fontFamily: HUB_SANS, fontWeight: 800, letterSpacing: '0.1em', fontSize: 13, color: HUB.muted }}>ACHIEVEMENTS</div>
+        <Pill color={HUB.gold}>{earned} / {achievements.length} unlocked</Pill>
+      </div>
+      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 150 : 210}px, 1fr))` }}>
+        {achievements.map((a) => (
+          <div key={a.id} style={{ padding: 14, borderRadius: 12, display: 'flex', gap: 12, alignItems: 'center',
+            background: a.earned ? `radial-gradient(circle at 0% 0%, ${HUB.gold}22, ${HUB.raised} 70%)` : HUB.raised,
+            border: `1px solid ${a.earned ? HUB.gold + '66' : HUB.border}`, opacity: a.earned ? 1 : 0.7 }}>
+            <div aria-hidden style={{ fontSize: 26, filter: a.earned ? `drop-shadow(0 0 8px ${HUB.gold}aa)` : 'grayscale(1)' }}>{a.earned ? a.icon : '🔒'}</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontWeight: 800, fontSize: 13, color: a.earned ? HUB.text : HUB.muted }}>{a.title}</span>
+                <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: '0.08em', color: a.earned ? HUB.green : HUB.muted }}>{a.earned ? 'UNLOCKED' : 'LOCKED'}</span>
+              </div>
+              <div style={{ fontSize: 11.5, color: HUB.muted, marginTop: 3 }}>{a.description}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Chain / type filter chips (chain accent only inside the badge) ──────────
+function ChainChips({ value, onChange }: { value: Color | 'all'; onChange: (c: Color | 'all') => void }) {
+  return (
+    <>
+      <span style={{ alignSelf: 'center', fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: HUB.muted, marginRight: 4 }}>CHAIN</span>
+      <HubChip label="ALL" selected={value === 'all'} onClick={() => onChange('all')} />
+      {COLORS.map((c) => (
+        <HubChip key={c} label={COLOR_META[c].name.toUpperCase()} selected={value === c} onClick={() => onChange(c)} accent={COLOR_META[c].hex} />
+      ))}
+    </>
+  );
+}
+function TypeChips({ value, onChange }: { value: 'all' | CardType; onChange: (t: 'all' | CardType) => void }) {
+  const types: Array<'all' | CardType> = ['all', 'node', 'meme', 'machine', 'aura', 'move'];
+  return (
+    <>
+      <span style={{ alignSelf: 'center', fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: HUB.muted, marginRight: 4 }}>TYPE</span>
+      {types.map((t) => <HubChip key={t} label={t.toUpperCase()} selected={value === t} onClick={() => onChange(t)} />)}
+    </>
+  );
+}
+function HubChip({ label, selected, onClick, accent }: { label: string; selected: boolean; onClick: () => void; accent?: string }) {
+  const col = accent ?? HUB.violet;
+  return (
+    <button onClick={onClick} aria-pressed={selected} className="hub-anim" style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 9, cursor: 'pointer',
+      fontSize: 11.5, fontWeight: 700, letterSpacing: '0.04em',
+      background: selected ? `${col}22` : HUB.surface, color: selected ? (accent ?? HUB.text) : HUB.muted,
+      border: `1px solid ${selected ? col : HUB.border}`, transition: 'all .15s ease',
+    }}>
+      {accent && <span style={{ width: 8, height: 8, borderRadius: 2, background: accent }} />}
+      {label}
+    </button>
+  );
+}
+
+// ── Card tile (memoized) ────────────────────────────────────────────────────
+const HubCardTile = React.memo(function HubCardTile({ def, inDeck, cap, deckFull, onAdd, showAdd = true }: {
+  def: CardDef; inDeck: number; cap: number; deckFull: boolean; onAdd?: () => void; showAdd?: boolean;
+}) {
+  const meta = COLOR_META[def.color];
+  const atCap = inDeck >= cap;
+  const cost = def.cost ? Object.values(def.cost).reduce((s, n) => s + (n ?? 0), 0) : null;
+  const capLabel = cap === Infinity ? '∞' : String(cap);
+  const disabled = !onAdd || atCap || deckFull;
+  return (
+    <CardHover defId={def.id}>
+      <div className="hub-anim" tabIndex={showAdd ? 0 : -1}
+        onKeyDown={(e) => { if (showAdd && onAdd && !disabled && (e.key === 'Enter' || e.key === '+')) { e.preventDefault(); onAdd(); } }}
+        onDoubleClick={() => { if (showAdd && onAdd && !disabled) onAdd(); }}
+        style={{ position: 'relative', display: 'flex', flexDirection: 'column', borderRadius: 12, overflow: 'hidden',
+          background: HUB.surface, border: `1px solid ${inDeck > 0 ? meta.hex + '99' : HUB.border}`,
+          boxShadow: inDeck > 0 ? `0 0 0 1px ${meta.hex}55 inset` : 'none', transition: 'transform .15s ease, box-shadow .2s ease', outline: 'none' }}
+        onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 12px 26px -12px ${HUB.violet}, 0 0 0 1px ${HUB.gold}66 inset`; }}
+        onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = inDeck > 0 ? `0 0 0 1px ${meta.hex}55 inset` : 'none'; }}
+        onFocus={(e) => { e.currentTarget.style.boxShadow = `0 0 0 2px ${HUB.gold}, 0 0 0 4px ${HUB.violet}55`; }}
+        onBlur={(e) => { e.currentTarget.style.boxShadow = inDeck > 0 ? `0 0 0 1px ${meta.hex}55 inset` : 'none'; }}>
+        {/* real TCG proportion art */}
+        <div style={{ position: 'relative', aspectRatio: '3 / 4', background: `linear-gradient(160deg, ${meta.hex}, #0a1020)`, display: 'grid', placeItems: 'center' }}>
+          {def.image ? <img src={def.image} alt={def.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            : <span style={{ fontSize: 34, fontWeight: 900, color: meta.ink, opacity: 0.85 }}>{(meta as any).glyph ?? meta.name[0]}</span>}
+          {cost != null && <span style={{ position: 'absolute', top: 6, left: 6, minWidth: 22, height: 22, padding: '0 6px', borderRadius: 8,
+            background: 'rgba(0,0,0,0.72)', color: '#fff', fontSize: 12, fontWeight: 900, display: 'grid', placeItems: 'center' }}>{cost}</span>}
+          <span style={{ position: 'absolute', top: 6, right: 6, padding: '2px 7px', borderRadius: 999, fontSize: 9, fontWeight: 800,
+            letterSpacing: '0.06em', background: 'rgba(0,0,0,0.7)', color: '#fff', textTransform: 'uppercase' }}>{def.type}</span>
+          {def.type === 'meme' && def.power != null && (
+            <span style={{ position: 'absolute', bottom: 6, right: 6, padding: '2px 7px', borderRadius: 6, background: 'rgba(0,0,0,0.78)', color: '#fff', fontSize: 12, fontWeight: 900 }}>{def.power}/{def.toughness}</span>
+          )}
+          {inDeck > 0 && <span style={{ position: 'absolute', bottom: 6, left: 6, padding: '2px 8px', borderRadius: 999, background: meta.hex, color: meta.ink, fontSize: 11, fontWeight: 900 }}>×{inDeck}</span>}
+        </div>
+        <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: HUB.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{def.name}</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, color: HUB.muted }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: meta.hex }} />{meta.name}
+            </span>
+            <span style={{ fontSize: 10.5, color: atCap ? HUB.gold : HUB.muted }}>{inDeck}/{capLabel}</span>
+          </div>
+          {showAdd && (
+            <button onClick={onAdd} disabled={disabled} aria-label={`Add ${def.name} to deck`} className="hub-anim"
+              style={{ marginTop: 2, padding: '7px 0', borderRadius: 8, cursor: disabled ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 13,
+                color: disabled ? HUB.muted : '#fff', background: disabled ? HUB.raised : `linear-gradient(180deg, ${HUB.purple}, ${HUB.violet})`,
+                border: `1px solid ${disabled ? HUB.border : HUB.violet}` }}>
+              {deckFull ? 'DECK FULL' : atCap ? 'AT LIMIT' : '+ ADD'}
+            </button>
+          )}
+        </div>
+      </div>
+    </CardHover>
+  );
+});
+
+// ── Deck workspace (library + persistent current-deck panel) ────────────────
+function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mobile: boolean; onDecksChanged: () => void }) {
+  const [decks, setDecks] = useState<DeckEntry[]>([]);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [deckName, setDeckName] = useState('Untitled Deck');
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [savedSnapshot, setSavedSnapshot] = useState<string>('[]');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState(false); // mobile deck drawer
+
+  // Library controls.
+  const [rawSearch, setRawSearch] = useState('');
+  const search = useDebounced(rawSearch, 180);
+  const [chain, setChain] = useState<Color | 'all'>('all');
+  const [type, setType] = useState<'all' | CardType>('all');
+  const [sort, setSort] = useState<'name' | 'cost' | 'chain' | 'type'>('name');
+  const [view, setView] = useState<'grid' | 'list'>('grid');
+  const [ownFilter, setOwnFilter] = useState<'all' | 'inDeck' | 'notInDeck'>('all');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const liveRef = useRef<HTMLDivElement>(null);
+
+  const countsFrom = (cards: string[]) => { const n: Record<string, number> = {}; for (const id of cards) n[id] = (n[id] ?? 0) + 1; return n; };
+
+  const loadInto = useCallback((d: DeckEntry | null) => {
+    if (d) { setEditingId(d.id); setDeckName(d.name); setCounts(countsFrom(d.cards)); setSavedSnapshot(JSON.stringify([...d.cards].sort())); }
+    else { setEditingId(null); setDeckName('Untitled Deck'); setCounts({}); setSavedSnapshot('[]'); }
+    setStatus(null);
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const list = await listDecksApi(myName);
+        setDecks(list);
+        loadInto(list.find((d) => d.isActive) ?? list[0] ?? null);
+      } catch {
+        try { const cards = await getDeckApi(myName); setCounts(countsFrom(cards)); setSavedSnapshot(JSON.stringify([...cards].sort())); } catch {}
+      } finally { setLoading(false); }
+    })();
+  }, [myName, loadInto]);
+
+  const deckList = useMemo(() => { const out: string[] = []; for (const [id, n] of Object.entries(counts)) for (let i = 0; i < n; i++) out.push(id); return out; }, [counts]);
+  const total = deckList.length;
+  const v60 = useMemo(() => validateDeck(deckList), [deckList]);
+  const copyIssues = useMemo(() => validateDeck(deckList, { requireSize: false }).issues, [deckList]);
+  const legality: 'EMPTY' | 'INCOMPLETE' | 'INVALID' | 'READY' =
+    total === 0 ? 'EMPTY' : total < DECK_SIZE ? 'INCOMPLETE' : v60.ok ? 'READY' : 'INVALID';
+  const dirty = JSON.stringify([...deckList].sort()) !== savedSnapshot;
+
+  // Announce count + legality changes for screen readers.
+  useEffect(() => { if (liveRef.current) liveRef.current.textContent = `${total} of ${DECK_SIZE} cards. Deck ${legality.toLowerCase()}.`; }, [total, legality]);
+
+  // Warn before leaving with unsaved changes.
+  useEffect(() => {
+    if (!dirty) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [dirty]);
+
+  function bump(id: string, delta: number) {
+    setCounts((prev) => {
+      const cur = prev[id] ?? 0;
+      let next = cur + delta;
+      if (next < 0) next = 0;
+      if (!isBasicNode(id) && next > MAX_COPIES_NONBASIC) next = MAX_COPIES_NONBASIC;
+      if (delta > 0 && total >= DECK_SIZE) return prev;
+      const out = { ...prev };
+      if (next === 0) delete out[id]; else out[id] = next;
+      return out;
+    });
+  }
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let list = BUILDABLE_CARDS.filter((c) => {
+      if (chain !== 'all' && c.color !== chain) return false;
+      if (type !== 'all' && c.type !== type) return false;
+      const inDeck = (counts[c.id] ?? 0) > 0;
+      if (ownFilter === 'inDeck' && !inDeck) return false;
+      if (ownFilter === 'notInDeck' && inDeck) return false;
+      if (q) {
+        const hay = `${c.name} ${c.text ?? ''} ${c.type} ${COLOR_META[c.color].name} ${c.effect ?? ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const costOf = (c: CardDef) => c.cost ? Object.values(c.cost).reduce((s, n) => s + (n ?? 0), 0) : 0;
+    list = [...list].sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name)
+      : sort === 'cost' ? costOf(a) - costOf(b) || a.name.localeCompare(b.name)
+      : sort === 'chain' ? a.color.localeCompare(b.color) || a.name.localeCompare(b.name)
+      : a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
+    return list;
+  }, [search, chain, type, sort, ownFilter, counts]);
+
+  async function refreshDecks() { try { const l = await listDecksApi(myName); setDecks(l); } catch {} onDecksChanged(); }
+
+  async function save() {
+    if (saving || !deckName.trim() || total !== DECK_SIZE || !v60.ok) return;
+    setSaving(true); setStatus(null);
+    try {
+      if (editingId != null) {
+        const up = await updateDeckApi(myName, editingId, { cards: deckList, name: deckName.trim() });
+        setSavedSnapshot(JSON.stringify([...up.cards].sort()));
+        setDecks((prev) => prev.map((d) => d.id === editingId ? { ...d, cards: up.cards, name: up.name } : d));
+      } else {
+        const created = await createDeckApi(myName, deckName.trim(), deckList);
+        setEditingId(created.id); setSavedSnapshot(JSON.stringify([...created.cards].sort()));
+        setDecks((prev) => [...prev, created]);
+      }
+      try { await saveDeckApi(myName, deckList); } catch {}
+      setStatus({ msg: 'Deck saved.', ok: true });
+      onDecksChanged();
+    } catch (e: any) { setStatus({ msg: String(e?.message ?? e), ok: false }); }
+    finally { setSaving(false); }
+  }
+
+  async function newDeck() {
+    if (dirty && !window.confirm('Discard unsaved changes to start a new deck?')) return;
+    loadInto(null);
+  }
+  function clearDeck() { if (total === 0) return; if (window.confirm('Remove all cards from this deck?')) setCounts({}); }
+
+  async function selectDeck(d: DeckEntry) {
+    if (d.id === editingId) { setShowLibrary(false); return; }
+    if (dirty && !window.confirm('Discard unsaved changes and load this deck?')) return;
+    loadInto(d); setShowLibrary(false);
+  }
+  async function setFavorite(d: DeckEntry) {
+    try { await activateDeckApi(myName, d.id); setDecks((prev) => prev.map((x) => ({ ...x, isActive: x.id === d.id }))); onDecksChanged(); } catch {}
+  }
+  async function duplicate(d: DeckEntry) {
+    try { const c = await createDeckApi(myName, `${d.name} copy`, d.cards); setDecks((prev) => [...prev, c]); onDecksChanged(); } catch {}
+  }
+  async function removeDeck(d: DeckEntry) {
+    if (!window.confirm(`Delete “${d.name}”? This cannot be undone.`)) return;
+    try {
+      await deleteDeckApi(myName, d.id);
+      const remaining = decks.filter((x) => x.id !== d.id);
+      setDecks(remaining);
+      if (editingId === d.id) loadInto(remaining.find((x) => x.isActive) ?? remaining[0] ?? null);
+      onDecksChanged();
+    } catch {}
+  }
+
+  const deckFull = total >= DECK_SIZE;
+
+  const panel = (
+    <CurrentDeckPanel
+      deckName={deckName} setDeckName={setDeckName} total={total} legality={legality}
+      counts={counts} bump={bump} copyIssues={copyIssues} v60={v60} dirty={dirty}
+      canSave={!!deckName.trim() && total === DECK_SIZE && v60.ok && !saving}
+      saving={saving} status={status} onSave={save} onClear={clearDeck} onNew={newDeck}
+      onOpenLibrary={() => setShowLibrary(true)} savedCount={decks.length} editingId={editingId}
+    />
+  );
+
+  return (
+    <div style={{ height: '100%', display: 'flex', gap: 14, minHeight: 0, flexDirection: mobile ? 'column' : 'row' }}>
+      <div aria-live="polite" ref={liveRef} style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }} />
+
+      {/* Card library */}
+      <div style={{ flex: mobile ? '1 1 auto' : '2 1 0', minWidth: 0, display: 'flex', flexDirection: 'column',
+        borderRadius: 14, background: HUB.raised, border: `1px solid ${HUB.border}`, minHeight: 0 }}>
+        <div style={{ padding: 14, borderBottom: `1px solid ${HUB.border}` }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
+            <span style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 17, color: HUB.goldHi }}>◈ CARD LIBRARY</span>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: HUB.muted }}>BUILD A 60-CARD DECK</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
+              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: HUB.muted }} aria-hidden>🔍</span>
+              <input value={rawSearch} onChange={(e) => setRawSearch(e.target.value)} placeholder="Search cards…" aria-label="Search cards"
+                style={{ width: '100%', padding: '9px 10px 9px 32px', borderRadius: 9, background: HUB.surface, border: `1px solid ${HUB.border}`, color: HUB.text, fontSize: 13, outline: 'none' }} />
+            </div>
+            <select value={sort} onChange={(e) => setSort(e.target.value as any)} aria-label="Sort cards"
+              style={{ padding: '9px 10px', borderRadius: 9, background: HUB.surface, border: `1px solid ${HUB.border}`, color: HUB.text, fontSize: 12.5 }}>
+              <option value="name">SORT: NAME</option><option value="cost">SORT: COST</option>
+              <option value="chain">SORT: CHAIN</option><option value="type">SORT: TYPE</option>
+            </select>
+            <div style={{ display: 'flex', borderRadius: 9, overflow: 'hidden', border: `1px solid ${HUB.border}` }}>
+              <button onClick={() => setView('grid')} aria-label="Grid view" aria-pressed={view === 'grid'} style={{ padding: '8px 11px', background: view === 'grid' ? HUB.purple : HUB.surface, color: '#fff', border: 'none', cursor: 'pointer' }}>▦</button>
+              <button onClick={() => setView('list')} aria-label="List view" aria-pressed={view === 'list'} style={{ padding: '8px 11px', background: view === 'list' ? HUB.purple : HUB.surface, color: '#fff', border: 'none', cursor: 'pointer' }}>☰</button>
+            </div>
+            <button onClick={() => setShowAdvanced((v) => !v)} aria-label="Advanced filters" aria-pressed={showAdvanced}
+              style={{ padding: '8px 11px', borderRadius: 9, background: showAdvanced ? HUB.purple : HUB.surface, color: showAdvanced ? '#fff' : HUB.muted, border: `1px solid ${HUB.border}`, cursor: 'pointer' }}>⛭</button>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}><ChainChips value={chain} onChange={setChain} /></div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
+            <TypeChips value={type} onChange={setType} />
+            <button onClick={() => { setChain('all'); setType('all'); setRawSearch(''); setOwnFilter('all'); setSort('name'); }}
+              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: HUB.muted, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, letterSpacing: '0.06em' }}>RESET ↺</button>
+          </div>
+          {showAdvanced && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: HUB.muted, marginRight: 4 }}>SHOW</span>
+              {(['all', 'inDeck', 'notInDeck'] as const).map((o) => (
+                <HubChip key={o} label={o === 'all' ? 'ALL' : o === 'inDeck' ? 'IN DECK' : 'NOT IN DECK'} selected={ownFilter === o} onClick={() => setOwnFilter(o)} />
+              ))}
+            </div>
+          )}
+          <div style={{ marginTop: 8, fontSize: 11.5, color: HUB.muted }}>{visible.length} cards</div>
+        </div>
+
+        {loading ? (
+          <div style={{ padding: 24, color: HUB.muted }}>Loading library…</div>
+        ) : (
+          <div className="hub-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 14 }}>
+            {visible.length === 0 ? (
+              <div style={{ color: HUB.muted, padding: 20, textAlign: 'center' }}>No cards match your filters. <button onClick={() => { setChain('all'); setType('all'); setRawSearch(''); setOwnFilter('all'); }} style={{ background: 'none', border: 'none', color: HUB.violet, cursor: 'pointer', textDecoration: 'underline' }}>Reset filters</button></div>
+            ) : view === 'grid' ? (
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 150 : 176}px, 1fr))`, gap: 12 }}>
+                {visible.map((def) => (
+                  <HubCardTile key={def.id} def={def} inDeck={counts[def.id] ?? 0}
+                    cap={isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC} deckFull={deckFull} onAdd={() => bump(def.id, +1)} />
+                ))}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {visible.map((def) => (
+                  <LibraryRow key={def.id} def={def} inDeck={counts[def.id] ?? 0}
+                    cap={isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC} deckFull={deckFull} onAdd={() => bump(def.id, +1)} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Current-deck panel (desktop persistent; mobile drawer) */}
+      {!mobile ? <div style={{ flex: '1 1 0', minWidth: 320, maxWidth: 440, display: 'flex', minHeight: 0 }}>{panel}</div> : (
+        <>
+          <button onClick={() => setMobilePanel(true)} style={{ position: 'fixed', left: 12, right: 12, bottom: 12, zIndex: 50, padding: '14px', borderRadius: 12,
+            background: `linear-gradient(180deg, ${HUB.purple}, ${HUB.violet})`, color: '#fff', border: 'none', fontWeight: 800, letterSpacing: '0.06em',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>CURRENT DECK · {total}/{DECK_SIZE} · {legality}</button>
+          {mobilePanel && (
+            <div onClick={() => setMobilePanel(false)} style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(3,4,10,0.7)', display: 'flex', alignItems: 'flex-end' }}>
+              <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxHeight: '85dvh', display: 'flex' }}>{panel}</div>
+            </div>
+          )}
+        </>
+      )}
+
+      {showLibrary && (
+        <SavedDeckLibrary decks={decks} editingId={editingId} onClose={() => setShowLibrary(false)}
+          onSelect={selectDeck} onFavorite={setFavorite} onDuplicate={duplicate} onDelete={removeDeck} />
+      )}
+    </div>
+  );
+}
+
+function LibraryRow({ def, inDeck, cap, deckFull, onAdd }: { def: CardDef; inDeck: number; cap: number; deckFull: boolean; onAdd: () => void }) {
+  const meta = COLOR_META[def.color];
+  const cost = def.cost ? Object.values(def.cost).reduce((s, n) => s + (n ?? 0), 0) : null;
+  const atCap = inDeck >= cap;
+  const disabled = atCap || deckFull;
+  return (
+    <CardHover defId={def.id}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, background: HUB.surface,
+        border: `1px solid ${inDeck > 0 ? meta.hex + '77' : HUB.border}` }}>
+        <div style={{ width: 34, height: 44, borderRadius: 6, overflow: 'hidden', background: `linear-gradient(160deg, ${meta.hex}, #0a1020)`, flex: 'none', display: 'grid', placeItems: 'center' }}>
+          {def.image ? <img src={def.image} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: 12, fontWeight: 900, color: meta.ink }}>{(meta as any).glyph}</span>}
+        </div>
+        {cost != null && <span style={{ minWidth: 22, height: 22, borderRadius: 6, background: HUB.raised, border: `1px solid ${HUB.border}`, display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 800, flex: 'none' }}>{cost}</span>}
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{def.name}</span>
+        <span style={{ fontSize: 10.5, color: HUB.muted, display: 'inline-flex', gap: 5, alignItems: 'center' }}><span style={{ width: 8, height: 8, borderRadius: 2, background: meta.hex }} />{def.type}</span>
+        <span style={{ fontSize: 11, color: atCap ? HUB.gold : HUB.muted, width: 40, textAlign: 'right' }}>{inDeck}/{cap === Infinity ? '∞' : cap}</span>
+        <button onClick={onAdd} disabled={disabled} aria-label={`Add ${def.name}`} style={{ width: 30, height: 30, borderRadius: 8, flex: 'none',
+          background: disabled ? HUB.raised : `linear-gradient(180deg, ${HUB.purple}, ${HUB.violet})`, color: disabled ? HUB.muted : '#fff',
+          border: `1px solid ${disabled ? HUB.border : HUB.violet}`, cursor: disabled ? 'not-allowed' : 'pointer', fontWeight: 900 }}>+</button>
+      </div>
+    </CardHover>
+  );
+}
+
+function CurrentDeckPanel(props: {
+  deckName: string; setDeckName: (s: string) => void; total: number; legality: 'EMPTY' | 'INCOMPLETE' | 'INVALID' | 'READY';
+  counts: Record<string, number>; bump: (id: string, d: number) => void; copyIssues: DeckIssue[]; v60: DeckValidation; dirty: boolean;
+  canSave: boolean; saving: boolean; status: { msg: string; ok: boolean } | null; onSave: () => void; onClear: () => void; onNew: () => void;
+  onOpenLibrary: () => void; savedCount: number; editingId: number | null;
+}) {
+  const { deckName, setDeckName, total, legality, counts, bump, copyIssues, v60, dirty, canSave, saving, status, onSave, onClear, onNew, onOpenLibrary, savedCount } = props;
+  const [editingName, setEditingName] = useState(false);
+  const legColor = legality === 'READY' ? HUB.green : legality === 'INVALID' ? HUB.red : HUB.gold;
+  const pct = Math.min(100, (total / DECK_SIZE) * 100);
+
+  // Group deck entries by card type.
+  const groups = useMemo(() => {
+    const byType: Record<string, Array<{ id: string; n: number }>> = {};
+    for (const [id, n] of Object.entries(counts)) { const t = CARDS[id]?.type ?? 'other'; (byType[t] ??= []).push({ id, n }); }
+    const order: CardType[] = ['node', 'meme', 'machine', 'aura', 'move'];
+    return order.filter((t) => byType[t]?.length).map((t) => ({ type: t, rows: byType[t].sort((a, b) => CARDS[a.id].name.localeCompare(CARDS[b.id].name)) }));
+  }, [counts]);
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, borderRadius: 14, background: HUB.raised, border: `1px solid ${HUB.gold}44` }}>
+      <div style={{ padding: 14, borderBottom: `1px solid ${HUB.border}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <span style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 16, color: HUB.goldHi }}>◈ CURRENT DECK</span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={onNew} style={{ padding: '6px 12px', borderRadius: 8, background: 'transparent', border: `1px solid ${HUB.violet}`, color: HUB.violet, cursor: 'pointer', fontWeight: 800, fontSize: 11 }}>NEW</button>
+            <button onClick={onOpenLibrary} title="Saved decks" aria-label="Open saved decks" style={{ width: 32, height: 30, borderRadius: 8, background: HUB.surface, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: 'pointer' }}>
+              🗂{savedCount > 0 && <span style={{ fontSize: 9, color: HUB.gold }}> {savedCount}</span>}
+            </button>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 9, background: HUB.surface, border: `1px solid ${HUB.border}` }}>
+          {editingName ? (
+            <input autoFocus value={deckName} onChange={(e) => setDeckName(e.target.value)} onBlur={() => setEditingName(false)}
+              onKeyDown={(e) => { if (e.key === 'Enter') setEditingName(false); }} aria-label="Deck name"
+              style={{ flex: 1, background: 'none', border: 'none', color: HUB.text, fontSize: 14, fontWeight: 700, outline: 'none' }} />
+          ) : (
+            <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: deckName ? HUB.text : HUB.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{deckName || 'Untitled Deck'}</span>
+          )}
+          <button onClick={() => setEditingName((v) => !v)} aria-label="Rename deck" style={{ background: 'none', border: 'none', color: HUB.muted, cursor: 'pointer' }}>✎</button>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+          <div style={{ fontSize: 26, fontWeight: 800, color: total === DECK_SIZE ? HUB.green : HUB.text, lineHeight: 1 }}>
+            {total}<span style={{ fontSize: 15, color: HUB.muted, fontWeight: 700 }}> / {DECK_SIZE}</span>
+          </div>
+          <div style={{ flex: 1, height: 8, borderRadius: 999, background: HUB.surface, border: `1px solid ${HUB.border}`, overflow: 'hidden' }}>
+            <div className="hub-anim" style={{ width: `${pct}%`, height: '100%', transition: 'width .2s ease', background: legality === 'READY' ? `linear-gradient(90deg, ${HUB.gold}, ${HUB.green})` : `linear-gradient(90deg, ${HUB.gold}, ${HUB.violet})` }} />
+          </div>
+          <span style={{ padding: '4px 10px', borderRadius: 999, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.06em', color: legColor, background: `${legColor}1c`, border: `1px solid ${legColor}66` }}>
+            {legality === 'EMPTY' ? 'INCOMPLETE' : legality}{dirty ? ' •' : ''}
+          </span>
+        </div>
+      </div>
+
+      <div className="hub-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 14 }}>
+        {total === 0 ? (
+          <div style={{ height: '100%', minHeight: 180, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, textAlign: 'center',
+            border: `1px dashed ${HUB.border}`, borderRadius: 12, color: HUB.muted }}>
+            <div style={{ fontSize: 30, opacity: 0.5 }} aria-hidden>🂠</div>
+            <div style={{ fontSize: 13 }}>Add cards from the library to begin.</div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {groups.map((g) => (
+              <div key={g.type}>
+                <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.12em', color: HUB.muted, marginBottom: 6, textTransform: 'uppercase' }}>
+                  {g.type} · {g.rows.reduce((s, r) => s + r.n, 0)}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  {g.rows.map(({ id, n }) => {
+                    const def = CARDS[id]; const meta = COLOR_META[def.color];
+                    const cost = def.cost ? Object.values(def.cost).reduce((s, x) => s + (x ?? 0), 0) : null;
+                    const over = !isBasicNode(id) && n > MAX_COPIES_NONBASIC;
+                    return (
+                      <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 8, background: HUB.surface, border: `1px solid ${over ? HUB.red : HUB.border}` }}>
+                        {cost != null && <span style={{ minWidth: 20, height: 20, borderRadius: 5, background: HUB.raised, display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 800, flex: 'none' }}>{cost}</span>}
+                        <span style={{ width: 8, height: 8, borderRadius: 2, background: meta.hex, flex: 'none' }} aria-hidden />
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={def.name}>{def.name}</span>
+                        {over && <span style={{ fontSize: 9.5, fontWeight: 800, color: HUB.red }} title={`Max ${MAX_COPIES_NONBASIC}`}>OVER</span>}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 'none' }}>
+                          <button onClick={() => bump(id, -1)} aria-label={`Remove one ${def.name}`} style={deckStep}>−</button>
+                          <span style={{ minWidth: 18, textAlign: 'center', fontWeight: 800, fontSize: 13 }}>{n}</span>
+                          <button onClick={() => bump(id, +1)} aria-label={`Add one ${def.name}`} style={deckStep}>+</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ padding: 14, borderTop: `1px solid ${HUB.border}` }}>
+        {(copyIssues.length > 0 || (total > 0 && total !== DECK_SIZE)) && (
+          <div style={{ marginBottom: 10, fontSize: 11.5, color: HUB.gold, display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {total !== DECK_SIZE && <div>○ {total < DECK_SIZE ? `${DECK_SIZE - total} more card${DECK_SIZE - total === 1 ? '' : 's'} needed` : `Remove ${total - DECK_SIZE} card${total - DECK_SIZE === 1 ? '' : 's'}`}</div>}
+            {copyIssues.slice(0, 3).map((it, i) => <div key={i} style={{ color: HUB.red }}>○ {it.message}</div>)}
+            {total === DECK_SIZE && v60.ok && <div style={{ color: HUB.green }}>✓ Deck is legal and ready.</div>}
+          </div>
+        )}
+        {total === 0 && <div style={{ marginBottom: 10, fontSize: 11.5, color: HUB.muted }}>○ 60 cards required · No cards selected</div>}
+        {status && <div style={{ marginBottom: 10, fontSize: 12, color: status.ok ? HUB.green : HUB.red }}>{status.msg}</div>}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClear} style={{ padding: '12px 18px', borderRadius: 10, background: HUB.surface, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: 'pointer', fontWeight: 700, letterSpacing: '0.06em', fontSize: 12 }}>CLEAR</button>
+          <button onClick={onSave} disabled={!canSave} style={{ ...hubGoldBtn(!canSave), flex: 1, marginTop: 0, padding: '12px 18px', fontSize: 14 }}>{saving ? 'SAVING…' : 'SAVE DECK'}</button>
+        </div>
+        {!canSave && total !== DECK_SIZE && <div style={{ marginTop: 8, fontSize: 11, color: HUB.muted, textAlign: 'center' }}>Add {DECK_SIZE} cards to save this deck.</div>}
+      </div>
+    </div>
+  );
+}
+const deckStep: React.CSSProperties = { width: 24, height: 24, borderRadius: 6, background: HUB.raised, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: 'pointer', fontWeight: 900, fontSize: 14, lineHeight: 1 };
+
+function SavedDeckLibrary({ decks, editingId, onClose, onSelect, onFavorite, onDuplicate, onDelete }: {
+  decks: DeckEntry[]; editingId: number | null; onClose: () => void;
+  onSelect: (d: DeckEntry) => void; onFavorite: (d: DeckEntry) => void; onDuplicate: (d: DeckEntry) => void; onDelete: (d: DeckEntry) => void;
+}) {
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 120, background: 'rgba(3,4,10,0.75)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(560px, 100%)', maxHeight: '80dvh', overflow: 'auto', borderRadius: 14, background: HUB.surface, border: `1px solid ${HUB.gold}44`, padding: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <span style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 17, color: HUB.goldHi }}>SAVED DECKS</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: HUB.muted, fontSize: 22, cursor: 'pointer' }}>×</button>
+        </div>
+        {decks.length === 0 ? (
+          <div style={{ color: HUB.muted, fontSize: 13, padding: '20px 0', textAlign: 'center' }}>No saved decks yet. Build a 60-card deck and hit Save.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {decks.map((d) => {
+              const ok = validateDeck(d.cards).ok;
+              const faction = deriveFavoriteFaction(d.cards);
+              return (
+                <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10,
+                  background: d.id === editingId ? `${HUB.violet}18` : HUB.raised, border: `1px solid ${d.id === editingId ? HUB.violet : HUB.border}` }}>
+                  <button onClick={() => onSelect(d)} style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 'none', color: HUB.text, cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {d.isActive && <span title="Favorite deck" aria-label="Favorite">⭐</span>}
+                      <span style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 10.5, color: HUB.muted }}>{d.cards.length} cards</span>
+                      {faction && <span style={{ fontSize: 10.5, color: faction.color }}>{faction.name}</span>}
+                      <span style={{ fontSize: 10.5, fontWeight: 700, color: ok ? HUB.green : HUB.red }}>{ok ? 'READY' : d.cards.length === DECK_SIZE ? 'INVALID' : 'INCOMPLETE'}</span>
+                    </div>
+                  </button>
+                  {!d.isActive && <button onClick={() => onFavorite(d)} title="Set as favorite" aria-label="Set favorite" style={libAct(HUB.gold)}>☆</button>}
+                  <button onClick={() => onDuplicate(d)} title="Duplicate" aria-label="Duplicate" style={libAct(HUB.muted)}>⧉</button>
+                  <button onClick={() => onDelete(d)} title="Delete" aria-label="Delete" style={libAct(HUB.red)}>🗑</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+function libAct(color: string): React.CSSProperties {
+  return { width: 30, height: 30, borderRadius: 8, background: HUB.raised, border: `1px solid ${HUB.border}`, color, cursor: 'pointer', flex: 'none', fontSize: 13 };
 }
 
 // ── Design tokens for the redesigned profile screen ────────────────────────
