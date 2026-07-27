@@ -30,6 +30,41 @@ const GOLD_HI = '#FFD86A';
 type Vars = React.CSSProperties & Record<string, string | number>;
 
 /**
+ * ── Board stacking order ────────────────────────────────────────────────────
+ * ONE explicit ladder for everything the board paints. Read it before adding a
+ * z-index anywhere in this file or in Board.css.
+ *
+ * Two rules make it work:
+ *   1. The playmat root sets `isolation: isolate`, so MAT_* values only ever
+ *      compete with each other — nothing inside the mat can escape it and
+ *      nothing outside it needs to out-number a mat layer.
+ *   2. Anything that creates a *new* stacking context (transform, filter,
+ *      backdrop-filter, opacity < 1, perspective, will-change, contain,
+ *      isolation) traps its children's z-index inside itself. Cards legitimately
+ *      need `transform` (tapped cards rotate) and `filter`, so a card can never
+ *      out-stack a *neighbouring* zone on its own — the ZONE is raised instead,
+ *      via `.brd-zone:hover { z-index: 4 }` in Board.css.
+ *
+ * Values 0–9 are inside the mat; 10+ are page-level chrome.
+ */
+const LAYER = {
+  /** Playmat photo. */
+  MAT_ART: 0,
+  /** Scrims, vignette, lane light, centre rule, watermark. */
+  MAT_SCRIM: 1,
+  /** Wrapper holding every zone / card / HUD element. */
+  MAT_CONTENT: 2,
+  /** Resting zone frame. */
+  ZONE: 2,
+  /** Zone containing the hovered card — lifts the whole zone, cards can't. */
+  ZONE_RAISED: 4,
+  /** Life orbs + count chips, above every zone. */
+  HUD: 6,
+  /** Drag ghost following the cursor. */
+  DRAG_GHOST: 9998,
+} as const;
+
+/**
  * Combat pairing badge rendered over card art: SVG glyph + count in a flex row,
  * on an obsidian pill with a coloured hairline ring and a hard drop shadow so
  * it stays legible over any artwork.
@@ -158,7 +193,7 @@ function MobilePlaymatScaler({
           top-right corner used to bury the opponent's deck / hand / graveyard
           zones on a 390px phone, making those cards untappable. */}
       <div style={{
-        margin: '8px auto 0', width: 'fit-content', zIndex: 5,
+        margin: '4px auto 0', width: 'fit-content', zIndex: 5,
         display: 'flex', gap: 8,
         background: 'linear-gradient(180deg, rgba(22,17,32,0.85), rgba(8,7,14,0.9))',
         padding: 5, borderRadius: 999,
@@ -323,7 +358,7 @@ function DraggableCard({
 }
 
 function CardFace({
-  defId, instance, footer, onClick, selected, faceDown, pinOnTap,
+  defId, instance, footer, onClick, selected, faceDown, pinOnTap, size,
 }: {
   defId: string;
   instance?: Instance;
@@ -332,12 +367,15 @@ function CardFace({
   selected?: boolean;
   faceDown?: boolean;
   pinOnTap?: boolean;
+  /** Explicit box, in px. Used by the mobile hand strip, which has more room
+   *  than the compact default and is the player's primary read of their hand. */
+  size?: { w: number; h: number };
 }) {
   const mobile = useIsMobile();
   const short = useIsShort();
   const compact = mobile || short; // phones portrait OR landscape
-  const W = compact ? 92 : 138;
-  const H = compact ? 134 : 200;
+  const W = size ? size.w : compact ? 92 : 138;
+  const H = size ? size.h : compact ? 134 : 200;
   if (faceDown) {
     return (
       <div style={{
@@ -561,9 +599,18 @@ export function ChainsBoard(props: Props) {
 
   const [selectedHand, setSelectedHand] = useState<number | null>(null);
   const [targetMode, setTargetMode] = useState<null | { kind: 'meme' | 'any' | 'machine' }>(null);
-  // Mobile hand drawer (bottom sheet). On mobile, the hand is collapsed to a
-  // peek bar; tapping the Hand button opens a full-screen sheet to browse + play cards.
+  // Mobile hand sheet. The hand itself is always visible as a strip under the
+  // mat; this is the expanded grid view for browsing a large hand.
   const [handOpen, setHandOpen] = useState(false);
+  // ACTION LOG + CHAT panel. Owned here (not inside MatchRail) because on
+  // phones the trigger lives in MobileActionBar — a floating one covered the
+  // hand strip. Starts closed on phones and landscape so it never hides the mat.
+  const [railOpen, setRailOpen] = useState(() =>
+    !(typeof window !== 'undefined' && (window.innerWidth <= 720 || window.innerHeight <= 450)));
+  const chatCount = chatMessages?.length ?? 0;
+  const [chatSeen, setChatSeen] = useState(0);
+  useEffect(() => { if (railOpen) setChatSeen(chatCount); }, [railOpen, chatCount]);
+  const chatUnread = Math.max(0, chatCount - chatSeen);
 
   const myTurn = ctx.currentPlayer === myId;
   const inBlockers = ctx.activePlayers?.[myId] === 'blockers';
@@ -809,12 +856,25 @@ export function ChainsBoard(props: Props) {
   return (
     <div className="brd" style={{
       fontFamily: 'system-ui, sans-serif', padding: mobile ? 6 : 8, color: '#eee', background: '#0a0a10',
-      minHeight: '100vh', height: mobile ? 'auto' : '100dvh', display: 'flex', flexDirection: 'column',
-      overflow: mobile ? undefined : 'hidden',
-      // Mobile: never allow horizontal page scroll; leave room for the fixed
-      // bottom action bar (+ notch safe area) so content is never covered.
-      overflowX: mobile ? 'hidden' : undefined,
-      paddingBottom: mobile ? 'calc(118px + env(safe-area-inset-bottom))' : 8,
+      // One flex column, exactly one viewport tall, on BOTH form factors.
+      // Mobile used to be `height: auto` + `minHeight: 100vh` with every child
+      // at its natural size, so the leftover height piled up as a dead region
+      // between the mat and the fixed action bar. Now the column is 100dvh and
+      // exactly one child grows into the slack: the mat on desktop, the hand
+      // strip on mobile.
+      minHeight: '100dvh', height: '100dvh',
+      display: 'flex', flexDirection: 'column',
+      // Desktop used to be `overflow: hidden`, which silently amputated whatever
+      // did not fit in 100dvh (see the Playmat comment below). The growing child
+      // now absorbs the slack, and `auto` is the safety valve for the cases it
+      // can't — content scrolls into reach instead of vanishing.
+      overflowY: 'auto',
+      // Never allow horizontal page scroll; on mobile also leave room for the
+      // fixed bottom action bar (+ notch safe area) via paddingBottom below.
+      overflowX: 'hidden',
+      // No bottom reserve on mobile any more: MobileActionBar is sticky and
+      // takes its own height at the end of the column.
+      paddingBottom: mobile ? 0 : 8,
     }}>
       {/* Compact top status bar */}
       <TurnBanner
@@ -836,13 +896,13 @@ export function ChainsBoard(props: Props) {
       />
 
       {/* Selected-card targeting instruction. Desktop pins it under the banner;
-          phones float it just above the chat bubble so it never covers the mat
+          phones float it just above the action bar so it never covers the mat
           (legal targets pulse gold there) nor the action bar's CANCEL. */}
       {targetMode && (
         <div style={{
           position: 'fixed', zIndex: 120,
           ...(mobile
-            ? { left: 10, right: 10, bottom: 'calc(178px + env(safe-area-inset-bottom))', justifyContent: 'center' }
+            ? { left: 10, right: 10, bottom: 'calc(78px + env(safe-area-inset-bottom))', justifyContent: 'center' }
             : { top: 64, left: '50%', transform: 'translateX(-50%)' }),
           display: 'flex', alignItems: 'center', gap: 12, padding: '8px 18px', borderRadius: 10,
           background: 'linear-gradient(180deg, rgba(22,16,44,0.94), rgba(10,10,22,0.94))',
@@ -985,10 +1045,18 @@ export function ChainsBoard(props: Props) {
         </div>
       )}
 
-      {/* Step instructions */}
+      {/* Step instructions. Phones get a single short line: the full prose ran
+          to two or three lines at 390px and that is premium vertical space the
+          hand needs. The long form stays on desktop and in the `title`. */}
       {!ctx.gameover && !pickPhase && (
         <div style={{
-          padding: '8px 14px', marginBottom: 6, fontSize: 13,
+          flex: '0 0 auto',
+          padding: mobile ? '5px 10px' : '8px 14px', marginBottom: mobile ? 4 : 6,
+          fontSize: mobile ? 12 : 13,
+          lineHeight: mobile ? 1.25 : undefined,
+          whiteSpace: mobile ? 'nowrap' : undefined,
+          overflow: mobile ? 'hidden' : undefined,
+          textOverflow: mobile ? 'ellipsis' : undefined,
           fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif',
           background: inBlockers
             ? 'linear-gradient(180deg, rgba(64,40,8,0.92), rgba(28,16,4,0.92))'
@@ -1004,11 +1072,17 @@ export function ChainsBoard(props: Props) {
             : (myTurn ? '0 0 14px rgba(139,92,246,0.25)' : 'none'),
         }}>
           {inBlockers
-            ? <><CTA color="#f0b32a">Declare blockers:</CTA> click an untapped meme below to select it, then click an attacking opponent meme above. Press <i>Confirm Blocks</i> when done (or with no blockers to take damage).</>
+            ? (mobile
+                ? <><CTA color="#f0b32a">Blockers:</CTA> tap yours, then an attacker.</>
+                : <><CTA color="#f0b32a">Declare blockers:</CTA> click an untapped meme below to select it, then click an attacking opponent meme above. Press <i>Confirm Blocks</i> when done (or with no blockers to take damage).</>)
             : myTurn
               ? (G.combat.attackers.length > 0
-                  ? <><CTA color="#f0b32a">{G.combat.attackers.length} attacker(s) selected.</CTA> Click another untapped meme to add, or press <i>Attack with {G.combat.attackers.length} meme(s)</i> to swing.</>
-                  : <><CTA color="#b896ff">Your main phase.</CTA> Play nodes, tap them for gas, cast cards. Click an untapped, non-sick meme to mark it as an attacker, then press <i>Attack</i>.</>)
+                  ? (mobile
+                      ? <><CTA color="#f0b32a">{G.combat.attackers.length} attacker(s).</CTA> Tap more, or press Attack.</>
+                      : <><CTA color="#f0b32a">{G.combat.attackers.length} attacker(s) selected.</CTA> Click another untapped meme to add, or press <i>Attack with {G.combat.attackers.length} meme(s)</i> to swing.</>)
+                  : (mobile
+                      ? <><CTA color="#b896ff">Your main phase.</CTA> Play nodes, tap for gas, cast.</>
+                      : <><CTA color="#b896ff">Your main phase.</CTA> Play nodes, tap them for gas, cast cards. Click an untapped, non-sick meme to mark it as an attacker, then press <i>Attack</i>.</>))
               : <>Waiting for opponent…</>}
         </div>
       )}
@@ -1050,14 +1124,31 @@ export function ChainsBoard(props: Props) {
       {/* Combat zone display */}
       <CombatStrip G={G} ctx={ctx} myId={myId} />
 
-      {/* Playmat — sized to fit alongside hand without scrolling */}
+      {/* Playmat.
+          Desktop: the board root is a 100dvh flex column with `overflow: hidden`,
+          so the mat MUST NOT be sized by a guessed constant — the old
+          `calc(100dvh - 280px)` under-reserved the chrome by ~200px and the
+          bottom of the page (most of the hand fan, the whole action row and the
+          log) was silently clipped away. Cards genuinely disappeared "behind the
+          board". Now the mat is the flex-grow item: it takes exactly the height
+          left over by the banner, hand and action row, and derives its width
+          from that (it is square), so the stack can never overflow again.
+          Mobile keeps the width-driven mat inside MobilePlaymatScaler. */}
       <div style={{
-        margin: short ? '4px auto' : '8px auto',
+        margin: short ? '4px auto' : '6px auto',
         width: '100%',
-        // Landscape phones (h<450): shrink the reserved chrome so the mat stays usable.
-        maxWidth: mobile ? '100%' : `min(1280px, calc(100dvh - ${short ? 170 : 280}px))`,
+        ...(mobile ? { flex: '0 0 auto' } : {
+          flex: '1 1 auto',
+          // Floor: on a very short viewport the mat stops shrinking and `.brd`
+          // scrolls instead, rather than collapsing the arena to nothing.
+          minHeight: short ? 240 : 320,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'stretch',
+          maxWidth: 'min(1280px, 100%)',
+        }),
       }}>
-        <div data-dropzone="battlefield">
+        <div data-dropzone="battlefield" style={mobile ? undefined : { height: '100%', aspectRatio: '1 / 1', maxWidth: '100%' }}>
         <MobilePlaymatScaler enabled={mobile}>
         <Playmat
         me={me} opp={opp} myId={myId} oppId={oppId}
@@ -1104,9 +1195,77 @@ export function ChainsBoard(props: Props) {
       </div>
       </div>
 
-      {/* Hand — curved fan layout on desktop, collapsed peek bar on mobile */}
+      {/* Hand on phones — a real, always-visible strip directly under the mat.
+          It used to be reachable only through the HAND button in the bottom bar,
+          which meant the player's own cards were invisible while the space under
+          the mat sat empty. The strip is the flex-GROW item on mobile, so it also
+          absorbs whatever height is left over: no dead region can reappear below
+          it. The bottom sheet is still there as the expanded/grid view. */}
+      {mobile && (
+        <div style={{
+          flex: '1 1 auto', minHeight: 216,
+          display: 'flex', flexDirection: 'column', marginTop: 4,
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 8, padding: '0 2px 3px',
+          }}>
+            <span className="brd-zone-label" style={{
+              fontSize: 11, color: 'rgba(229,184,75,0.82)',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              textShadow: '0 1px 3px rgba(0,0,0,0.85)',
+            }}>
+              <HandIcon size={12} /> Hand · {me.hand.length}
+            </span>
+            <button
+              onClick={() => setHandOpen(true)}
+              className="brd-glyph-btn"
+              aria-label="Expand hand"
+              title="Expand hand — full grid view"
+              style={{ minHeight: 44, minWidth: 44, padding: '4px 12px', fontSize: 10, letterSpacing: 1.4, fontWeight: 800 }}
+            >EXPAND</button>
+          </div>
+          <div className="brd-scroll" style={{
+            flex: '1 1 auto', minHeight: 0,
+            display: 'flex', flexWrap: 'nowrap', gap: 4,
+            alignItems: 'center',
+            justifyContent: me.hand.length > 3 ? 'flex-start' : 'center',
+            overflowX: 'auto', overflowY: 'hidden',
+            WebkitOverflowScrolling: 'touch',
+            overscrollBehavior: 'contain',
+            padding: '4px 4px 6px',
+            // A sunken tray, so any slack around the cards reads as the hand's
+            // housing rather than as an empty gap in the page.
+            borderRadius: 10,
+            border: '1px solid rgba(229,184,75,0.20)',
+            background: 'linear-gradient(180deg, rgba(8,7,16,0.75), rgba(4,4,10,0.85))',
+            boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.8), inset 0 -1px 0 rgba(255,226,160,0.07)',
+          }}>
+            {me.hand.length === 0
+              ? <span style={{ fontSize: 12, color: '#7b7f95', margin: '0 auto' }}>No cards in hand.</span>
+              : me.hand.map((id, i) => (
+                <div key={i} style={{ flex: '0 0 auto' }}>
+                  <DraggableCard
+                    defId={id}
+                    onDrop={() => isActive && myTurn && !inBlockers && tryPlay(i)}
+                  >
+                    <CardFace
+                      defId={id}
+                      selected={selectedHand === i}
+                      pinOnTap
+                      size={{ w: 110, h: 160 }}
+                      onClick={() => isActive && myTurn && !inBlockers && tryPlay(i)}
+                    />
+                  </DraggableCard>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* Hand — curved fan layout on desktop */}
       {!mobile && (
-        <div style={{ marginTop: short ? 4 : 8 }}>
+        <div style={{ marginTop: short ? 4 : 6, flex: '0 0 auto' }}>
           <div className="brd-zone-label" style={{
             fontSize: 11, color: 'rgba(229,184,75,0.78)', marginBottom: 5,
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -1131,7 +1290,12 @@ export function ChainsBoard(props: Props) {
               const mid = (n - 1) / 2;
               const t = n === 1 ? 0 : (i - mid) / Math.max(1, mid); // -1 (left) .. 1 (right)
               const rot = t * 10;                                   // fan spread
-              const arc = t * t * 24;                               // edges dip below the raised center
+              // Arc: the centre card RISES, the edges sit on the baseline. The
+              // curve used to be `t*t*24` (edges pushed *down*), which is the
+              // same shape but overflowed the row's box and hung the outer
+              // cards over the action bar below. Rising is free — the fan
+              // paints above the mat, and there is nothing to collide with.
+              const arc = -(24 - t * t * 24);                       // -24 at centre, 0 at the edges
               const overlap = n > 7 ? -34 : n > 5 ? -26 : -18;      // tighten for larger hands
               const rest = `translateY(${arc}px) rotate(${rot}deg)`;
               return (
@@ -1175,6 +1339,8 @@ export function ChainsBoard(props: Props) {
           targetMode={!!targetMode}
           onCancelTarget={() => { setSelectedHand(null); setTargetMode(null); }}
           onOpenRules={() => setShowRules(true)}
+          onOpenLog={() => setRailOpen(true)}
+          logUnread={chatUnread}
         />
       )}
       {mobile && handOpen && (
@@ -1189,7 +1355,7 @@ export function ChainsBoard(props: Props) {
 
       {/* Action bar (desktop) — mobile uses the sticky bottom bar above */}
       {!mobile && (
-      <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ marginTop: 6, flex: '0 0 auto', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <GasBar gas={me.gas} />
         {myTurn && !inBlockers && (
           <>
@@ -1237,24 +1403,13 @@ export function ChainsBoard(props: Props) {
         </div>
       )}
 
-      {/* Log. On phones this is the only in-page action log (the right rail is
-          desktop-only), so keep its summary clear of the floating chat bubble. */}
-      <details style={{ marginTop: 12, paddingLeft: mobile ? 68 : 0 }}>
-        <summary style={{ cursor: 'pointer', opacity: 0.75, minHeight: 44, display: 'flex', alignItems: 'center' }}>Log ({G.log.length})</summary>
-        <pre className="brd-scroll" style={{
-          fontSize: 11, maxHeight: 200, overflow: 'auto',
-          background: 'rgba(10,10,20,0.85)', padding: 10, borderRadius: 10,
-          border: '1px solid rgba(150,140,190,0.14)',
-        }}>
-          {G.log.slice(-80).join('\n')}
-        </pre>
-      </details>
-
-      {/* Desktop: unified collapsible rail with ACTION LOG + CHAT tabs.
-          Mobile: keep the floating chat bubble (the rail becomes a drawer). */}
-      {!mobile
-        ? <MatchRail entries={G.log} myId={myId} messages={chatMessages ?? []} sendChatMessage={sendChatMessage} />
-        : <ChatPanel myId={myId} messages={chatMessages ?? []} sendChatMessage={sendChatMessage} />}
+      {/* ACTION LOG + CHAT. One component on both form factors: a collapsible
+          right rail on desktop, a drawer above the action bar on phones. The
+          bare `<details>Log (n)</details>` that used to sit in the mobile flow
+          is gone — it was default-styled, took a full row of the board, and
+          duplicated this panel. */}
+      <MatchRail entries={G.log} myId={myId} messages={chatMessages ?? []} sendChatMessage={sendChatMessage}
+        open={railOpen} onOpenChange={setRailOpen} />
 
       {/* Proximity voice with your opponent (PeerJS WebRTC). Skipped in solo. */}
       {matchID && playerID && !isSolo && (
@@ -1264,207 +1419,29 @@ export function ChainsBoard(props: Props) {
   );
 }
 
-function ActionLogRail({ entries }: { entries: string[] }) {
-  const scrollRef = React.useRef<HTMLDivElement>(null);
-  // Auto-scroll to bottom whenever new entries arrive.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [entries.length]);
-
-  // Tint key events so the user can scan turn boundaries / combat / damage.
-  function colorFor(line: string): string {
-    if (line.startsWith('— Turn')) return '#a78bfa';
-    if (/attack|damage|destroyed|kills/i.test(line)) return '#fb7185';
-    if (/draws|gains|heals/i.test(line)) return '#6ee7b7';
-    if (/mulligan|keeps/i.test(line)) return '#fcd34d';
-    return '#cbd5e1';
-  }
-
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 80, right: 16, bottom: 100,
-      width: 280, zIndex: 60,
-      background: 'rgba(10, 10, 30, 0.78)',
-      border: '1px solid #4c1d95',
-      borderRadius: 8,
-      boxShadow: '0 0 14px rgba(76, 29, 149, 0.4)',
-      backdropFilter: 'blur(4px)',
-      display: 'flex', flexDirection: 'column',
-      fontFamily: '"EB Garamond", Garamond, serif',
-    }}>
-      <div style={{
-        padding: '8px 12px',
-        borderBottom: '1px solid #4c1d95',
-        fontFamily: '"Cinzel", "Times New Roman", serif',
-        fontSize: 12, letterSpacing: 2, textTransform: 'uppercase',
-        color: '#c4b5fd', fontWeight: 700,
-      }}>
-        Action Log
-      </div>
-      <div ref={scrollRef} style={{
-        flex: 1, overflow: 'auto', padding: '8px 12px',
-        fontSize: 12, lineHeight: 1.45,
-      }}>
-        {entries.length === 0 ? (
-          <div style={{ opacity: 0.4 }}>(No actions yet)</div>
-        ) : entries.slice(-200).map((line, i) => (
-          <div key={i} style={{ color: colorFor(line), marginBottom: 2, wordBreak: 'break-word' }}>
-            {line}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ChatPanel({
-  myId, messages, sendChatMessage,
-}: {
-  myId: string;
-  messages: Array<{ id: string; sender: string; payload: any }>;
-  sendChatMessage?: (msg: any) => void;
-}) {
-  const mobile = useIsMobile();
-  const [draft, setDraft] = useState('');
-  const [open, setOpen] = useState(!mobile);
-  const [lastSeen, setLastSeen] = useState(0);
-  const listRef = React.useRef<HTMLDivElement>(null);
-  const inputRef = React.useRef<HTMLInputElement>(null);
-
-  React.useEffect(() => {
-    if (open && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-    if (open) setLastSeen(messages.length);
-  }, [messages.length, open]);
-
-  const unread = Math.max(0, messages.length - lastSeen);
-
-  function send() {
-    const text = draft.trim();
-    if (!text || !sendChatMessage) return;
-    sendChatMessage({ text });
-    setDraft('');
-  }
-
-  // Collapsed bubble — small floating button bottom-right.
-  if (!open) {
-    return (
-      <button
-        onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 50); }}
-        className="brd-stud"
-        style={{
-          position: 'fixed',
-          left: mobile ? 10 : 16,
-          // Sit above the mobile action bar + notch safe area.
-          bottom: mobile ? 'calc(120px + env(safe-area-inset-bottom))' : 16,
-          zIndex: 90,
-          width: 48, height: 48,
-        }}
-        title="Open chat" aria-label="Open chat"
-      >
-        <ChatIcon size={20} />
-        {unread > 0 && (
-          <span style={{
-            position: 'absolute', top: -4, right: -4,
-            background: '#e33', color: '#fff', fontSize: 10, fontWeight: 800,
-            borderRadius: 10, minWidth: 18, height: 18, padding: '0 5px',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: '1px solid #000',
-          }}>{unread > 9 ? '9+' : unread}</span>
-        )}
-      </button>
-    );
-  }
-
-  return (
-    <div style={{
-      position: 'fixed',
-      left: mobile ? 8 : 16,
-      bottom: mobile ? 'calc(118px + env(safe-area-inset-bottom))' : 16,
-      zIndex: 90,
-      width: mobile ? 'calc(100vw - 16px)' : 320,
-      maxWidth: 'calc(100vw - 16px)',
-      border: '1px solid rgba(229,184,75,0.35)', borderRadius: 12,
-      background: 'linear-gradient(180deg, rgba(20,16,30,0.94), rgba(9,8,16,0.95))',
-      backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-      display: 'flex', flexDirection: 'column',
-      overflow: 'hidden',
-    }} className="brd-panel">
-      <div style={{
-        padding: '7px 10px', background: 'rgba(6,7,17,0.55)',
-        fontFamily: '"Cinzel", "Times New Roman", serif',
-        fontSize: 11, fontWeight: 800, letterSpacing: 1.6, textTransform: 'uppercase',
-        color: GOLD, borderBottom: '1px solid rgba(229,184,75,0.22)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><ChatIcon size={13} /> Chat</span>
-        <button
-          onClick={() => setOpen(false)}
-          aria-label="Hide chat"
-          className="brd-glyph-btn"
-          style={{ minWidth: 44, minHeight: 44, padding: '0 6px' }}
-          title="Hide chat"
-        ><Close size={18} /></button>
-      </div>
-      <div ref={listRef} className="brd-scroll" style={{ height: mobile ? 'min(180px, 32dvh)' : 220, overflowY: 'auto', padding: 8, fontSize: 12, fontFamily: 'system-ui' }}>
-        {messages.length === 0 && (
-          <div style={{ color: '#666', fontStyle: 'italic' }}>No messages yet. Talk smack.</div>
-        )}
-        {messages.map(m => {
-          const mine = m.sender === myId;
-          const text = typeof m.payload === 'string'
-            ? m.payload
-            : (m.payload && typeof m.payload.text === 'string' ? m.payload.text : JSON.stringify(m.payload));
-          return (
-            <div key={m.id} style={{ marginBottom: 6, lineHeight: 1.5 }}>
-              <span style={{
-                fontWeight: 800, fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase',
-                color: mine ? '#39E879' : '#7fb3ff',
-              }}>P{m.sender}{mine ? ' (you)' : ''}</span>{' '}
-              <span style={{ color: '#F4F2EA' }}>{text}</span>
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ display: 'flex', gap: 6, padding: 8, borderTop: '1px solid rgba(229,184,75,0.22)', background: 'rgba(6,7,17,0.5)' }}>
-        <input
-          ref={inputRef}
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') send(); }}
-          placeholder={sendChatMessage ? 'Type a message and press Enter' : 'Chat unavailable'}
-          disabled={!sendChatMessage}
-          aria-label="Chat message"
-          style={{
-            flex: 1, minWidth: 0, padding: '12px 10px', minHeight: 44, color: '#F4F2EA',
-            background: 'linear-gradient(180deg, #070A14, #0C1120)',
-            border: '1px solid rgba(229,184,75,0.20)', borderRadius: 8,
-            boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.6)',
-            fontFamily: 'system-ui', fontSize: 12,
-          }}
-        />
-        <button
-          onClick={send}
-          disabled={!sendChatMessage || !draft.trim()}
-          className="brd-plate brd-plate--gold brd-plate--sm"
-          style={{ padding: '10px 16px', minHeight: 44 }}
-        >Send</button>
-      </div>
-    </div>
-  );
-}
-
-/** Unified right rail (desktop): ACTION LOG + CHAT tabs, collapsible. */
-function MatchRail({ entries, myId, messages, sendChatMessage }: {
+/**
+ * Unified ACTION LOG + CHAT surface.
+ *  · desktop — a collapsible right rail with its own edge tab.
+ *  · phones  — the same panel as a drawer above the action bar. Its trigger
+ *    lives IN the action bar (see MobileActionBar): a floating stud sat on top
+ *    of the hand strip. This is also where the action log lives on phones now;
+ *    it used to be a bare, default-styled `<details>Log (n)</details>` loose in
+ *    the board's flow, which is what the owner saw in their screenshot.
+ *
+ * `open` is owned by ChainsBoard so the action bar can drive it.
+ */
+function MatchRail({ entries, myId, messages, sendChatMessage, open, onOpenChange }: {
   entries: string[]; myId: string;
   messages: Array<{ id: string; sender: string; payload: any }>;
   sendChatMessage?: (msg: any) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const short = useIsShort();
+  const mobile = useIsMobile();
   const [tab, setTab] = useState<'log' | 'chat'>('log');
-  // Landscape phones: start collapsed so the rail never covers the mat.
-  const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && window.innerHeight <= 450);
+  const collapsed = !open;
+  const setCollapsed = (c: boolean) => onOpenChange(!c);
   const [draft, setDraft] = useState('');
   const [lastSeen, setLastSeen] = useState(0);
   const logRef = React.useRef<HTMLDivElement>(null);
@@ -1489,6 +1466,8 @@ function MatchRail({ entries, myId, messages, sendChatMessage }: {
   function send() { const t = draft.trim(); if (!t || !sendChatMessage) return; sendChatMessage({ text: t }); setDraft(''); }
 
   if (collapsed) {
+    // Phones: no floating trigger — MobileActionBar owns it.
+    if (mobile) return null;
     return (
       <button onClick={() => setCollapsed(false)} aria-label="Expand match rail" title="Expand rail" className="brd-tab" style={{
         position: 'fixed', top: short ? 56 : 80, right: 0, zIndex: 60, width: 34, height: 84, borderRadius: '10px 0 0 10px',
@@ -1515,8 +1494,19 @@ function MatchRail({ entries, myId, messages, sendChatMessage }: {
   });
   return (
     <div className="brd-panel" style={{
-      position: 'fixed', top: short ? 56 : 80, right: short ? 8 : 16, bottom: short ? 64 : 100,
-      width: short ? 240 : 300, maxWidth: 'calc(100vw - 24px)', zIndex: 60,
+      position: 'fixed', zIndex: mobile ? 90 : 60,
+      // Phones: a drawer that sits above the fixed action bar. Desktop: right rail.
+      ...(mobile
+        ? {
+            left: 8, right: 8,
+            bottom: 'calc(76px + env(safe-area-inset-bottom))',
+            height: 'min(44dvh, 340px)',
+            maxWidth: 'none',
+          }
+        : {
+            top: short ? 56 : 80, right: short ? 8 : 16, bottom: short ? 64 : 100,
+            width: short ? 240 : 300, maxWidth: 'calc(100vw - 24px)',
+          }),
       // Dark parchment: warm-black gradient under an engraved gold hairline.
       background: 'linear-gradient(180deg, rgba(24,19,34,0.93) 0%, rgba(13,11,21,0.94) 45%, rgba(8,7,14,0.95) 100%)',
       border: `1px solid ${GOLD}44`, borderRadius: 12,
@@ -1528,8 +1518,10 @@ function MatchRail({ entries, myId, messages, sendChatMessage }: {
         <button onClick={() => { setTab('chat'); setLastSeen(messages.length); }} className="brd-tab" style={tabBtn(tab === 'chat')}>
           CHAT{unread > 0 && tab !== 'chat' && <span style={{ marginLeft: 6, background: '#E45F76', color: '#fff', fontSize: 9, borderRadius: 8, padding: '1px 5px' }}>{unread > 9 ? '9+' : unread}</span>}
         </button>
-        <button onClick={() => setCollapsed(true)} aria-label="Collapse rail" title="Collapse" className="brd-glyph-btn"
-          style={{ border: 'none', padding: '0 12px', height: 34 }}><ChevronRight size={16} /></button>
+        <button onClick={() => setCollapsed(true)} aria-label={mobile ? 'Close panel' : 'Collapse rail'} title={mobile ? 'Close' : 'Collapse'} className="brd-glyph-btn"
+          style={{ border: 'none', padding: mobile ? '0 14px' : '0 12px', height: mobile ? 44 : 34, minWidth: mobile ? 44 : undefined }}>
+          {mobile ? <Close size={18} /> : <ChevronRight size={16} />}
+        </button>
       </div>
       {tab === 'log' ? (
         <div ref={logRef} className="brd-scroll" style={{ flex: 1, overflow: 'auto', padding: '10px 12px', fontSize: 12, lineHeight: 1.55, fontFamily: 'system-ui' }}>
@@ -1959,9 +1951,11 @@ function NodeStack({
     <div style={{
       position: 'relative',
       width: MINI_W, aspectRatio: '68 / 96', flex: '0 0 auto',
-      // Reserve room for the offset ghost layers so adjacent zones don't overlap us.
+      // Reserve room for the offset ghost layers so adjacent stacks don't
+      // overlap. Horizontal only: a vertical reserve made the wrapper taller
+      // than a card and pushed the live card off-centre in its zone, which is
+      // how stacked nodes ended up clipped by the zone's `overflow: hidden`.
       marginRight: 4 * ghostLayers,
-      marginBottom: 4 * ghostLayers,
     }}
     title={allTapped
       ? `All ${total} tapped — wait for next turn.`
@@ -1977,7 +1971,8 @@ function NodeStack({
         return (
           <div key={i} aria-hidden style={{
             position: 'absolute',
-            left: 4 * depth, top: 4 * depth,
+            // Fan sideways, not down — see the wrapper's margin note above.
+            left: 4 * depth, top: 0,
             width: '100%', height: '100%', borderRadius: 6,
             background: meta.hex, opacity: 0.55,
             border: '1px solid #000',
@@ -2118,7 +2113,8 @@ function Playmat(props: {
   // Zone rectangles in percentage of the mat (left, top, width, height).
   // Tuned to match the labels on /playmat.png.
   const Z = {
-    // Opponent (top half, rendered rotated 180° so cards face them)
+    // Opponent (top half; `rotated` mirrors the zone's internal layout only —
+    // labels hug the outer edge, cards hug the centre line. No glyph is flipped.)
     oppGrave:    { left: 1,  top: 1,  w: 13, h: 18 },
     oppNodes:    { left: 15, top: 1,  w: 70, h: 18 },
     oppDeck:     { left: 86, top: 1,  w: 13, h: 18 }, // draw deck
@@ -2140,10 +2136,12 @@ function Playmat(props: {
     <div style={{
       position: 'relative',
       width: '100%',
-      // Parent wrapper (in ChainsBoard) owns the responsive max-width.
-      maxWidth: '100%',
+      // Parent wrapper (in ChainsBoard) owns the responsive sizing: on desktop
+      // it hands us a square box sized by the leftover height, on mobile a
+      // full-width one. Either way we just fill it and stay square.
+      maxWidth: '100%', maxHeight: '100%',
       aspectRatio: '1 / 1',
-      margin: '8px auto', borderRadius: 16, overflow: 'hidden',
+      margin: '0 auto', borderRadius: 16, overflow: 'hidden',
       // Gilded outer bezel: bronze edge outside, gold hairline inside.
       border: '1px solid rgba(122,84,18,0.9)',
       boxShadow:
@@ -2156,37 +2154,41 @@ function Playmat(props: {
       // so they step down on phones AND grow back when MobileZoom zooms in.
       containerType: 'inline-size',
     }}>
+      {/* ── Mat decoration. Every layer here is LAYER.MAT_ART / LAYER.MAT_SCRIM and is
+             pointer-transparent; nothing below LAYER.MAT_CONTENT may hold a card. ── */}
       {/* Obsidian mat surface — the arena scene, heavily darkened + navy-tinted so cards pop. */}
-      <div style={{
-        position: 'absolute', inset: 0,
+      <div aria-hidden style={{
+        position: 'absolute', inset: 0, pointerEvents: 'none',
         backgroundImage: 'url(/playmat.png?v=2)', backgroundSize: 'cover', backgroundPosition: 'center',
         filter: 'blur(2.5px) brightness(0.24) saturate(0.55) contrast(1.05)',
-        zIndex: 0,
+        zIndex: LAYER.MAT_ART,
       }} />
       {/* Scrim + vignette: pushes the art back so card frames read as the top layer. */}
       <div aria-hidden style={{
-        position: 'absolute', inset: 0, zIndex: 0,
+        position: 'absolute', inset: 0, zIndex: LAYER.MAT_SCRIM, pointerEvents: 'none',
         background:
           'radial-gradient(120% 92% at 50% 50%, rgba(8,13,24,0.30) 0%, rgba(5,7,17,0.86) 72%, rgba(2,3,8,0.95) 100%)',
       }} />
       <div aria-hidden style={{
-        position: 'absolute', inset: 0, zIndex: 0,
+        position: 'absolute', inset: 0, zIndex: LAYER.MAT_SCRIM, pointerEvents: 'none',
         background:
           'linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 16%, rgba(0,0,0,0) 84%, rgba(0,0,0,0.55) 100%),' +
           'linear-gradient(90deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0) 12%, rgba(0,0,0,0) 88%, rgba(0,0,0,0.45) 100%)',
       }} />
       {/* Violet lane light */}
-      <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0,
+      <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: LAYER.MAT_SCRIM, pointerEvents: 'none',
         background: 'radial-gradient(50% 30% at 50% 50%, rgba(142,77,255,0.13), transparent 70%)' }} />
       {/* Luminous center divider between the two halves */}
       <div aria-hidden style={{
-        position: 'absolute', left: '2%', right: '2%', top: '50%', height: 2, transform: 'translateY(-1px)', zIndex: 0,
+        position: 'absolute', left: '2%', right: '2%', top: '50%', height: 2, transform: 'translateY(-1px)',
+        zIndex: LAYER.MAT_SCRIM, pointerEvents: 'none',
         background: 'linear-gradient(90deg, transparent, rgba(196,92,255,0.85), rgba(255,216,106,0.55), rgba(196,92,255,0.85), transparent)',
         boxShadow: '0 0 14px rgba(196,92,255,0.55)',
       }} />
       {/* Heraldic diamond set on the centre rule. */}
       <div aria-hidden style={{
-        position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', zIndex: 0,
+        position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
+        zIndex: LAYER.MAT_SCRIM, pointerEvents: 'none',
         display: 'grid', placeItems: 'center', color: GOLD_HI,
         filter: 'drop-shadow(0 0 6px rgba(255,216,106,0.75))',
       }}>
@@ -2195,10 +2197,11 @@ function Playmat(props: {
       {/* Built on Robinhood watermark — low-contrast, behind all cards/zones. */}
       <img src="/built-on-robinhood.png?v=2" alt="" aria-hidden style={{
         position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
-        width: 118, opacity: 0.1, zIndex: 0, pointerEvents: 'none',
+        width: 118, opacity: 0.1, zIndex: LAYER.MAT_SCRIM, pointerEvents: 'none',
       }} />
-      <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
-      {/* ─── OPPONENT SIDE (rotated for face-to-face feel) ─── */}
+      {/* ── Playable content. Sits above every decoration layer. ── */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: LAYER.MAT_CONTENT }}>
+      {/* ─── OPPONENT SIDE (mirrored layout, upright text) ─── */}
       <ZoneSlot rect={Z.oppGrave} icon={<Skull size={11} />} label={`Graveyard (${opp.graveyard.length})`} compactLabel={`${opp.graveyard.length}`} rotated>
         {opp.graveyard.slice(-1).map((id, i) => <MiniCard key={i} defId={id} faceUp />)}
       </ZoneSlot>
@@ -2318,27 +2321,42 @@ function ZoneSlot({
         position: 'absolute',
         left: `${rect.left}%`, top: `${rect.top}%`,
         width: `${rect.w}%`, height: `${rect.h}%`,
+        // Explicit rung on the ladder (see `Z` at the top of this file). The
+        // zone — not the card — is what gets raised on hover, because the
+        // rotated half needs `transform` and that traps child z-indexes.
+        zIndex: LAYER.ZONE,
         // Engraved stone inset: dark well, hairline gold rim, cut-in shadow.
         border: targetable ? '2px dashed #FFD86A' : '1px solid rgba(229,184,75,0.20)',
         borderRadius: 8,
-        background: 'linear-gradient(180deg, rgba(6,8,16,0.52) 0%, rgba(3,4,10,0.62) 100%)',
-        backdropFilter: 'blur(1.5px)', WebkitBackdropFilter: 'blur(1.5px)',
+        // NOTE: no backdrop-filter here. It used to blur the mat art behind the
+        // well, but it also created a stacking context *and* a containing block,
+        // which is what stopped hovered cards from lifting clear of the zone.
+        // The well is already opaque enough without it.
+        background: 'linear-gradient(180deg, rgba(6,8,16,0.62) 0%, rgba(3,4,10,0.72) 100%)',
         boxShadow: targetable
           ? '0 0 14px rgba(255,216,106,0.5), inset 0 0 12px rgba(0,0,0,0.4)'
           : 'inset 0 2px 6px rgba(0,0,0,0.75), inset 0 -1px 0 rgba(255,226,160,0.09), inset 0 0 22px rgba(0,0,0,0.55)',
         padding: 3,
         overflow: 'hidden',
         cursor: onClick ? 'pointer' : 'default',
-        transform: rotated ? 'rotate(180deg)' : undefined,
+        // NOTE: the opponent's half used to be `rotate(180deg)` "so cards face
+        // them". That also turned every glyph on their half upside down — zone
+        // labels, deck/graveyard counts, card names and power/toughness were all
+        // mirrored and unreadable. A digital client has to let you read your
+        // opponent's board, so the rotation is gone. `rotated` now only mirrors
+        // the *layout*: the label sits on the outer edge of the mat and the card
+        // row hugs the centre line, so the two halves still read as facing.
       }}
     >
-      {/* Engraved rule under the zone label. */}
+      {/* Engraved rule alongside the zone label. */}
       <span aria-hidden style={{
-        position: 'absolute', top: 16, left: 6, right: 6, height: 1, pointerEvents: 'none',
+        position: 'absolute',
+        ...(rotated ? { bottom: 'clamp(9px, 2.6cqw, 13px)' } : { top: 'clamp(9px, 2.6cqw, 13px)' }),
+        left: 6, right: 6, height: 1, pointerEvents: 'none',
         background: 'linear-gradient(90deg, transparent, rgba(229,184,75,0.30), transparent)',
       }} />
       <div className="brd-zone-label" style={{
-        position: 'absolute', top: 2, left: 6, right: 6,
+        position: 'absolute', ...(rotated ? { bottom: 1 } : { top: 1 }), left: 6, right: 6,
         fontSize: 'clamp(9px, 1.4cqw, 11px)', color: 'rgba(229,184,75,0.82)',
         textShadow: '0 1px 3px #000, 0 0 5px #000',
         pointerEvents: 'none',
@@ -2349,13 +2367,26 @@ function ZoneSlot({
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{compactLabel ?? label}</span>
       </div>
       <div className="brd-scroll" style={{
-        position: 'absolute', top: 18, left: 3, right: 3, bottom: 3,
+        position: 'absolute',
+        // The label row is sized in cqw (a % of the square mat) so it shrinks
+        // with the mat instead of eating a fixed 18px out of a 64px-tall zone
+        // on a 390px phone — which is what made cards taller than their zone.
+        ...(rotated
+          ? { top: 1, bottom: 'clamp(11px, 3cqw, 15px)' }
+          : { top: 'clamp(11px, 3cqw, 15px)', bottom: 1 }),
+        left: 2, right: 2,
+        // Headroom so the hover lift (see `.brd-mini[role=button]:hover`) plays
+        // out *inside* the scrollport instead of being sliced off by it.
+        padding: '4px 3px',
         display: 'flex', gap: 3,
         // Phones: keep every card on ONE horizontally-scrolling row. Wrapping
         // pushed later cards into a second row that the short zone clipped —
         // they ended up sitting behind their neighbours and untappable.
         flexWrap: mobile ? 'nowrap' : 'wrap',
-        alignContent: 'flex-start', justifyContent: 'center', alignItems: 'center',
+        // `center`, not `flex-start`: packing the line to the top left a card
+        // with 2px of headroom above and 15px below, so the hover lift clipped
+        // against the top edge while there was room going spare underneath.
+        alignContent: 'center', justifyContent: 'center', alignItems: 'center',
         // Crowded zones scroll internally instead of clipping cards out of reach.
         overflowX: 'auto', overflowY: mobile ? 'hidden' : 'auto',
         WebkitOverflowScrolling: 'touch',
@@ -2380,17 +2411,24 @@ function LifeBadge({
   const A = side === 'me' ? '#298BFF' : '#E45F76';   // player blue / opponent red-violet
   const A2 = side === 'me' ? '#8E4DFF' : '#C45CFF';  // violet highlight
   const isRight = position === 'topRight';
-  // Phones: park the orb in the mat's dedicated life slot (the free band either
-  // side of the centre rule). The old corner anchor sat on top of the Nodes and
-  // Battlefield zones at 390px, so tapping a node — or targeting a player —
-  // hit the HUD instead of the card underneath. Name + chips are dropped there
-  // (the names live in the turn banner, the counts in the zone labels).
+  // Phones: park the orb in the free band that flanks the centre rule.
+  //
+  // Every zone rectangle in `Z` (see Playmat) is accounted for here. In the two
+  // 13%-wide outer columns the zones are: 1–19%, 20–37%, then nothing until
+  // 62–79% and 80–98%. So 37%–62% is genuinely empty on BOTH sides, and an orb
+  // is `clamp(46px, 10cqw, 72px)` ≈ 12% of the mat. The previous offsets put the
+  // player's orb at 52% + 12% = 64%, which ran into the 62–79% Main Deck slot —
+  // that is the bottom-left overlap in the owner's screenshot. These offsets
+  // keep both orbs strictly inside 37%–62%, on opposite sides of the divider.
+  // Name + chips are dropped on phones (names live in the turn banner).
   const pos: React.CSSProperties = mobile
-    ? (isRight ? { top: '37%', right: '1.5%' } : { top: '52%', left: '1.5%' })
-    : (isRight ? { top: 12, right: 14 } : { bottom: 12, left: 14 });
+    ? (isRight ? { top: '40%', right: '1%' } : { top: '48%', left: '1%' })
+    : (isRight ? { top: '37%', right: '1%' } : { top: '43%', left: '1%' });
+  // Seating shadow: the orb sits *in* the mat, so the drop shadow is tight and
+  // the identity glow is a halo around the bezel — not a rim-light on a ball.
   const orbGlow = targetable
-    ? 'inset 0 3px 10px rgba(255,255,255,0.30), inset 0 -8px 16px rgba(0,0,0,0.55), 0 0 24px rgba(255,216,106,0.85), 0 0 5px rgba(255,216,106,0.9)'
-    : `inset 0 3px 12px rgba(255,255,255,0.28), inset 0 -9px 18px rgba(0,0,0,0.6), 0 0 22px ${A}80, 0 6px 18px rgba(0,0,0,0.75)`;
+    ? '0 0 0 1px rgba(255,216,106,0.9), 0 0 26px rgba(255,216,106,0.75), 0 5px 14px rgba(0,0,0,0.8)'
+    : `0 0 20px ${A}55, 0 5px 14px rgba(0,0,0,0.78)`;
 
   // Damage / heal flash: re-key the animation class whenever the total moves.
   const prevLife = useRef(life);
@@ -2402,14 +2440,6 @@ function LifeBadge({
     setFlash(f => ({ dir, n: (f?.n ?? 0) + 1 }));
   }, [life]);
 
-  const chip: React.CSSProperties = {
-    fontSize: 'clamp(9px, 1.4cqw, 10px)', fontWeight: 800, color: '#e6dcc4',
-    background: 'linear-gradient(180deg, rgba(18,15,26,0.88), rgba(6,7,14,0.9))',
-    border: '1px solid rgba(229,184,75,0.28)', borderRadius: 5, padding: '2px 7px',
-    letterSpacing: 1, textTransform: 'uppercase',
-    boxShadow: 'inset 0 1px 0 rgba(255,226,160,0.16), 0 1px 3px rgba(0,0,0,0.6)',
-    whiteSpace: 'nowrap',
-  };
   return (
     <div
       onClick={onClick}
@@ -2417,46 +2447,27 @@ function LifeBadge({
       aria-label={`${name}, ${life} life, ${deckCount} in deck, ${handCount} in hand`}
       className={targetable ? 'brd-targetable' : undefined}
       style={{
-        position: 'absolute', ...pos, zIndex: 5,
+        position: 'absolute', ...pos, zIndex: LAYER.HUD,
         display: 'flex', alignItems: 'center', gap: 'clamp(6px, 1.2cqw, 10px)',
         cursor: onClick ? 'pointer' : 'default', pointerEvents: 'auto',
         flexDirection: isRight ? 'row-reverse' : 'row',
         maxWidth: '46cqw',
       }}>
-      {/* Set gemstone in a forged bezel — scales with the mat so it never
-          overlaps zones on phones. The border carries a conic "metal" ring;
-          the face is a radial gem with a specular highlight and inner glow. */}
+      {/* Life gem, seated in a forged bezel (see `.brd-orb` in Board.css).
+          Not a sphere: facet fan + light welling up from below + rivets. */}
       <div
         key={flash?.n ?? 0}
-        className={flash ? (flash.dir === 'hit' ? 'brd-orb-hit' : 'brd-orb-heal') : undefined}
+        className={`brd-orb${flash ? (flash.dir === 'hit' ? ' brd-orb-hit' : ' brd-orb-heal') : ''}`}
         style={{
-          position: 'relative', width: 'clamp(48px, 10.5cqw, 76px)', aspectRatio: '1 / 1', borderRadius: '50%', flex: '0 0 auto',
-          background:
-            `radial-gradient(circle at 34% 26%, ${A2}, ${A} 44%, #0b0e1a 86%) padding-box, ` +
-            (targetable
-              ? 'linear-gradient(180deg, #FFD86A, #b9862a) border-box'
-              : 'conic-gradient(from 210deg, #6d5220, #f0dba0 12%, #a8862f 30%, #fff2c8 48%, #7f6224 64%, #ddc27a 82%, #6d5220 100%) border-box'),
-          border: '3px solid transparent',
+          ...({ '--orb-a': A, '--orb-a2': A2 } as Vars),
+          width: 'clamp(46px, 10cqw, 72px)',
+          fontSize: 'clamp(19px, 4.2cqw, 31px)',
           boxShadow: orbGlow,
-          display: 'grid', placeItems: 'center', color: '#fff',
-          textShadow: '0 2px 8px #000, 0 0 14px rgba(0,0,0,0.8)',
-          fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 900, fontSize: 'clamp(20px, 4.6cqw, 34px)', lineHeight: 1,
-          transition: 'box-shadow 0.2s ease',
+          // Targetable swaps the hammered bezel for a bright forged-gold one.
+          ...(targetable ? { borderColor: GOLD_HI, borderStyle: 'solid' } : null),
         }}>
-        <span style={{ position: 'relative', zIndex: 2 }}>{life}</span>
-        {/* inner facet ring */}
-        <span aria-hidden style={{
-          position: 'absolute', inset: '9%', borderRadius: '50%',
-          border: `1px solid ${A}66`,
-          boxShadow: `inset 0 0 14px ${A2}55`,
-        }} />
-        {/* specular glint */}
-        <span aria-hidden style={{
-          position: 'absolute', left: '17%', top: '11%', width: '40%', height: '26%',
-          borderRadius: '50%', pointerEvents: 'none',
-          background: 'radial-gradient(closest-side, rgba(255,255,255,0.72), rgba(255,255,255,0) 100%)',
-          filter: 'blur(0.5px)',
-        }} />
+        <span className="brd-orb__num">{life}</span>
+        <span aria-hidden className="brd-orb__glint" />
       </div>
       {/* name + seat + counts — desktop only; see `pos` above for the phone case */}
       {!mobile && (
@@ -2479,13 +2490,33 @@ function LifeBadge({
             }}>YOU · P{seat}</span>
           )}
         </div>
+        {/* Count tallies — icon + numeral first, small-caps label second, so a
+            glance reads the number and only a second look reads what it counts. */}
         <div style={{ display: 'flex', gap: 6, flexDirection: isRight ? 'row-reverse' : 'row' }}>
-          <span className="brd-chip" style={chip}>DECK {deckCount}</span>
-          <span className="brd-chip" style={chip}>HAND {handCount}</span>
+          <CountChip icon={<Cards size={12} />} n={deckCount} label="Deck" title={`${deckCount} cards left in deck`} />
+          <CountChip icon={<HandIcon size={12} />} n={handCount} label="Hand" title={`${handCount} cards in hand`} />
         </div>
       </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Engraved metal tally: icon + numeral + small-caps Cinzel label.
+ * Styling lives in `.brd-count` (Board.css) so it shares the chamfered plate
+ * and engraved gold hairline with `.brd-plate` / `.brd-stud`. Pass
+ * `label={null}` where there is no room for the caption.
+ */
+function CountChip({
+  icon, n, label, title,
+}: { icon: React.ReactNode; n: number; label?: string | null; title?: string }) {
+  return (
+    <span className="brd-count" title={title} aria-label={title ?? `${label ?? ''} ${n}`}>
+      <span aria-hidden className="brd-count__icon">{icon}</span>
+      <span className="brd-count__n">{n}</span>
+      {label ? <span className="brd-count__label">{label}</span> : null}
+    </span>
   );
 }
 
@@ -2501,7 +2532,7 @@ function MobileActionBar({
   canEndTurn, onEndTurn,
   inBlockers, onConfirmBlocks,
   targetMode, onCancelTarget,
-  onOpenRules,
+  onOpenRules, onOpenLog, logUnread,
 }: {
   gas: Record<Color, number>;
   handCount: number;
@@ -2516,10 +2547,20 @@ function MobileActionBar({
   targetMode: boolean;
   onCancelTarget: () => void;
   onOpenRules: () => void;
+  onOpenLog: () => void;
+  logUnread: number;
 }) {
   return (
     <div style={{
-      position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 90,
+      // Sticky, not fixed. A fixed bar has to be paid for with a padding-bottom
+      // reserve on the board, and that reserve has to assume the worst case
+      // (the row wraps when CANCEL + ATTACK + END TURN + HAND are all live) —
+      // which left a permanent black gap under the hand whenever it did not.
+      // Sticky means the bar occupies exactly its own height, always.
+      position: 'sticky', bottom: 0, zIndex: 90,
+      flex: '0 0 auto',
+      // Bleed through the board's 6px padding to the screen edges.
+      marginLeft: -6, marginRight: -6, marginTop: 4,
       paddingBottom: 'env(safe-area-inset-bottom)',
       background: 'linear-gradient(180deg, rgba(22,17,32,0.90), rgba(4,4,9,0.97))',
       borderTop: '1px solid rgba(229,184,75,0.45)',
@@ -2544,6 +2585,21 @@ function MobileActionBar({
           className="brd-stud"
           style={{ width: 44, height: 44, flex: '0 0 auto', fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 800, fontSize: 15 }}
         >?</button>
+        {/* Action log + chat. Docked here rather than floating: a floating
+            bubble sat on top of the hand strip. */}
+        <button onClick={onOpenLog} title="Action log & chat" aria-label="Open action log and chat"
+          className="brd-stud"
+          style={{ width: 44, height: 44, flex: '0 0 auto', position: 'relative' }}
+        >
+          <ChatIcon size={19} />
+          {logUnread > 0 && (
+            <span style={{
+              position: 'absolute', top: -3, right: -3, background: '#E45F76', color: '#fff',
+              fontSize: 9, fontWeight: 800, borderRadius: 9, minWidth: 17, height: 17,
+              display: 'grid', placeItems: 'center', padding: '0 4px', border: '1px solid #000',
+            }}>{logUnread > 9 ? '9+' : logUnread}</span>
+          )}
+        </button>
         {/* Compact gas pool — labelled so it is readable without zooming. */}
         <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0, marginRight: 'auto' }}>
           <span className="brd-zone-label" style={{ fontSize: 10, color: 'rgba(229,184,75,0.8)' }}>Gas</span>
@@ -3066,10 +3122,20 @@ function RulesDrawer({ onClose }: { onClose: () => void }) {
   );
 }
 
-// Mini-card width relative to the playmat container (cqw): full 68px on
-// desktop mats, stepping down to 46px on a 360px phone — and back up again
-// when the MobileZoom wrapper widens the mat. Height follows via aspect-ratio.
-const MINI_W = 'clamp(46px, 9.5cqw, 68px)';
+// Mini-card width relative to the playmat container (cqw): steps down on a
+// phone mat and back up again when the MobileZoom wrapper widens it. Height
+// follows via aspect-ratio.
+//
+// The second term is a HEIGHT budget expressed in cqw. The mat is square, so
+// 1cqw == 1% of the mat's height too; the shortest zones (Machines at 17% of
+// the mat, Nodes/Deck/Graveyard at 18%) leave `0.17 * mat - 22px` of usable
+// room once the label row and padding are removed. A card is 96/68 ≈ 1.41×
+// its width, so `10.8cqw - 13px` keeps it inside that budget (with room
+// left for the tapped tilt and the hover lift). Without it a
+// full-width card was ~2px taller than the Nodes zone at rest and ~9px taller
+// on hover — it got sliced off by the zone's `overflow: hidden` and read as
+// "the card is behind the board".
+const MINI_W = 'clamp(26px, min(9.5cqw, 10.8cqw - 13px), 66px)';
 const MINI_BACK_W = 'clamp(34px, 6.7cqw, 48px)';
 
 function MiniCard({
@@ -3113,7 +3179,7 @@ function MiniCard({
         ? 'inset 0 0 10px rgba(0,0,0,0.65), 0 1px 3px rgba(0,0,0,0.7)'
         : '0 1px 2px rgba(0,0,0,0.7), 0 4px 9px rgba(0,0,0,0.5), 0 9px 20px rgba(0,0,0,0.3)';
   const vars: Vars = {
-    '--rot': tapped ? '11deg' : '0deg',
+    '--rot': tapped ? '6deg' : '0deg',
     '--shadow': restShadow,
     '--glow': `${meta.hex}bb`,
     '--filter': tapped ? 'saturate(0.5) brightness(0.78)' : 'none',
@@ -3265,9 +3331,14 @@ function Zone({
 }
 
 function CombatStrip({ G, ctx, myId }: { G: GState; ctx: any; myId: string }) {
-  if (G.combat.attackers.length === 0) return <div style={{ fontSize: 12, opacity: 0.5 }}>No combat in progress.</div>;
+  const mobile = useIsMobile();
+  // Phones: "No combat in progress." is a whole line of chrome that says
+  // nothing. Render it only where there is room for it.
+  if (G.combat.attackers.length === 0) {
+    return mobile ? null : <div style={{ fontSize: 12, opacity: 0.5, flex: '0 0 auto' }}>No combat in progress.</div>;
+  }
   return (
-    <div style={{ padding: '6px 10px', background: 'rgba(18,18,31,0.8)', border: '1px solid rgba(228,95,118,0.4)', borderRadius: 8 }}>
+    <div style={{ flex: '0 0 auto', padding: '6px 10px', background: 'rgba(18,18,31,0.8)', border: '1px solid rgba(228,95,118,0.4)', borderRadius: 8 }}>
       <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
         Combat — attacker: P{ctx.currentPlayer}
       </div>

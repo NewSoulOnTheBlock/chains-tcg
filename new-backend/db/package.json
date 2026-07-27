@@ -1,0 +1,15 @@
+{
+  "name": "@chains/migrate",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Standalone migration runner. Deliberately NOT an npm workspace so its Docker image can be built from db/ alone.",
+  "type": "module",
+  "main": "migrate.mjs",
+  "scripts": {
+    "migrate": "node migrate.mjs",
+    "status": "node migrate.mjs --status"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
+  }
+}

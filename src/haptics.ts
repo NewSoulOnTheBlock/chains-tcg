@@ -4,7 +4,20 @@
 
 type Pattern = number | number[];
 
+/** Settings -> Audio & Feel -> Vibration. Absent key = enabled. */
+export const HAPTICS_KEY = 'ocva.haptics';
+
+/** True when this device can vibrate at all (used to hide the setting row). */
+export function hapticsSupported(): boolean {
+  return typeof navigator !== 'undefined' && typeof (navigator as any).vibrate === 'function';
+}
+
+function enabled(): boolean {
+  try { return localStorage.getItem(HAPTICS_KEY) !== '0'; } catch { return true; }
+}
+
 function vibrate(pattern: Pattern): void {
+  if (!enabled()) return;
   try {
     if (typeof navigator !== 'undefined' && typeof (navigator as any).vibrate === 'function') {
       (navigator as any).vibrate(pattern);

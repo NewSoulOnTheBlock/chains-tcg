@@ -1,0 +1,57 @@
+#!/bin/sh
+# Turn ALLOWED_ORIGINS (comma-separated) into the regex alternation that
+# nginx.conf's CORS map expects.
+#
+#   ALLOWED_ORIGINS="http://localhost:5173,https://play.chains.gg"
+#     -> ALLOWED_ORIGINS_REGEX='http://localhost:5173|https://play\.chains\.gg'
+#
+# The `.envsh` suffix matters: nginx's entrypoint SOURCES these, so the export
+# below is visible to 20-envsubst-on-templates.sh, which runs afterwards.
+#
+# There is deliberately no wildcard path. An empty or missing ALLOWED_ORIGINS
+# yields a regex that cannot match any real origin — the gateway fails closed,
+# it never falls back to '*'.
+
+set -eu
+
+: "${ALLOWED_ORIGINS:=}"
+
+regex=""
+old_ifs="${IFS:-}"
+IFS=','
+for origin in $ALLOWED_ORIGINS; do
+    # strip surrounding whitespace
+    trimmed=$(printf '%s' "$origin" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    [ -z "$trimmed" ] && continue
+
+    case "$trimmed" in
+        '*')
+            echo "gateway: ALLOWED_ORIGINS contains '*' — refusing. Wildcard CORS is not permitted." >&2
+            exit 1
+            ;;
+        http://*|https://*) ;;
+        *)
+            echo "gateway: ignoring malformed origin '$trimmed' (must start with http:// or https://)" >&2
+            continue
+            ;;
+    esac
+
+    # Escape regex metacharacters so a '.' in a hostname is a literal dot.
+    # The class starts with ']' and keeps '.' away from the opening bracket:
+    # busybox sed reads a leading '[.' as a collating element and errors out.
+    escaped=$(printf '%s' "$trimmed" | sed -e 's/[]\^$.*+?()[{}|]/\\&/g')
+    if [ -z "$regex" ]; then
+        regex="$escaped"
+    else
+        regex="$regex|$escaped"
+    fi
+done
+IFS="$old_ifs"
+
+if [ -z "$regex" ]; then
+    echo "gateway: ALLOWED_ORIGINS is empty — every cross-origin browser request will be rejected." >&2
+    regex='https://unset\.origin\.invalid'
+fi
+
+export ALLOWED_ORIGINS_REGEX="$regex"
+echo "gateway: CORS allowlist -> $ALLOWED_ORIGINS_REGEX" >&2

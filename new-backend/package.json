@@ -1,0 +1,25 @@
+{
+  "name": "chains-backend",
+  "private": true,
+  "version": "2.0.0",
+  "description": "Chains TCG secure backend (v2) — see ARCHITECTURE.md",
+  "type": "module",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "workspaces": [
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "build:shared": "npm run build --workspace @chains/shared",
+    "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present",
+    "migrate": "node db/migrate.mjs",
+    "dev:auth": "npm run dev --workspace @chains/auth"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "@types/node": "^22.10.5"
+  }
+}

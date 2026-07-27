@@ -33,6 +33,9 @@ const PORT = Number(process.env.PORT) || 8000;
 // ALLOW_ORIGIN env var can't take the site down. ALLOW_ORIGIN (comma-
 // separated) is still honored on top of these.
 const PROD_ORIGINS = [
+  'https://ocva.online',
+  'https://www.ocva.online',
+  // Previous domain — kept so existing links keep working during the cutover.
   'https://www.masterstcg.com',
   'https://masterstcg.com',
 ];

@@ -18,6 +18,7 @@ import {
 import { connectSolanaWith, connectSolana, getSolanaWallet, detectSolanaWallets, connectRobinhoodChain, detectEvmWallet, shortAddr, type ConnectedWallet, type SolanaWalletKind } from './wallet';
 import { color as C, font as F, surface as SURF, edge as EDGE, depth as DEPTH } from './theme';
 import { Button as UIButton, goldPlate, obsidianPlate, engravedPanel } from './ui';
+import { SettingsPage, PREFS_EVENT } from './Settings';
 import {
   ArrowRight, ArrowLeft, ArrowUp, ArrowUpRight, ArrowDown, ChevronRight, ChevronDown,
   Close, Check, Plus, Refresh, Play, Search, Copy, Edit as EditIcon,
@@ -603,12 +604,27 @@ function BgMusic({ src, storageKey }: { src: string; storageKey: string }) {
     try { return localStorage.getItem(storageKey) === '1'; } catch { return false; }
   });
 
+  // This track is silent when either its own flag or the master mute is set.
+  // Several screens blanket-assign `.muted` to every <audio> when the master
+  // mute changes, which would otherwise un-mute a track the player had
+  // individually silenced — so we re-assert from storage rather than trusting
+  // the element's current value.
+  const applyMute = useCallback(() => {
+    const a = audioRef.current; if (!a) return;
+    let own = false, master = false;
+    try {
+      own = localStorage.getItem(storageKey) === '1';
+      master = localStorage.getItem('ocva.muted') === '1';
+    } catch { /* storage blocked */ }
+    a.muted = own || master;
+  }, [storageKey]);
+
   useEffect(() => {
     const a = audioRef.current; if (!a) return;
     a.volume = 0.35;
-    a.muted = muted;
+    applyMute();
     a.play().catch(() => { /* autoplay blocked until user gesture */ });
-  }, [muted]);
+  }, [muted, applyMute]);
 
   useEffect(() => {
     const kick = () => { audioRef.current?.play().catch(() => {}); };
@@ -616,10 +632,24 @@ function BgMusic({ src, storageKey }: { src: string; storageKey: string }) {
     return () => window.removeEventListener('pointerdown', kick);
   }, []);
 
+  // The Settings page (and the per-screen master-mute buttons) write these same
+  // keys. Re-read on the change event — and on `storage`, i.e. another tab — so
+  // the controls never drift apart.
+  useEffect(() => {
+    const sync = () => {
+      try { setMuted(localStorage.getItem(storageKey) === '1'); } catch { /* noop */ }
+      applyMute();
+    };
+    window.addEventListener(PREFS_EVENT, sync);
+    window.addEventListener('storage', sync);
+    return () => { window.removeEventListener(PREFS_EVENT, sync); window.removeEventListener('storage', sync); };
+  }, [storageKey, applyMute]);
+
   function toggle() {
     setMuted(m => {
       const next = !m;
       try { localStorage.setItem(storageKey, next ? '1' : '0'); } catch {}
+      try { window.dispatchEvent(new CustomEvent(PREFS_EVENT)); } catch {}
       return next;
     });
   }
@@ -627,18 +657,21 @@ function BgMusic({ src, storageKey }: { src: string; storageKey: string }) {
   return (
     <>
       <audio ref={audioRef} src={src} loop preload="auto" />
+      {/* Docked to the vertical centre of the right edge: clears the in-game
+          bottom action bar and the top turn banner, and is thumb-reachable
+          either-handed. z-index sits under the board's right rail (60) and
+          under every modal, so it can never cover them. */}
       <button
         onClick={toggle}
+        className="ova-plate ova-plate--obsidian ova-edge-stud ova-edge-stud--right"
+        aria-label={muted ? 'Unmute music' : 'Mute music'}
+        aria-pressed={muted}
         title={muted ? 'Unmute music' : 'Mute music'}
-        style={{
-          position: 'fixed', right: 14, bottom: 'calc(14px + env(safe-area-inset-bottom))', zIndex: 1000,
-          width: 44, height: 44, borderRadius: '50%',
-          background: 'rgba(20,20,20,0.75)', color: '#fff',
-          border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
-          fontSize: 18, backdropFilter: 'blur(6px)',
-          boxShadow: '0 4px 14px rgba(0,0,0,0.6)',
-        }}
-      >{muted ? <SoundOff size={19} /> : <SoundOn size={19} />}</button>
+        style={{ zIndex: 50 }}
+      >
+        <span className="ova-stud-grip" aria-hidden />
+        {muted ? <SoundOff size={19} /> : <SoundOn size={19} />}
+      </button>
     </>
   );
 }
@@ -1633,6 +1666,8 @@ function RulebookPage({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     try { localStorage.setItem('ocva.muted', muted ? '1' : '0'); } catch {}
     document.querySelectorAll('audio,video').forEach((a) => { (a as HTMLMediaElement).muted = muted; });
+    // Let <BgMusic> re-assert its own per-track mute after this blanket set.
+    try { window.dispatchEvent(new CustomEvent(PREFS_EVENT)); } catch {}
   }, [muted]);
 
   const h = rbHighlight(hlQuery);
@@ -2036,8 +2071,8 @@ function fmtCountdown(ms: number) {
 type QueueMode = 'ranked' | 'casual';
 
 function Landing({
-  myName, onPlay, onMasterquest, onBoosters, onProfile, onRules, onLogout,
-}: { myName: string; onPlay: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
+  myName, onPlay, onMasterquest, onBoosters, onProfile, onRules, onSettings,
+}: { myName: string; onPlay: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onSettings: () => void }) {
   const mobile = useIsMobile(767);
   const tablet = useIsMobile(1279);
   const [prof, setProf] = useState<Profile | null>(null);
@@ -2049,8 +2084,6 @@ function Landing({
   const [mode, setMode] = useState<QueueMode>(() => (localStorage.getItem('ocva.queueMode') as QueueMode) || 'ranked');
   const [muted, setMuted] = useState<boolean>(() => { try { return localStorage.getItem('ocva.muted') === '1'; } catch { return false; } });
   const [copied, setCopied] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [confirmSignOut, setConfirmSignOut] = useState(false);
   const liveRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -2078,6 +2111,8 @@ function Landing({
   useEffect(() => {
     try { localStorage.setItem('ocva.muted', muted ? '1' : '0'); } catch {}
     document.querySelectorAll('audio,video').forEach((a) => { (a as HTMLMediaElement).muted = muted; });
+    // Let <BgMusic> re-assert its own per-track mute after this blanket set.
+    try { window.dispatchEvent(new CustomEvent(PREFS_EVENT)); } catch {}
   }, [muted]);
 
   const games = prof ? prof.wins + prof.losses + prof.draws : 0;
@@ -2120,7 +2155,7 @@ function Landing({
         xpInto={xpInto} xpRange={xpRange} placement={placement}
         rankLabel={ranked && placement === 0 ? rankLabel(ranked) : null}
         walletAddress={prof?.walletAddress ?? null} copied={copied} onCopy={copyAddr}
-        muted={muted} onToggleMute={() => setMuted((m) => !m)} onSettings={() => setSettingsOpen(true)}
+        muted={muted} onToggleMute={() => setMuted((m) => !m)} onSettings={onSettings}
         loading={loading} mobile={mobile}
       />
 
@@ -2140,7 +2175,7 @@ function Landing({
         </div>
       </div>
 
-      <NavDock onCollection={goCollection} onBoosters={onBoosters} onMasters={onMasterquest} onProfile={onProfile} onRules={onRules} onSettings={() => setSettingsOpen(true)} mobile={mobile} />
+      <NavDock onCollection={goCollection} onBoosters={onBoosters} onMasters={onMasterquest} onProfile={onProfile} onRules={onRules} onSettings={onSettings} mobile={mobile} />
 
       <img src="/built-on-robinhood.png?v=2" alt="Built on Robinhood" draggable={false}
         style={{ position: mobile ? 'static' : 'absolute', zIndex: 2, left: '50%', bottom: mobile ? undefined : 70,
@@ -2148,14 +2183,6 @@ function Landing({
           width: mobile ? 120 : 150, height: 'auto', pointerEvents: 'none', userSelect: 'none', opacity: 0.9,
           filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.6))' }} />
 
-      {settingsOpen && (
-        <SettingsMenu muted={muted} onToggleMute={() => setMuted((m) => !m)} onClose={() => setSettingsOpen(false)}
-          onSignOut={() => { setSettingsOpen(false); setConfirmSignOut(true); }} onRules={onRules} />
-      )}
-      {confirmSignOut && (
-        <ConfirmDialog title="Sign out?" body="You'll return to the sign-in screen. Your progress is saved to your profile."
-          confirmLabel="SIGN OUT" onConfirm={onLogout} onCancel={() => setConfirmSignOut(false)} />
-      )}
     </div>
   );
 }
@@ -2397,40 +2424,10 @@ function NavDock({ onCollection, onBoosters, onMasters, onProfile, onRules, onSe
   );
 }
 
-function SettingsMenu({ muted, onToggleMute, onClose, onSignOut, onRules }: { muted: boolean; onToggleMute: () => void; onClose: () => void; onSignOut: () => void; onRules: () => void }) {
-  return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 30, background: 'rgba(4,4,12,0.6)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(360px, 100%)', borderRadius: 16, background: MENU.bgEl, border: `1px solid ${MENU.border}`, padding: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <span style={{ fontFamily: MENU_SERIF, fontWeight: 700, fontSize: 18, color: MENU.goldHi }}>Settings</span>
-          <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', color: MENU.text2, fontSize: 22, cursor: 'pointer' }}>×</button>
-        </div>
-        <button onClick={onToggleMute} style={settingsRow()}><span>Sound</span><span style={{ color: muted ? MENU.text2 : MENU.success, fontWeight: 700 }}>{muted ? 'Off' : 'On'}</span></button>
-        <button onClick={() => { onClose(); onRules(); }} style={settingsRow()}><span>Rulebook</span><span style={{ color: MENU.text2 }}>→</span></button>
-        <button onClick={onSignOut} style={{ ...settingsRow(), color: '#FF616F' }}><span>Sign out</span><span>→</span></button>
-      </div>
-    </div>
-  );
-}
-function settingsRow(): React.CSSProperties {
-  return { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 14px', marginBottom: 8, minHeight: 44,
-    borderRadius: 10, background: MENU.panel, border: `1px solid ${MENU.border}`, color: MENU.text, cursor: 'pointer', fontSize: 14, fontWeight: 600 };
-}
-
-function ConfirmDialog({ title, body, confirmLabel, onConfirm, onCancel }: { title: string; body: string; confirmLabel: string; onConfirm: () => void; onCancel: () => void }) {
-  return (
-    <div onClick={onCancel} style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(4,4,12,0.7)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(400px, 100%)', borderRadius: 16, background: MENU.bgEl, border: `1px solid ${MENU.border}`, padding: 22 }}>
-        <div style={{ fontFamily: MENU_SERIF, fontWeight: 700, fontSize: 20 }}>{title}</div>
-        <div style={{ color: MENU.text2, fontSize: 13.5, marginTop: 8, lineHeight: 1.5 }}>{body}</div>
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
-          <button onClick={onCancel} style={{ padding: '10px 18px', borderRadius: 10, background: MENU.panel, border: `1px solid ${MENU.border}`, color: MENU.text, cursor: 'pointer', fontWeight: 700 }}>CANCEL</button>
-          <button onClick={onConfirm} style={{ padding: '10px 18px', borderRadius: 10, background: '#FF616F', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 800 }}>{confirmLabel}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// The hub's old three-row settings popover (sound / rulebook / sign out) and its
+// sign-out ConfirmDialog were removed when the real Settings screen landed —
+// see src/Settings.tsx. Both the NavDock gear and the PlayerHUD gear now route
+// to view 'settings', which carries those three actions plus the rest.
 
 function ContractAddressFooter() {
   const mobile = useIsMobile();
@@ -2548,13 +2545,21 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void }) {
+function ProfilePage({ myName, onBack, onSettings }: { myName: string; onBack: () => void; onSettings: () => void }) {
   const mobile = useIsMobile(920);
   const [prof, setProf] = useState<Profile | null>(null);
   const [ranked, setRanked] = useState<any | null>(null);
   const [decks, setDecks] = useState<DeckEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
+  // Settings -> Account -> "Edit profile" sets this one-shot flag and navigates
+  // here, so the existing edit modal is reused instead of duplicated.
+  const [editing, setEditing] = useState(() => {
+    try {
+      if (sessionStorage.getItem('ocva.openProfileEdit') !== '1') return false;
+      sessionStorage.removeItem('ocva.openProfileEdit');
+      return true;
+    } catch { return false; }
+  });
   const [tab, setTab] = useState<HubTab>(readHubTab);
   const [muted, setMuted] = useState<boolean>(() => { try { return localStorage.getItem('ocva.muted') === '1'; } catch { return false; } });
   const [copied, setCopied] = useState(false);
@@ -2591,6 +2596,8 @@ function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void })
   useEffect(() => {
     try { localStorage.setItem('ocva.muted', muted ? '1' : '0'); } catch {}
     document.querySelectorAll('audio').forEach((a) => { (a as HTMLAudioElement).muted = muted; });
+    // Let <BgMusic> re-assert its own per-track mute after this blanket set.
+    try { window.dispatchEvent(new CustomEvent(PREFS_EVENT)); } catch {}
   }, [muted]);
 
   const activeDeck = decks.find((d) => d.isActive) ?? null;
@@ -2622,7 +2629,7 @@ function ProfilePage({ myName, onBack }: { myName: string; onBack: () => void })
       <HubTopNav
         tab={tab} setTab={(t) => setTab(t)} onBack={onBack} onEdit={() => setEditing(true)}
         walletAddress={prof?.walletAddress ?? null} copied={copied} onCopy={copyAddr}
-        muted={muted} onToggleMute={() => setMuted((m) => !m)}
+        muted={muted} onToggleMute={() => setMuted((m) => !m)} onSettings={onSettings}
       />
 
       {loading ? (
@@ -2681,9 +2688,10 @@ function HubBackdrop() {
 }
 
 // ── Top navigation (~60px) ──────────────────────────────────────────────────
-function HubTopNav({ tab, setTab, onBack, onEdit, walletAddress, copied, onCopy, muted, onToggleMute }: {
+function HubTopNav({ tab, setTab, onBack, onEdit, walletAddress, copied, onCopy, muted, onToggleMute, onSettings }: {
   tab: HubTab; setTab: (t: HubTab) => void; onBack: () => void; onEdit: () => void;
   walletAddress: string | null; copied: boolean; onCopy: () => void; muted: boolean; onToggleMute: () => void;
+  onSettings: () => void;
 }) {
   const mobile = useIsMobile(920);
   const connected = !!walletAddress;
@@ -2741,6 +2749,8 @@ function HubTopNav({ tab, setTab, onBack, onEdit, walletAddress, copied, onCopy,
       )}
       <button onClick={onToggleMute} aria-label={muted ? 'Unmute' : 'Mute'} style={{ width: mobile ? 40 : 34, height: mobile ? 40 : 34, display: 'grid', placeItems: 'center',
         borderRadius: 9, background: HUB.raised, border: `1px solid ${HUB.gold}44`, color: HUB.goldHi, cursor: 'pointer', flex: 'none' }}>{muted ? <SoundOff size={16} /> : <SoundOn size={16} />}</button>
+      <button onClick={onSettings} aria-label="Settings" title="Settings" style={{ width: mobile ? 40 : 34, height: mobile ? 40 : 34, display: 'grid', placeItems: 'center',
+        borderRadius: 9, background: HUB.raised, border: `1px solid ${HUB.gold}44`, color: HUB.goldHi, cursor: 'pointer', flex: 'none' }}><Settings size={16} /></button>
       <button onClick={onEdit} style={{ padding: mobile ? '10px 12px' : '8px 14px', borderRadius: 9, background: 'transparent', border: `1px solid ${HUB.gold}`,
         color: HUB.goldHi, cursor: 'pointer', fontWeight: 800, letterSpacing: '0.06em', fontSize: 11.5, whiteSpace: 'nowrap', flex: 'none' }}>{mobile ? 'EDIT' : 'EDIT PROFILE'}</button>
     </div>
@@ -6714,7 +6724,9 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nameKey]);
 
-  // Leave-match flow with confirm + in-flight guard.
+  // Leave-match flow with confirm + in-flight guard. Shared by the waiting-room
+  // LEAVE MATCH button and the in-game exit stud below — one state, one API
+  // call, one dialog, so both routes behave identically.
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [leaveErr, setLeaveErr] = useState('');
@@ -6747,6 +6759,36 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
     copyInvite();
   }
 
+  // Shared confirmation. `live` swaps the copy for the in-game case, where
+  // leaving abandons a match in progress rather than closing an open lobby.
+  const renderLeaveDialog = (live: boolean) => !confirmLeave ? null : (
+    <div onClick={() => !leaving && setConfirmLeave(false)} style={{
+      position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(3,4,10,0.78)',
+      backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="leave-match-title" style={{
+        width: 'min(440px, 100%)', borderRadius: 14, background: HUB.surface,
+        border: `1px solid ${HUB.gold}44`, padding: 22,
+      }}>
+        <div id="leave-match-title" style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 20, color: HUB.text }}>
+          {live ? 'Forfeit this match?' : 'Leave this match?'}
+        </div>
+        <div style={{ color: HUB.muted, fontSize: 13.5, marginTop: 8, lineHeight: 1.5 }}>
+          {live
+            ? 'The match is in progress. Leaving now forfeits it — you give up the duel, your seat is released and you cannot rejoin.'
+            : 'The open match will be closed and the invite link will stop working.'}
+        </div>
+        {leaveErr && <div style={{ color: HUB.red, fontSize: 12.5, marginTop: 10 }}>{leaveErr}</div>}
+        <div style={{ display: 'flex', gap: 10, marginTop: 18, justifyContent: 'flex-end' }}>
+          <button onClick={() => setConfirmLeave(false)} disabled={leaving} style={{ padding: '10px 18px', minHeight: 44, borderRadius: 10, background: HUB.raised, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: leaving ? 'default' : 'pointer', fontWeight: 700, letterSpacing: '0.04em' }}>STAY</button>
+          <button onClick={doLeave} disabled={leaving} style={{ padding: '10px 18px', minHeight: 44, borderRadius: 10, background: leaving ? '#5a2530' : HUB.red, border: 'none', color: '#fff', cursor: leaving ? 'default' : 'pointer', fontWeight: 800, letterSpacing: '0.04em' }}>
+            {leaving ? 'LEAVING…' : (live ? 'FORFEIT & LEAVE' : 'LEAVE MATCH')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   // Once the interstitial elapses and both seats are filled, mount the game.
   if (entered && isFull) {
     return (
@@ -6754,6 +6796,27 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
         <BattleMusic />
         <WagerStatusBadge matchID={seat.matchID} compact />
         <ChainsClient matchID={seat.matchID} playerID={seat.playerID} credentials={seat.credentials} />
+        {/* In-game exit. Before this the only way out of a live match was the
+            browser's back button. It reuses the waiting room's confirmLeave /
+            doLeave path exactly — same lobby API call, same in-flight guard.
+            Placement: the top-right corner, which the board's TurnBanner
+            already reserves (see its `paddingRight`) for the host app's exit
+            control, so it covers neither the banner, the hand, nor the action
+            bar at 390px. z-index 200 puts it above the board's bars (90–150)
+            and keeps it reachable during the mulligan overlay (199). */}
+        <button
+          onClick={() => { setLeaveErr(''); setConfirmLeave(true); }}
+          className="brd-stud"
+          aria-label="Leave match"
+          title="Leave match (forfeits the duel)"
+          style={{
+            position: 'fixed', zIndex: 200,
+            top: 'max(12px, env(safe-area-inset-top))',
+            right: 'max(12px, env(safe-area-inset-right))',
+            width: 44, height: 44,
+          }}
+        ><Close size={19} /></button>
+        {renderLeaveDialog(true)}
       </div>
     );
   }
@@ -6859,19 +6922,7 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
         </div>
       </div>
 
-      {confirmLeave && (
-        <div onClick={() => !leaving && setConfirmLeave(false)} style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(3,4,10,0.78)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(440px, 100%)', borderRadius: 14, background: HUB.surface, border: `1px solid ${HUB.gold}44`, padding: 22 }}>
-            <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 20, color: HUB.text }}>Leave this match?</div>
-            <div style={{ color: HUB.muted, fontSize: 13.5, marginTop: 8, lineHeight: 1.5 }}>The open match will be closed and the invite link will stop working.</div>
-            {leaveErr && <div style={{ color: HUB.red, fontSize: 12.5, marginTop: 10 }}>{leaveErr}</div>}
-            <div style={{ display: 'flex', gap: 10, marginTop: 18, justifyContent: 'flex-end' }}>
-              <button onClick={() => setConfirmLeave(false)} disabled={leaving} style={{ padding: '10px 18px', borderRadius: 10, background: HUB.raised, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: leaving ? 'default' : 'pointer', fontWeight: 700, letterSpacing: '0.04em' }}>STAY</button>
-              <button onClick={doLeave} disabled={leaving} style={{ padding: '10px 18px', borderRadius: 10, background: leaving ? '#5a2530' : HUB.red, border: 'none', color: '#fff', cursor: leaving ? 'default' : 'pointer', fontWeight: 800, letterSpacing: '0.04em' }}>{leaving ? 'LEAVING…' : 'LEAVE MATCH'}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {renderLeaveDialog(false)}
     </div>
   );
 }
@@ -7055,7 +7106,7 @@ function WagerStatusBadge({ matchID, compact }: { matchID: string; compact?: boo
 }
 
 // ── Root ────────────────────────────────────────────────────────────────────
-type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile' | 'ranked' | 'solo' | 'boosters' | 'masterquest';
+type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile' | 'ranked' | 'solo' | 'boosters' | 'masterquest' | 'settings';
 
 /**
  * Print-mode renderer used by scripts/render-cards.mjs. Lays out every card in
@@ -7499,7 +7550,14 @@ export default function App() {
 
   // Landing + Profile share the same audio element so music keeps playing
   // (and the user's mute state is preserved) when switching between them.
-  const showMusic = view === 'landing' || view === 'profile' || view === 'rules' || view === 'lobby' || view === 'ranked' || view === 'boosters' || view === 'masterquest';
+  const showMusic = view === 'landing' || view === 'profile' || view === 'rules' || view === 'lobby' || view === 'ranked' || view === 'boosters' || view === 'masterquest' || view === 'settings';
+
+  // Settings -> Account -> "Edit profile" hands off to the profile hub's
+  // existing ProfileEditModal rather than duplicating the edit form.
+  function editProfile() {
+    try { sessionStorage.setItem('ocva.openProfileEdit', '1'); } catch {}
+    goto('profile');
+  }
   return (
     <>
       <InstallPrompt />
@@ -7525,8 +7583,16 @@ export default function App() {
         />
       )}
       {showMusic && <MenuMusic />}
-      {view === 'profile'
-        ? <ProfilePage myName={name} onBack={() => goto('landing')} />
+      {view === 'settings'
+        ? <SettingsPage
+            myName={name}
+            onBack={() => goto('landing')}
+            onRules={() => goto('rules')}
+            onLogout={logout}
+            onEditProfile={editProfile}
+          />
+        : view === 'profile'
+        ? <ProfilePage myName={name} onBack={() => goto('landing')} onSettings={() => goto('settings')} />
         : view === 'rules'
           ? <RulebookPage onBack={() => goto('landing')} />
           : view === 'boosters'
@@ -7551,7 +7617,7 @@ export default function App() {
                       onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
                       onSolo={() => setSoloSetup(true)}
                     />
-                  : <Landing myName={name} onPlay={() => goto('lobby')} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onLogout={logout} />}
+                  : <Landing myName={name} onPlay={() => goto('lobby')} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onSettings={() => goto('settings')} />}
     </>
   );
 }

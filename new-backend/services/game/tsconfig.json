@@ -1,0 +1,29 @@
+{
+  "//": [
+    "audit M-12: nothing is excluded. Every .ts file under src/ - vendored rules included - is typechecked, under `strict: true`.",
+    "noUncheckedIndexedAccess is OFF for THIS SERVICE ONLY. src/game/Game.ts is a verbatim vendored copy of the repo's rules engine, authored against the root tsconfig; it indexes Record<string, ...> maps by playerID several hundred times. Rewriting those would make the file undiffable against upstream and risks changing game behaviour for a type-only win. The profile service, which vendors only cards.ts, keeps the flag on.",
+    "noUnusedLocals is OFF for the same reason - the vendored rules module keeps helpers this service does not call."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": false,
+    "sourceMap": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "noUnusedLocals": false,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedParameters": false,
+    "exactOptionalPropertyTypes": false,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"]
+}

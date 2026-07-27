@@ -1,0 +1,28 @@
+{
+  "name": "@chains/auth",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Chains TCG auth service — nonces, wallet signature verification, sessions, JWT issuing/rotation.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "dev": "node --watch --enable-source-maps dist/index.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@chains/shared": "*",
+    "bs58": "^6.0.0",
+    "express": "^5.2.1",
+    "tweetnacl": "^1.0.3",
+    "viem": "^2.55.10",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.10.5",
+    "typescript": "^5.9.2"
+  }
+}

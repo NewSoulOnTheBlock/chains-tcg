@@ -1,0 +1,330 @@
+# Chains TCG secure backend (v2)
+#
+#   docker compose up --build            # the whole stack, gateway on :8080
+#   docker compose up -d postgres redis migrate auth   # just the auth path
+#
+# Note for the parallel build: services/{profile,game,wager,rpc-proxy} are owned
+# by other agents and their Dockerfiles may not exist yet. Their entries below
+# are correct and complete; `docker compose config` validates fine without them,
+# and any subset can be started on its own.
+
+name: chains-backend
+
+# ---------------------------------------------------------------- fragments
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-hardening: &hardening
+  # Services run as the non-root `node` user (see each Dockerfile).
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+# Shared by every Node service. Secrets have no defaults: an unset
+# JWT_SECRET or POSTGRES_PASSWORD aborts `docker compose` outright rather than
+# booting the stack with a guessable key.
+x-service-env: &service-env
+  NODE_ENV: ${NODE_ENV:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_URL: "postgres://${POSTGRES_USER:-chains}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required, see .env.example}@postgres:5432/${POSTGRES_DB:-chains}"
+  REDIS_URL: "redis://redis:6379"
+  JWT_SECRET: "${JWT_SECRET:?JWT_SECRET is required, generate with openssl rand -hex 32}"
+  JWT_ISSUER: ${JWT_ISSUER:-chains-auth}
+  JWT_AUDIENCE: ${JWT_AUDIENCE:-chains-api}
+  ACCESS_TOKEN_TTL_SEC: ${ACCESS_TOKEN_TTL_SEC:-900}
+  OPERATOR_ADDRESSES: ${OPERATOR_ADDRESSES:-}
+  TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+  PGPOOL_MAX: ${PGPOOL_MAX:-10}
+
+x-service-depends: &service-depends
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  migrate:
+    condition: service_completed_successfully
+
+services:
+  # ------------------------------------------------------------ datastores
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-chains}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required, see .env.example}"
+      POSTGRES_DB: ${POSTGRES_DB:-chains}
+      # Refuse trust auth even on the container network.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # Loopback only. In production nothing but the gateway is published.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chains} -d ${POSTGRES_DB:-chains}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Nonces and rate-limit buckets are short-lived; AOF keeps single-use
+    # guarantees across a restart instead of resetting every bucket.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+
+  # ------------------------------------------------------- migration job
+  # One-shot. Runs to completion before any service starts; every service
+  # declares `migrate: service_completed_successfully`.
+  migrate:
+    build:
+      context: .
+      dockerfile: ./db/Dockerfile
+    restart: "no"
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-chains}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-chains}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    <<: *hardening
+    logging: *logging
+
+  # ------------------------------------------------------------- services
+  auth:
+    build:
+      context: .
+      dockerfile: ./services/auth/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *service-env
+      SERVICE_NAME: auth
+      PORT: "4001"
+      # The domain baked into every SIWE-style message a wallet signs. It comes
+      # from env and ONLY from env — never from the request's Host/Origin — so
+      # a phishing site cannot get a wallet to produce a signature this server
+      # will accept. No default: silently minting "localhost:8080" challenges in
+      # production is exactly the class of bug this backend exists to prevent.
+      # Production value is the WEB APP's origin: ocva.online.
+      AUTH_DOMAIN: "${AUTH_DOMAIN:?AUTH_DOMAIN is required, e.g. ocva.online (prod) or localhost:8080 (dev)}"
+      AUTH_URI: "${AUTH_URI:?AUTH_URI is required, e.g. https://ocva.online (prod) or http://localhost:8080 (dev)}"
+      AUTH_STATEMENT: "${AUTH_STATEMENT:-Sign in to Chains TCG.}"
+      NONCE_TTL_SEC: ${NONCE_TTL_SEC:-300}
+      REFRESH_TOKEN_TTL_SEC: ${REFRESH_TOKEN_TTL_SEC:-2592000}
+    depends_on: *service-depends
+    ports:
+      - "127.0.0.1:${AUTH_PORT:-4001}:4001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4001/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    <<: *hardening
+    logging: *logging
+
+  profile:
+    build:
+      context: .
+      dockerfile: ./services/profile/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *service-env
+      SERVICE_NAME: profile
+      PORT: "4002"
+    depends_on: *service-depends
+    ports:
+      - "127.0.0.1:${PROFILE_PORT:-4002}:4002"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4002/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    <<: *hardening
+    logging: *logging
+
+  game:
+    build:
+      context: .
+      dockerfile: ./services/game/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *service-env
+      SERVICE_NAME: game
+      PORT: "4003"
+      # HMAC over each game.match_results row. The wager service holds the same
+      # secret and verifies provenance before paying anyone (C-1).
+      MATCH_RESULT_HMAC_SECRET: "${MATCH_RESULT_HMAC_SECRET:?MATCH_RESULT_HMAC_SECRET is required, generate with openssl rand -hex 32}"
+    depends_on: *service-depends
+    ports:
+      - "127.0.0.1:${GAME_PORT:-4003}:4003"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4003/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    <<: *hardening
+    logging: *logging
+
+  wager:
+    build:
+      context: .
+      dockerfile: ./services/wager/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *service-env
+      SERVICE_NAME: wager
+      PORT: "4004"
+      MATCH_RESULT_HMAC_SECRET: "${MATCH_RESULT_HMAC_SECRET:?MATCH_RESULT_HMAC_SECRET is required}"
+      # On-chain READS go through the rpc-proxy so the credentials stay in one
+      # place (H-5). Writes cannot: the proxy refuses eth_sendRawTransaction by
+      # design, so signed payouts leave via EVM_SUBMIT_RPC_URL below.
+      RPC_PROXY_URL: "http://rpc-proxy:4005"
+      RPC_PROXY_INTERNAL_TOKEN: ${RPC_PROXY_INTERNAL_TOKEN:-}
+      RPC_PROXY_TIMEOUT_MS: ${RPC_PROXY_TIMEOUT_MS:-12000}
+
+      # ---- H-4: two DISTINCT hot wallets. `loadKeys()` refuses two identical
+      # keys at boot, so the escrow that holds player stakes can never double as
+      # the shop treasury. No default: an escrow signer must be deliberate.
+      WAGER_ESCROW_KEYPAIR: "${WAGER_ESCROW_KEYPAIR:?WAGER_ESCROW_KEYPAIR is required, generate with: openssl rand -hex 32 | sed 's/^/0x/'}"
+      BOOSTER_TREASURY_KEYPAIR: "${BOOSTER_TREASURY_KEYPAIR:?BOOSTER_TREASURY_KEYPAIR is required and MUST differ from WAGER_ESCROW_KEYPAIR (H-4)}"
+      # Seeds the deterministic pack roll; a retry must never re-roll a pack.
+      BOOSTER_PACK_SEED_SECRET: "${BOOSTER_PACK_SEED_SECRET:?BOOSTER_PACK_SEED_SECRET is required, generate with openssl rand -hex 32}"
+
+      # ---- payout submission (EVM only; there is no Solana path in this stack)
+      EVM_SUBMIT_RPC_URL: "${EVM_SUBMIT_RPC_URL:-https://ethereum-sepolia-rpc.publicnode.com}"
+      EVM_CHAIN_ID: ${EVM_CHAIN_ID:-11155111}
+      EVM_MIN_CONFIRMATIONS: ${EVM_MIN_CONFIRMATIONS:-2}
+
+      # ---- server-decided amount policy. The client names a TIER INDEX only.
+      WAGER_TOKEN_ADDRESS: "${WAGER_TOKEN_ADDRESS:-0x1c7d4b196cb0c7b01d743fbc6116a902379c7238}"
+      WAGER_TOKEN_DECIMALS: ${WAGER_TOKEN_DECIMALS:-6}
+      WAGER_STAKE_TIERS_BASE: "${WAGER_STAKE_TIERS_BASE:-1000000,5000000,25000000}"
+      WAGER_BURN_ADDRESS: "${WAGER_BURN_ADDRESS:-0x000000000000000000000000000000000000dead}"
+      WAGER_BURN_BPS: ${WAGER_BURN_BPS:-1000}
+
+      # ---- booster shop
+      BOOSTER_PRICE_WEI: "${BOOSTER_PRICE_WEI:-3500000000000000}"
+      BOOSTER_SUPPLY_CAP: ${BOOSTER_SUPPLY_CAP:-2000}
+      # Empty => digital redemption answers 503 instead of inventing card ids.
+      BOOSTER_CARD_POOL: "${BOOSTER_CARD_POOL:-}"
+
+      # ---- settlement worker
+      SETTLEMENT_ENABLED: ${SETTLEMENT_ENABLED:-true}
+      SETTLEMENT_POLL_MS: ${SETTLEMENT_POLL_MS:-5000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      rpc-proxy:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${WAGER_PORT:-4004}:4004"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4004/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    <<: *hardening
+    logging: *logging
+
+  rpc-proxy:
+    build:
+      context: .
+      dockerfile: ./services/rpc-proxy/Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *service-env
+      SERVICE_NAME: rpc-proxy
+      PORT: "4005"
+      # H-5: the only place this ever exists. It is never injected into a
+      # browser bundle. EVM only — the Solana Anchor program was never deployed,
+      # so there is no /rpc/solana and no SOLANA_RPC_URL anywhere in this stack.
+      EVM_RPC_URL: "${EVM_RPC_URL:?EVM_RPC_URL is required}"
+      RPC_ALLOWED_METHODS: ${RPC_ALLOWED_METHODS:-}
+      # Shared secret for server-to-server callers (wager). Buys a higher
+      # rate-limit tier and NOTHING else — it grants no extra methods.
+      RPC_INTERNAL_TOKEN: ${RPC_PROXY_INTERNAL_TOKEN:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${RPC_PROXY_PORT:-4005}:4005"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4005/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    <<: *hardening
+    logging: *logging
+
+  # ------------------------------------------------------------- gateway
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # Comma-separated. Never '*' — the entrypoint refuses a wildcard.
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:?ALLOWED_ORIGINS is required, e.g. http://localhost:5173}"
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    # nginx resolves upstream hostnames at startup, so every service must exist.
+    depends_on:
+      auth:
+        condition: service_healthy
+      profile:
+        condition: service_healthy
+      game:
+        condition: service_healthy
+      wager:
+        condition: service_healthy
+      rpc-proxy:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+
+volumes:
+  postgres-data:
+  redis-data:

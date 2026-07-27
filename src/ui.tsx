@@ -30,6 +30,30 @@ const CSS = `
 /* Small shared utilities (used across App.tsx screens). */
 .ocva-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ocva-scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* ── User-chosen "reduce motion" ──────────────────────────────────────────
+   index.html already neutralises animation for OS-level
+   \`prefers-reduced-motion: reduce\`. This mirrors that guard for the in-app
+   preference (Settings -> Display), which stamps data-reduced-motion="1" on
+   <html>. Same declarations, so both paths behave identically. */
+:root[data-reduced-motion="1"] *,
+:root[data-reduced-motion="1"] *::before,
+:root[data-reduced-motion="1"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+/* The named animation hooks each screen already guards on the media query. */
+:root[data-reduced-motion="1"] .menu-anim,
+:root[data-reduced-motion="1"] .hub-anim,
+:root[data-reduced-motion="1"] .rb-anim,
+:root[data-reduced-motion="1"] .ml-anim,
+:root[data-reduced-motion="1"] .ovp-field,
+:root[data-reduced-motion="1"] .ovp-primary {
+  animation: none !important;
+  transition: none !important;
+}
 `;
 
 // ── Forged-plate button language ─────────────────────────────────────────────
@@ -134,6 +158,48 @@ const PLATES = `
 /* Ornament sizing helper for the diamond flanks on hero CTAs. */
 .ova-plate .ova-orn { opacity: 0.55; }
 .ova-plate:hover:not([disabled]) .ova-orn { opacity: 0.9; }
+
+/* ── Edge-docked stud ────────────────────────────────────────────────────
+   A half-rounded obsidian tab that sits flush against a screen edge (the
+   same language as the board's collapsed rail tab). Compose it with
+   \`.ova-plate .ova-plate--obsidian\` so it inherits the forged hairline,
+   hover glow and sunk :active from the plate system — this class only
+   changes geometry + docking. */
+.ova-edge-stud {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0;
+  width: 38px; height: 58px;
+  border-radius: 12px 0 0 12px;
+  border-right: none;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  box-shadow: ${edge.topHighlight}, inset 1px 0 0 rgba(255,226,160,0.14), -8px 0 22px -8px rgba(3,2,10,0.85);
+}
+/* Dock to the right edge, honouring the notch/rounded-corner inset. */
+.ova-edge-stud--right { right: 0; margin-right: env(safe-area-inset-right, 0px); }
+.ova-edge-stud--left {
+  left: 0; margin-left: env(safe-area-inset-left, 0px);
+  border-radius: 0 12px 12px 0; border-right: 1px solid rgba(217,180,90,0.34); border-left: none;
+  box-shadow: ${edge.topHighlight}, inset -1px 0 0 rgba(255,226,160,0.14), 8px 0 22px -8px rgba(3,2,10,0.85);
+}
+/* Follow the tab's own rounding rather than the plate's square chamfer. */
+.ova-edge-stud::after { inset: 3px; border-radius: 9px 0 0 9px; }
+.ova-edge-stud--left::after { border-radius: 0 9px 9px 0; }
+/* The plate hover lifts by 1px; on a docked tab it should ease outward, not up. */
+.ova-edge-stud:hover:not([disabled]) { transform: translateY(-50%) translateX(-2px); }
+.ova-edge-stud--left:hover:not([disabled]) { transform: translateY(-50%) translateX(2px); }
+.ova-edge-stud:active:not([disabled]) { transform: translateY(-50%); }
+/* Vertical grip notches — reads as a pull-tab rather than a bare circle. */
+.ova-edge-stud > .ova-stud-grip {
+  position: absolute; left: 5px; top: 50%; transform: translateY(-50%);
+  width: 2px; height: 18px; border-radius: 2px; pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(217,180,90,0.55), transparent);
+}
+.ova-edge-stud--left > .ova-stud-grip { left: auto; right: 5px; }
+@media (pointer: coarse) {
+  .ova-edge-stud { width: 46px; height: 66px; }
+}
 `;
 
 // ── Engraved panels ──────────────────────────────────────────────────────────
@@ -305,11 +371,18 @@ if (typeof document !== 'undefined' && !document.getElementById('ocva-theme')) {
 
 // Global menu click SFX: play a short sound whenever a menu / UI button is pressed.
 // Scoped to our UI-primitive classes so in-game board controls stay silent.
+// Honours two prefs from the Settings page, re-read on every press so a toggle
+// takes effect immediately without a reload: `ocva.clickSfx` (this sound) and
+// `ocva.muted` (master mute).
 if (typeof document !== 'undefined' && !(window as any).__ocvaClickSfx) {
   (window as any).__ocvaClickSfx = true;
   document.addEventListener('pointerdown', (e) => {
     const el = (e.target as HTMLElement | null)?.closest?.('.ova-menu-item, .ova-hot, .ocva-btn, .ova-plate');
     if (!el || (el as HTMLButtonElement).disabled) return;
+    try {
+      if (localStorage.getItem('ocva.clickSfx') === '0') return;
+      if (localStorage.getItem('ocva.muted') === '1') return;
+    } catch { /* storage blocked — fall through and play */ }
     try {
       const a = new Audio('/click.mp3');
       a.volume = 0.45;

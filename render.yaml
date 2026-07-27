@@ -23,7 +23,7 @@ services:
       - key: PGSSL
         value: "1"            # Supabase requires SSL.
       - key: ALLOW_ORIGIN
-        value: "https://chains-tcg.vercel.app,https://www.masterstcg.com,https://masterstcg.com"
+        value: "https://ocva.online,https://www.ocva.online,https://chains-tcg.vercel.app,https://www.masterstcg.com,https://masterstcg.com"
         # Comma-separated allowed origins for socket.io + REST. Includes the Vercel frontend.
       - key: HELIUS_API_KEY
         sync: false           # required to populate the NFT library — paste your Helius API key

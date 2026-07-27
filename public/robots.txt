@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://www.masterstcg.com/sitemap.xml
+Sitemap: https://ocva.online/sitemap.xml

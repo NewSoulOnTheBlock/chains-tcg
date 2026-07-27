@@ -1,0 +1,31 @@
+{
+  "name": "@chains/wager",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Chains TCG wager service \u2014 EVM escrow deposits, settlement, payouts, booster tickets (:4004)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@chains/shared": "file:../../packages/shared",
+    "express": "^5.2.1",
+    "pg": "^8.16.3",
+    "redis": "^5.8.3",
+    "viem": "^2.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.15.5",
+    "typescript": "^5.9.2",
+    "vitest": "^2.1.9"
+  }
+}
