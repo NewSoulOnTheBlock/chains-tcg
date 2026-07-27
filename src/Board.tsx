@@ -601,6 +601,10 @@ export function ChainsBoard(props: Props) {
     if (draw) Haptics.turn();
     else if (winnerId === myId) Haptics.win();
     else Haptics.loss();
+    // Real daily-quest tracker ("Win 1 match" on the main menu). Any win counts.
+    if (!draw && winnerId === myId) {
+      try { localStorage.setItem(`ocva.daily.${new Date().toISOString().slice(0, 10)}.win`, '1'); } catch { /* ignore */ }
+    }
     if (isSolo) {
       // SoloClient handles solo result recording; broadcast a window event so
       // it can save the daily-best without us importing it (decouples Board).
