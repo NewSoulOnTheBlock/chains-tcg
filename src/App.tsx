@@ -3084,6 +3084,8 @@ function Lobby({
   const [wagerAmount, setWagerAmount] = useState<string>('1000');
   // Optional human-readable match name so opponents can find each other in the lobby.
   const [matchName, setMatchName] = useState<string>('');
+  // Center-column action tabs — one dominant action at a time instead of 3 stacked forms.
+  const [centerTab, setCenterTab] = useState<'quick' | 'create' | 'challenge'>('quick');
 
   // Player profile for top-bar header (avatar, win rate, level)
   const [myProfile, setMyProfile] = useState<Profile | null>(null);
@@ -3552,34 +3554,68 @@ function Lobby({
           />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
-            <RankedQueuePanel
-              myName={myName}
-              decks={myDecks}
-              selectedDeckId={mySelectedDeckId}
-              setSelectedDeckId={setMySelectedDeckId}
-              selectedDeckCards={myDeck}
-              deckOk={myDeckOk}
-              onJoined={onJoined}
-              setError={setError}
-            />
-            <CreateMatchPanel
-              myColor={myColor} setMyColor={setMyColor}
-              useCustom={useCustom} setUseCustom={setUseCustom}
-              myDeck={myDeck} myDeckOk={myDeckOk}
-              myDecks={myDecks} selectedDeckId={mySelectedDeckId} onSelectDeck={setMySelectedDeckId}
-              seatChoice={seatChoice} setSeatChoice={setSeatChoice}
-              matchName={matchName} setMatchName={setMatchName}
-              wagerKind={wagerKind} setWagerKind={setWagerKind}
-              wagerAmount={wagerAmount} setWagerAmount={setWagerAmount}
-              onCreate={createAndJoin}
-            />
-            <ChallengePanel
-              target={challengeTarget} setTarget={setChallengeTarget}
-              message={challengeMsg} setMessage={setChallengeMsg}
-              busy={challengeBusy} onSend={sendChallenge}
-              outgoing={outgoingChallenges} onCancel={cancelOutgoing}
-              wagerKind={wagerKind} wagerAmount={wagerAmount}
-            />
+            {/* Center action tabs — one dominant action at a time (Quick Match default). */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {([
+                { k: 'quick',     icon: '⚔️', label: 'Quick Match' },
+                { k: 'create',    icon: '➕', label: 'Create Match' },
+                { k: 'challenge', icon: '🎯', label: 'Challenge' },
+              ] as const).map(t => {
+                const active = centerTab === t.k;
+                const gold = t.k === 'quick';
+                return (
+                  <button key={t.k} onClick={() => { setCenterTab(t.k); setError(''); }} style={{
+                    padding: '12px 8px', borderRadius: 12, cursor: 'pointer', textAlign: 'center',
+                    fontFamily: PROFILE_FONT, fontWeight: 800, fontSize: 13, letterSpacing: 0.3,
+                    background: active
+                      ? (gold ? 'linear-gradient(180deg,#f0d27a,#c69533)' : 'rgba(143,92,255,0.22)')
+                      : 'rgba(10,15,25,0.72)',
+                    color: active ? (gold ? '#1a1408' : '#e6d4ff') : LOBBY_TOKENS.muted,
+                    border: `1px solid ${active ? (gold ? '#8a6d24' : 'rgba(143,92,255,0.6)') : LOBBY_TOKENS.border}`,
+                    boxShadow: active ? (gold ? '0 6px 18px -6px #d9b85f88' : '0 0 20px rgba(143,92,255,0.35)') : 'none',
+                    transition: 'all .15s ease', backdropFilter: 'blur(10px)',
+                  }}>
+                    <div style={{ fontSize: 18 }}>{t.icon}</div>
+                    <div style={{ marginTop: 4 }}>{t.label}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {centerTab === 'quick' && (
+              <RankedQueuePanel
+                myName={myName}
+                decks={myDecks}
+                selectedDeckId={mySelectedDeckId}
+                setSelectedDeckId={setMySelectedDeckId}
+                selectedDeckCards={myDeck}
+                deckOk={myDeckOk}
+                onJoined={onJoined}
+                setError={setError}
+              />
+            )}
+            {centerTab === 'create' && (
+              <CreateMatchPanel
+                myColor={myColor} setMyColor={setMyColor}
+                useCustom={useCustom} setUseCustom={setUseCustom}
+                myDeck={myDeck} myDeckOk={myDeckOk}
+                myDecks={myDecks} selectedDeckId={mySelectedDeckId} onSelectDeck={setMySelectedDeckId}
+                seatChoice={seatChoice} setSeatChoice={setSeatChoice}
+                matchName={matchName} setMatchName={setMatchName}
+                wagerKind={wagerKind} setWagerKind={setWagerKind}
+                wagerAmount={wagerAmount} setWagerAmount={setWagerAmount}
+                onCreate={createAndJoin}
+              />
+            )}
+            {centerTab === 'challenge' && (
+              <ChallengePanel
+                target={challengeTarget} setTarget={setChallengeTarget}
+                message={challengeMsg} setMessage={setChallengeMsg}
+                busy={challengeBusy} onSend={sendChallenge}
+                outgoing={outgoingChallenges} onCancel={cancelOutgoing}
+                wagerKind={wagerKind} wagerAmount={wagerAmount}
+              />
+            )}
           </div>
 
           <CommunityPanel
