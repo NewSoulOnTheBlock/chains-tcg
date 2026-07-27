@@ -4,6 +4,10 @@ dist/
 .env
 .env.*
 !.env.example
+# Holds no secret — just the public API URL. Committed so a fresh clone and
+# any host that builds from git (Vercel) produce a bundle pointing at the
+# real API without depending on a dashboard setting.
+!.env.production
 *.log
 .vite/
 .cache/

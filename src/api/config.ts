@@ -42,9 +42,25 @@ function normaliseBase(raw: string): string {
  * Base URL of the gateway. Every request in `src/api/**` is built as
  * `${API_BASE}${path}` where `path` always starts with `/`.
  */
-export const API_BASE: string = normaliseBase(
-  readEnv('VITE_API_BASE') ?? 'http://localhost:8080',
-);
+/**
+ * Fallback when `VITE_API_BASE` is unset.
+ *
+ * `.env.production` is git-ignored, so a fresh clone — or a host like Vercel
+ * that builds from git and injects env vars through its dashboard — can easily
+ * build with no value at all. Defaulting to localhost in that case ships a
+ * bundle that talks to nothing, and the failure only shows up in the browser.
+ *
+ * So: a build served from a real origin defaults to the real API, and only a
+ * localhost origin defaults to the local gateway. An explicit `VITE_API_BASE`
+ * always wins over both.
+ */
+function defaultBase(): string {
+  const host = (globalThis as { location?: { hostname?: string } }).location?.hostname;
+  const isLocal = host === undefined || host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+  return isLocal ? 'http://localhost:8080' : 'https://api.ocva.online';
+}
+
+export const API_BASE: string = normaliseBase(readEnv('VITE_API_BASE') ?? defaultBase());
 
 /**
  * Read-only JSON-RPC endpoint (INTEGRATION.md §8.5). Point viem/ethers here
