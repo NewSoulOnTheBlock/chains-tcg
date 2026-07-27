@@ -1,0 +1,7 @@
+# BuildKit per-Dockerfile ignore: the compose build context is the repo root
+# (~1.4 GB with frontend node_modules); only ship what this image needs.
+*
+!packages/game-core
+!backend/services/game
+packages/game-core/node_modules
+backend/services/game/node_modules

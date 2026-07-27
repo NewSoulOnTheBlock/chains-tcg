@@ -1,0 +1,19 @@
+{
+  "name": "@chains/game-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "boardgame.io game server for Chains TCG",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chains/game-core": "file:../../../packages/game-core",
+    "boardgame.io": "^0.50.2",
+    "tsx": "^4"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.3"
+  }
+}

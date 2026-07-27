@@ -1,0 +1,80 @@
+name: chains-tcg
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: chains
+      POSTGRES_USER: chains
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chains}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chains -d chains"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - chains
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - chains
+
+  game:
+    build:
+      context: ../
+      dockerfile: backend/services/game/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      ALLOW_ORIGIN: ${ALLOW_ORIGIN:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - chains
+
+  profile:
+    build:
+      context: ../
+      dockerfile: backend/services/profile/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      PORT: "8001"
+      DATABASE_URL: postgres://chains:${POSTGRES_PASSWORD:-chains}@postgres:5432/chains
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - chains
+
+  gateway:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - game
+      - profile
+    networks:
+      - chains
+
+volumes:
+  pgdata:
+
+networks:
+  chains:
