@@ -82,6 +82,16 @@ describe('errorHeadline', () => {
     expect(errorIssues(unowned)).toEqual(['Your deck runs 3 × PEPE but you own 0.']);
   });
 
+  it('reads unowned_cards as a rule, not a fault, and names the fix', () => {
+    // A starter deck (22 Nodes + ~38 booster cards) can never pass the ranked
+    // ownership check. The player must come away knowing ranked needs minted
+    // cards — not that something is broken.
+    const headline = errorHeadline(unowned);
+    expect(headline).toMatch(/booster/i);
+    expect(headline).toMatch(/node/i);
+    expect(headline).toMatch(/ranked/i);
+  });
+
   it('still describes network and rate-limit failures', () => {
     const offline = new ApiError({ status: 0, code: 'network_error', message: 'x' });
     expect(errorHeadline(offline)).toMatch(/could not reach the server/i);

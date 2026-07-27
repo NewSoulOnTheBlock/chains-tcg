@@ -51,7 +51,12 @@ const REASON_TEXT: Record<string, string> = {
   // Ranked and wager seating check the active deck against the player's real
   // CardPack holdings. `details.issues` names each offending card, so the
   // headline stays short and the list carries the detail.
-  unowned_cards: 'Ranked and wager matches only use cards you own, and your active deck has some you do not.',
+  //
+  // Wager is not mentioned: this client does not offer it, so the only way a
+  // player reaches this line is a ranked match. It names the fix (boosters) and
+  // the exemption (Nodes) because a starter deck ALWAYS lands here — that is the
+  // design, and the copy has to read as a rule rather than as a fault.
+  unowned_cards: 'Ranked matches only use cards you own — your active deck has some you do not. Basic Nodes are always free; everything else comes from booster packs.',
   // The HOST's deck failed re-validation as you tried to join. It deliberately
   // carries no card detail — a decklist must never cross the table — and there
   // is nothing the joining player can fix, so point them elsewhere.

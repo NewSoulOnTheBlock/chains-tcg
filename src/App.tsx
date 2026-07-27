@@ -17,7 +17,7 @@ import {
 import {
   auth, decks as decksApi, lobby as lobbyApi, session as sessionApi,
   ApiError, SOCKET_URL,
-  type AuthChain, type LobbyEntry, type OwnProfile, type SeatInfo,
+  type AuthChain, type LobbyEntry, type MatchMode, type OwnProfile, type SeatInfo,
 } from './api';
 import { errorText, errorHeadline, errorIssues, isDeckBlocked, isHostDeckUnowned } from './error-text';
 import { RANKED_AVAILABLE, RANKED_UNAVAILABLE_MESSAGE } from './ranked-client';
@@ -26,7 +26,13 @@ import { connectRobinhoodChain, detectEvmWallet, shortAddr, ROBINHOOD_CHAIN } fr
 // is a subscription to the cached snapshot; `ownershipIssues` mirrors the
 // server's ranked/wager seating check. Ownership is shown in the deck builder,
 // never enforced there — casual and solo are deliberately ungated.
-import { useCollection, ownershipIssues, ownedCount, refreshCollection, syncCollection } from './collection';
+import { useCollection, ownershipIssues, ownedCount, ownershipKnown, refreshCollection, syncCollection } from './collection';
+// Which modes the lobby offers (casual + ranked; wager is deliberately absent)
+// and whether the active deck would survive the server's ranked ownership check.
+import {
+  OFFERED_MODES, MODE_LABEL, MODE_BLURB, evaluateRankedDeck, shortfallLines, pickQuickMatch,
+  type OfferedMode, type RankedEligibility,
+} from './match-mode';
 import { color as C, font as F, surface as SURF, edge as EDGE, depth as DEPTH } from './theme';
 import { Button as UIButton, goldPlate, obsidianPlate, engravedPanel } from './ui';
 import { SettingsPage, PREFS_EVENT } from './Settings';
@@ -4330,7 +4336,8 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
 
 // ── Lobby screen ────────────────────────────────────────────────────────────
 function Lobby({
-  myName, onJoined, onBack, onViewProfile, onSolo, onDeckScreen, linkProblem, onDismissLinkProblem,
+  myName, onJoined, onBack, onViewProfile, onSolo, onDeckScreen, onBoosters,
+  linkProblem, onDismissLinkProblem,
 }: {
   myName: string;
   onJoined: (seat: Seat) => void;
@@ -4339,6 +4346,12 @@ function Lobby({
   onSolo: () => void;
   /** Send the player to the deck builder — the only fix for `no_active_deck`. */
   onDeckScreen: () => void;
+  /**
+   * Send the player to boosters — the only way to acquire the cards a ranked
+   * deck is checked against. Starter decks are free but not owned, so this is
+   * the real fix for the ranked advisory's "short" state.
+   */
+  onBoosters: () => void;
   /**
    * Why a `#match=<id>` invite link could not be opened.
    *
@@ -4363,10 +4376,35 @@ function Lobby({
   const [unlisted, setUnlisted] = useState(false);
   const [challengeTarget, setChallengeTarget] = useState('');
   const [centerTab, setCenterTab] = useState<'quick' | 'create' | 'challenge'>('quick');
+  /**
+   * The mode the next created match is opened in.
+   *
+   * Shared by Create Match and Challenge because both are the same
+   * `POST /games/create` — a challenge is just a match addressed to one player.
+   * Only casual and ranked are offered; see `OFFERED_MODES` for why wager is not.
+   */
+  const [mode, setMode] = useState<OfferedMode>('casual');
 
   const [myProfile, setMyProfile] = useState<Profile | null>(null);
   const [myDecks, setMyDecks] = useState<DeckEntry[]>([]);
   const activeDeck = useMemo(() => myDecks.find(d => d.isActive) ?? null, [myDecks]);
+
+  // Ownership for the ranked advisory. The lobby reads the cheap
+  // `GET /wager/collection` snapshot once on entry; a full chain scan stays an
+  // explicit button, because it is rate limited to 6 per 5 minutes.
+  const collection = useCollection();
+  useEffect(() => { void refreshCollection(); }, []);
+  const rankedDeck: RankedEligibility = useMemo(
+    () => evaluateRankedDeck(activeDeck?.cards, { known: ownershipKnown(), ownedCount }),
+    // `collection` is the subscription that makes this recompute after a sync;
+    // the values themselves come from the module's confirmed snapshot.
+    [activeDeck, collection],
+  );
+  const [scanning, setScanning] = useState(false);
+  const scanChain = useCallback(async () => {
+    setScanning(true);
+    try { await syncCollection(); } finally { setScanning(false); }
+  }, []);
 
   /**
    * ONE place where a thrown value becomes lobby UI.
@@ -4443,15 +4481,20 @@ function Lobby({
     onJoined(seatFrom(info, myName));
   }, [myName, onJoined]);
 
-  async function createMatch(options: { unlisted?: boolean; invitedDisplayName?: string } = {}) {
+  async function createMatch(options: { unlisted?: boolean; invitedDisplayName?: string; mode?: OfferedMode } = {}) {
     clearErrors();
     setBusy(options.invitedDisplayName ? 'challenge' : 'create');
     try {
       // NO DECK IN THE BODY. The server attaches the caller's ACTIVE deck —
       // that is the whole point of the migration, and a stray `deck` key is a
       // 400 against the strict body schema.
+      //
+      // `mode` decides whether that deck is ownership-checked: ranked (and
+      // wager, which this client does not offer) validate every non-Node card
+      // against `core.card_ownership` by quantity, and refuse with 400
+      // `unowned_cards` — which `report` routes to the deck screen.
       const created = await lobbyApi.create({
-        mode: 'casual',
+        mode: options.mode ?? 'casual',
         ...(options.unlisted !== undefined ? { unlisted: options.unlisted } : {}),
         ...(options.invitedDisplayName ? { invitedDisplayName: options.invitedDisplayName } : {}),
       });
@@ -4507,10 +4550,11 @@ function Lobby({
     setBusy('quick');
     try {
       const open = await lobbyApi.getLobby({ limit: 50 });
-      // Our own matches are in this list too; joining one is a `self_challenge`.
-      const candidate = open.find(
-        m => m.seats.some(s => !s.filled) && !m.seats.some(s => s.displayName === myName),
-      );
+      // Prefers casual, and only offers a ranked seat to a deck that would
+      // actually pass the server's ownership check — otherwise "find a match"
+      // would be a button that can only 400. Our own matches are in this list
+      // too; joining one is a `self_challenge`.
+      const candidate = pickQuickMatch(open, myName, rankedDeck.status === 'ready');
       if (candidate) {
         const joined = await lobbyApi.join(candidate.matchID);
         onJoined({
@@ -4519,6 +4563,8 @@ function Lobby({
         });
         return;
       }
+      // Nobody to play: open a casual seat. Quick Match never opens a ranked
+      // one — ranked is a deliberate choice, made in Create Match.
       const created = await lobbyApi.create({ mode: 'casual' });
       await enterMatch(created.matchID);
     } catch (e) {
@@ -4538,7 +4584,7 @@ function Lobby({
     if (target.toLowerCase() === myName.toLowerCase()) { setError('You cannot challenge yourself.'); return; }
     // An invite is just a match addressed to one player: it is forced unlisted
     // and shows up in their `GET /games/invites`.
-    await createMatch({ invitedDisplayName: target });
+    await createMatch({ invitedDisplayName: target, mode });
     setChallengeTarget('');
   }
 
@@ -4711,13 +4757,21 @@ function Lobby({
             {centerTab === 'create' && (
               <CreateMatchPanel
                 unlisted={unlisted} setUnlisted={setUnlisted}
+                mode={mode} setMode={setMode}
+                ranked={rankedDeck} scanning={scanning || collection.loading}
+                onScanChain={() => { void scanChain(); }}
+                onDeckScreen={onDeckScreen} onBoosters={onBoosters}
                 busy={busy === 'create'}
-                onCreate={() => { void createMatch({ unlisted }); }}
+                onCreate={() => { void createMatch({ unlisted, mode }); }}
               />
             )}
             {centerTab === 'challenge' && (
               <ChallengePanel
                 target={challengeTarget} setTarget={setChallengeTarget}
+                mode={mode} setMode={setMode}
+                ranked={rankedDeck} scanning={scanning || collection.loading}
+                onScanChain={() => { void scanChain(); }}
+                onDeckScreen={onDeckScreen} onBoosters={onBoosters}
                 busy={busy === 'challenge'} onSend={() => { void sendChallenge(); }}
               />
             )}
@@ -4874,7 +4928,8 @@ function QuickMatchPanel({ busy, onQuickMatch }: { busy: boolean; onQuickMatch: 
         color: LOBBY_TOKENS.gold, display: 'flex', alignItems: 'center', gap: 10,
       }}><Swords size={17} /> QUICK MATCH</div>
       <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.muted, margin: '8px 0 14px', lineHeight: 1.6 }}>
-        Takes the first open seat in the lobby. If nobody is waiting, it opens a
+        Takes the first open casual seat in the lobby — or a ranked one, if your
+        active deck already qualifies. If nobody is waiting, it opens a casual
         match and waits for a challenger.
       </div>
       <button onClick={onQuickMatch} disabled={busy} className="ova-plate ova-plate--gold"
@@ -5135,21 +5190,185 @@ function MatchCard({ m, myName, busy, onJoin }: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MATCH MODE
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * CASUAL or RANKED, sent as `POST /games/create {mode}`.
+ *
+ * Two options, not three: WAGER is not offered at all — no option, no disabled
+ * teaser — because its money path is currently pointed at the wrong chain. See
+ * `src/match-mode.ts`.
+ *
+ * Rendered as a radio group rather than a tab strip: this is a property of the
+ * match being created, not navigation, and screen readers should say so.
+ */
+function MatchModePicker({ mode, setMode }: { mode: OfferedMode; setMode: (m: OfferedMode) => void }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 11, letterSpacing: 1.5, color: LOBBY_TOKENS.muted, fontWeight: 800, marginBottom: 7 }}>
+        MATCH MODE
+      </div>
+      <div role="radiogroup" aria-label="Match mode" style={{
+        display: 'grid', gridTemplateColumns: `repeat(${OFFERED_MODES.length}, minmax(0, 1fr))`, gap: 8,
+      }}>
+        {OFFERED_MODES.map((m) => {
+          const active = mode === m;
+          const gold = m === 'casual';
+          return (
+            <button key={m} type="button" role="radio" aria-checked={active}
+              onClick={() => setMode(m)}
+              style={{
+                padding: '11px 8px', minHeight: 44, borderRadius: 11, cursor: 'pointer',
+                fontFamily: PROFILE_FONT, fontWeight: 800, fontSize: 12.5, letterSpacing: 1,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                background: active
+                  ? (gold ? 'linear-gradient(180deg,#f0d27a,#c69533)' : 'rgba(143,92,255,0.22)')
+                  : 'rgba(10,15,25,0.72)',
+                color: active ? (gold ? '#1a1408' : '#e6d4ff') : LOBBY_TOKENS.muted,
+                border: `1px solid ${active ? (gold ? '#8a6d24' : 'rgba(143,92,255,0.6)') : LOBBY_TOKENS.border}`,
+                boxShadow: active ? (gold ? '0 6px 18px -6px #d9b85f88' : '0 0 20px rgba(143,92,255,0.35)') : 'none',
+                transition: 'all .15s ease',
+              }}>
+              {gold ? <Swords size={15} /> : <Trophy size={15} />} {MODE_LABEL[m]}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 11.5, color: LOBBY_TOKENS.muted, marginTop: 8, lineHeight: 1.6 }}>
+        {MODE_BLURB[mode]}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Whether the active deck will survive the ranked ownership check — said BEFORE
+ * the player presses the button rather than as a 400 afterwards.
+ *
+ * The three states are answers to three different questions and are styled to
+ * match: gold "we have not looked" (scan the chain), gold "you are short these
+ * cards" (open boosters), green "verified". Nothing here ever DISABLES creating
+ * the match: the server is the authority, this snapshot can lag a pack minted
+ * seconds ago, and a client-side refusal would be a dead end. If it turns out to
+ * be right, `unowned_cards` comes back and `ProblemBanner` names every card.
+ */
+function RankedDeckNote({ ranked, scanning, onScanChain, onDeckScreen, onBoosters }: {
+  ranked: RankedEligibility; scanning: boolean;
+  onScanChain: () => void; onDeckScreen: () => void; onBoosters: () => void;
+}) {
+  const ok = ranked.status === 'ready';
+  const accent = ok ? LOBBY_TOKENS.green : LOBBY_TOKENS.gold;
+  const heading =
+    ranked.status === 'ready'   ? 'RANKED · DECK VERIFIED'
+    : ranked.status === 'no-deck' ? 'RANKED · NO ACTIVE DECK'
+    : ranked.status === 'unknown' ? 'RANKED · COLLECTION NOT SCANNED'
+    : 'RANKED · CARDS YOU DO NOT OWN YET';
+
+  return (
+    <div style={{
+      marginBottom: 12, padding: '12px 14px', borderRadius: 10,
+      background: ok ? 'rgba(0,209,143,0.07)' : 'rgba(217,184,95,0.07)',
+      border: `1px solid ${accent}66`,
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: accent,
+      }}>
+        {ok ? <Check size={14} /> : <Warning size={14} />} {heading}
+      </div>
+
+      <div style={{ fontSize: 12, color: LOBBY_TOKENS.muted, marginTop: 6, lineHeight: 1.6 }}>
+        {ranked.status === 'no-deck' && (
+          <>Activate a deck and we will check it against the cards you own before you open the match.</>
+        )}
+        {/* NEVER "your deck is illegal" here. Nobody has looked yet. */}
+        {ranked.status === 'unknown' && (
+          <>Your cards have not been read from the chain yet, so we cannot tell whether this deck
+            qualifies. Scan the chain and we will check it — Basic Nodes are free either way.</>
+        )}
+        {ranked.status === 'ready' && (ranked.checked === 0 ? (
+          // A deck of nothing but Nodes is legal and owns itself — the server
+          // skips `node_*` entirely, so there is nothing to verify.
+          <>Your active deck is {ranked.nodes} Basic Nodes, which are free, unlimited and never
+            checked. You are clear to open a ranked match.</>
+        ) : (
+          <>All {ranked.checked} non-Node card{ranked.checked === 1 ? '' : 's'} in your active deck
+            are yours{ranked.nodes > 0 ? `, alongside ${ranked.nodes} free Basic Node${ranked.nodes === 1 ? '' : 's'}` : ''}.
+            You are clear to open a ranked match.</>
+        ))}
+        {ranked.status === 'short' && (
+          <>Ranked decks are built from cards you have minted from booster packs, so the free
+            starter decks stay casual — that is the design, not a fault. You are short{' '}
+            <b style={{ color: '#f0e2b8' }}>{ranked.missingCopies} cop{ranked.missingCopies === 1 ? 'y' : 'ies'}</b>{' '}
+            across {ranked.missingCards} card{ranked.missingCards === 1 ? '' : 's'}. Basic Nodes are free and
+            unlimited, so a ranked deck can be mostly Nodes plus the cards you have actually pulled.</>
+        )}
+      </div>
+
+      {ranked.status === 'short' && (
+        <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 11.5, color: '#d9c98e', lineHeight: 1.65 }}>
+          {shortfallLines(ranked.shortfall).map((line, i) => <li key={i}>{line}</li>)}
+        </ul>
+      )}
+
+      {ranked.status !== 'ready' && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+          {ranked.status === 'no-deck' && (
+            <button onClick={onDeckScreen} style={{ ...LOBBY_GHOST_BTN, padding: '8px 12px', fontSize: 11.5 }}>
+              <DeckIcon size={13} /> Build a deck
+            </button>
+          )}
+          {ranked.status === 'short' && (
+            <>
+              <button onClick={onBoosters} style={{ ...LOBBY_GHOST_BTN, padding: '8px 12px', fontSize: 11.5 }}>
+                <Gem size={13} /> Open boosters
+              </button>
+              <button onClick={onDeckScreen} style={{ ...LOBBY_GHOST_BTN, padding: '8px 12px', fontSize: 11.5 }}>
+                <DeckIcon size={13} /> Edit deck
+              </button>
+            </>
+          )}
+          {ranked.status !== 'no-deck' && (
+            /* The one control that can change the answer: the snapshot lags a
+               pack minted seconds ago, and a never-synced player needs it. */
+            <button onClick={onScanChain} disabled={scanning}
+              title="Re-read your CardPack NFTs from Robinhood Chain"
+              style={{
+                ...LOBBY_GHOST_BTN, padding: '8px 12px', fontSize: 11.5,
+                opacity: scanning ? 0.6 : 1, cursor: scanning ? 'default' : 'pointer',
+              }}>
+              <Refresh size={13} /> {scanning ? 'Scanning…' : 'Scan chain'}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CREATE MATCH PANEL (center column)
 // ─────────────────────────────────────────────────────────────────────────────
 /**
- * Opening a match is now a one-button affair.
+ * Opening a match asks for two things: the MODE, and whether it is listed.
  *
- * Everything this panel used to ask for is decided elsewhere or not at all:
- * the DECK comes from your active deck (`POST /games/create` takes no deck),
- * the CHAIN COLOUR is gone because the server seats both players with real
- * decklists and `colors: [null, null]`, so nobody enters the colour-pick phase,
- * and the SEAT is fixed — the creator is always seat 0.
+ * Everything else is decided elsewhere or not at all: the DECK comes from your
+ * active deck (`POST /games/create` takes no deck), the CHAIN COLOUR is gone
+ * because the server seats both players with real decklists and
+ * `colors: [null, null]`, so nobody enters the colour-pick phase, and the SEAT
+ * is fixed — the creator is always seat 0.
  *
  * Stakes are a separate, currently-gated flow: see `WagerControls`.
  */
-function CreateMatchPanel({ unlisted, setUnlisted, busy, onCreate }: {
-  unlisted: boolean; setUnlisted: (v: boolean) => void; busy: boolean; onCreate: () => void;
+function CreateMatchPanel({
+  unlisted, setUnlisted, mode, setMode, ranked, scanning,
+  onScanChain, onDeckScreen, onBoosters, busy, onCreate,
+}: {
+  unlisted: boolean; setUnlisted: (v: boolean) => void;
+  mode: OfferedMode; setMode: (m: OfferedMode) => void;
+  ranked: RankedEligibility; scanning: boolean;
+  onScanChain: () => void; onDeckScreen: () => void; onBoosters: () => void;
+  busy: boolean; onCreate: () => void;
 }) {
   return (
     <div style={{ ...LOBBY_GLASS, padding: 18 }}>
@@ -5161,6 +5380,12 @@ function CreateMatchPanel({ unlisted, setUnlisted, busy, onCreate }: {
         Opens a match with you in seat 0 and waits for a challenger. You can have
         3 open matches at a time.
       </div>
+
+      <MatchModePicker mode={mode} setMode={setMode} />
+      {mode === 'ranked' && (
+        <RankedDeckNote ranked={ranked} scanning={scanning}
+          onScanChain={onScanChain} onDeckScreen={onDeckScreen} onBoosters={onBoosters} />
+      )}
 
       <label style={{
         display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10,
@@ -5179,9 +5404,11 @@ function CreateMatchPanel({ unlisted, setUnlisted, busy, onCreate }: {
 
       <WagerControls />
 
+      {/* Never disabled on the ranked advisory — the server decides who owns
+          what, and a stale snapshot must not lock the player out of trying. */}
       <button onClick={onCreate} disabled={busy} className="ova-plate ova-plate--gold"
         style={{ width: '100%', marginTop: 14, padding: '14px 18px', fontSize: 13.5, letterSpacing: '0.18em' }}>
-        <Plus size={16} /> {busy ? 'CREATING…' : 'CREATE MATCH'}
+        <Plus size={16} /> {busy ? 'CREATING…' : `CREATE ${MODE_LABEL[mode]} MATCH`}
       </button>
     </div>
   );
@@ -5198,8 +5425,15 @@ function CreateMatchPanel({ unlisted, setUnlisted, busy, onCreate }: {
  * There is therefore no "decline" to send and no outgoing-challenge list to
  * poll — declining is local, and cancelling is done from the waiting room.
  */
-function ChallengePanel({ target, setTarget, busy, onSend }: {
-  target: string; setTarget: (s: string) => void; busy: boolean; onSend: () => void;
+function ChallengePanel({
+  target, setTarget, mode, setMode, ranked, scanning,
+  onScanChain, onDeckScreen, onBoosters, busy, onSend,
+}: {
+  target: string; setTarget: (s: string) => void;
+  mode: OfferedMode; setMode: (m: OfferedMode) => void;
+  ranked: RankedEligibility; scanning: boolean;
+  onScanChain: () => void; onDeckScreen: () => void; onBoosters: () => void;
+  busy: boolean; onSend: () => void;
 }) {
   return (
     <div style={{ ...LOBBY_GLASS, padding: 18 }}>
@@ -5220,11 +5454,21 @@ function ChallengePanel({ target, setTarget, busy, onSend }: {
         placeholder="Exact display name" autoComplete="off"
         style={challengeInputStyle()} />
 
+      {/* A challenge is the same `POST /games/create`, so it takes the same
+          mode — and the same ownership check when that mode is ranked. */}
+      <div style={{ marginTop: 14 }}>
+        <MatchModePicker mode={mode} setMode={setMode} />
+      </div>
+      {mode === 'ranked' && (
+        <RankedDeckNote ranked={ranked} scanning={scanning}
+          onScanChain={onScanChain} onDeckScreen={onDeckScreen} onBoosters={onBoosters} />
+      )}
+
       <WagerControls />
 
       <button onClick={onSend} disabled={busy || !target.trim()} className="ova-plate ova-plate--gold"
         style={{ width: '100%', marginTop: 14, padding: '14px 18px', fontSize: 13.5, letterSpacing: '0.18em' }}>
-        <Target size={16} /> {busy ? 'SENDING…' : 'SEND CHALLENGE'}
+        <Target size={16} /> {busy ? 'SENDING…' : `SEND ${MODE_LABEL[mode]} CHALLENGE`}
       </button>
     </div>
   );
@@ -6658,6 +6902,7 @@ export default function App() {
                       onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
                       onSolo={() => setSoloSetup(true)}
                       onDeckScreen={() => { try { window.location.hash = 'decks'; } catch {} goto('profile'); }}
+                      onBoosters={() => goto('boosters')}
                       linkProblem={linkProblem}
                       onDismissLinkProblem={() => setLinkProblem(null)}
                     />

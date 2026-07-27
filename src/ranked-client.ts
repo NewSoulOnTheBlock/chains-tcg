@@ -38,9 +38,18 @@
 // tier colours and the LP label formatter are gone: keeping them would mean
 // keeping UI that renders data nothing can supply.
 
-/** Is competitive ranked play backed by a real service? It is not. */
+/**
+ * Is the competitive LADDER backed by a real service? It is not.
+ *
+ * This says nothing about ranked MATCHES, which do work: `POST /games/create
+ * {mode:'ranked'}` seats a match whose decks are checked against real card
+ * ownership, and the lobby's Create Match panel offers exactly that. What is
+ * missing is everything the ladder is made of — rating, seasons, a queue — so
+ * this gate stays closed and the panel it drives says which half is which.
+ */
 export const RANKED_AVAILABLE = false as const;
 
-/** One line for the UI to show wherever ranked used to be offered. */
+/** One line for the UI to show wherever the ladder used to be offered. */
 export const RANKED_UNAVAILABLE_MESSAGE =
-  'Ranked ladder is not available yet — there is no rating, season or queue service behind it.';
+  'You can already create ranked matches from Create Match — they check your deck against the cards you own. ' +
+  'The ladder itself is what is missing: there is no rating, season or queue service yet, so results do not move a rank.';
