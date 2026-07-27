@@ -4,7 +4,7 @@
   "description": "A Robinhood app — the 5-chain onchain card arena on Robinhood Chain.",
   "start_url": "/",
   "scope": "/",
-  "display": "standalone",
+  "display": "browser",
   "orientation": "any",
   "background_color": "#0a0a1e",
   "theme_color": "#0a0a1e",
