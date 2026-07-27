@@ -283,32 +283,38 @@ function Login({ onLogin, onFirstTime }: {
   const CYAN = '#4FD1C5';
   const mobile = useIsMobile();
 
-  // ── Mobile / portrait login ──────────────────────────────────────────────
-  // A landscape splash can't carry tiny painted hotspots on a phone, so on mobile
-  // the artwork fills the screen (cover, no stretch) and real touch-sized controls
-  // sit in a bottom sheet.
-  if (mobile) {
+  // ── Sign-in ───────────────────────────────────────────────────────────────
+  // The splash art is a clean arena scene, so real controls sit on top: a
+  // centered card on desktop, a bottom sheet on mobile (both over a cover image).
+  {
     const evm = detectEvmWallet();
     const connecting = busy === 'robinhood';
     return (
       <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#07060f', fontFamily: F.body, color: '#F8F8F8' }}>
         <audio ref={audioRef} src="/login-theme.mp3" loop preload="auto" style={{ display: 'none' }} />
-        <img src="/login-splash.png" alt="" draggable={false}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 22%', userSelect: 'none', zIndex: 0 }} />
-        <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 1, background: 'linear-gradient(180deg, rgba(7,6,15,0.1) 0%, rgba(7,6,15,0.55) 55%, rgba(7,6,15,0.96) 100%)' }} />
+        <img src="/login-splash.png?v=2" alt="" draggable={false}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', userSelect: 'none', zIndex: 0 }} />
+        <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 1, background: mobile
+          ? 'linear-gradient(180deg, rgba(7,6,15,0.10) 0%, rgba(7,6,15,0.55) 55%, rgba(7,6,15,0.96) 100%)'
+          : 'radial-gradient(55% 55% at 50% 66%, rgba(7,6,15,0.72), transparent 72%), linear-gradient(180deg, rgba(7,6,15,0.28), rgba(7,6,15,0.5))' }} />
         <button onClick={() => setMuted(m => !m)} aria-label={muted ? 'Unmute' : 'Mute'} style={{
-          position: 'fixed', top: 'calc(10px + env(safe-area-inset-top))', right: 12, zIndex: 5, width: 40, height: 40, borderRadius: 20,
+          position: 'fixed', top: 'calc(12px + env(safe-area-inset-top))', right: 14, zIndex: 5, width: 40, height: 40, borderRadius: 20,
           background: 'rgba(10,5,30,0.6)', border: '1px solid rgba(212,175,55,0.45)', color: '#D4AF37', fontSize: 17, cursor: 'pointer',
         }}>{muted ? '🔇' : (playing ? '🔊' : '🎵')}</button>
 
-        <div style={{
+        <div style={mobile ? {
           position: 'absolute', zIndex: 2, left: 0, right: 0, bottom: 0,
           padding: '18px 16px calc(20px + env(safe-area-inset-bottom))',
           display: 'flex', flexDirection: 'column', gap: 10,
+        } : {
+          position: 'absolute', zIndex: 2, left: '50%', top: '64%', transform: 'translate(-50%,-50%)',
+          width: 'min(440px, calc(100vw - 40px))', display: 'flex', flexDirection: 'column', gap: 12,
+          background: 'rgba(12,10,26,0.72)', border: '1px solid rgba(150,120,255,0.22)', borderRadius: 18,
+          padding: 26, backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', boxShadow: '0 24px 70px rgba(0,0,0,0.55)',
         }}>
           <div style={{ textAlign: 'center', marginBottom: 2 }}>
-            <div style={{ color: '#b794f6', letterSpacing: 3, fontWeight: 800, fontSize: 13 }}>WELCOME, CHAMPION</div>
-            <div style={{ color: '#9a94ad', fontSize: 12, marginTop: 3 }}>Enter the Arena. Claim your victory.</div>
+            <div style={{ color: '#b794f6', letterSpacing: 3, fontWeight: 800, fontSize: 14 }}>‹ WELCOME BACK, CHAMPION ›</div>
+            <div style={{ color: '#9a94ad', fontSize: 12, marginTop: 4 }}>Enter the Arena. Claim your victory.</div>
           </div>
 
           <button className="ocva-btn" disabled={!!busy}
@@ -340,141 +346,6 @@ function Login({ onLogin, onFirstTime }: {
     );
   }
 
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, overflow: 'hidden',
-      background: '#07060f', display: 'grid', placeItems: 'center',
-      fontFamily: F.body, color: '#F8F8F8',
-    }}>
-      <audio ref={audioRef} src="/login-theme.mp3" loop preload="auto" style={{ display: 'none' }} />
-      <button
-        onClick={() => setMuted(m => !m)}
-        title={muted ? 'Unmute music' : 'Mute music'}
-        aria-label={muted ? 'Unmute music' : 'Mute music'}
-        style={{
-          position: 'fixed', top: 14, right: 14, zIndex: 50,
-          width: 38, height: 38, borderRadius: 19,
-          background: 'rgba(10,5,30,0.55)', border: '1px solid rgba(212,175,55,0.45)',
-          color: '#D4AF37', fontSize: 16, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-          boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
-        }}
-      >{muted ? '🔇' : (playing ? '🔊' : '🎵')}</button>
-
-      <style>{`
-        .ova-hot { position:absolute; background:transparent; border:2px solid transparent; border-radius:14px;
-          cursor:pointer; padding:0; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
-        .ova-hot:hover:not([disabled]) { background: rgba(160,120,255,0.14); border-color: rgba(160,120,255,0.6);
-          box-shadow: 0 0 26px rgba(124,92,255,0.45); }
-        .ova-hot:focus-visible { outline:2px solid #9d86ff; outline-offset:2px; }
-        .ova-hot[disabled] { cursor: wait; }
-      `}</style>
-
-      {/* Splash art locked to its 1717:916 aspect ratio; every hotspot is a % of
-          this box, so the transparent buttons stay glued to the painted ones. */}
-      <div style={mobile ? {
-        position: 'relative', display: 'inline-block', lineHeight: 0, maxWidth: '100vw', maxHeight: '100dvh',
-      } : {
-        position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
-        width: 'max(100vw, calc(100dvh * 1717 / 916))',
-        height: 'max(100dvh, calc(100vw * 916 / 1717))',
-        lineHeight: 0,
-      }}>
-        <img
-          src="/login-splash.png"
-          alt="On-Chain Virtual Arena — sign in"
-          draggable={false}
-          style={mobile
-            ? { display: 'block', maxWidth: '100vw', maxHeight: '100dvh', width: 'auto', height: 'auto', userSelect: 'none' }
-            : { display: 'block', width: '100%', height: '100%', userSelect: 'none' }}
-        />
-
-        {/* Connect Wallet -> MetaMask on Robinhood Chain */}
-        <button
-          className="ova-hot" disabled={!!busy}
-          title="Connect MetaMask on Robinhood Chain"
-          onClick={() => detectEvmWallet().installed ? doConnectRobinhood() : window.open('https://metamask.io/download/', '_blank', 'noopener')}
-          style={{ left: '28.4%', top: '63.4%', width: '13.7%', height: '14.6%' }}
-        />
-        {/* Email -> coming soon */}
-        <button
-          className="ova-hot" disabled={!!busy} title="Email login"
-          onClick={() => setNotice('Email login is coming soon.')}
-          style={{ left: '43.2%', top: '63.4%', width: '13.7%', height: '14.6%' }}
-        />
-        {/* Guest -> name entry */}
-        <button
-          className="ova-hot" disabled={!!busy} title="Guest login"
-          onClick={() => { setNotice(''); setMode('guest'); }}
-          style={{ left: '58.0%', top: '63.4%', width: '13.7%', height: '14.6%' }}
-        />
-
-        {/* Social sign-in -> coming soon */}
-        {([['Discord', 41.3], ['Google', 45.9], ['Apple', 50.5], ['X', 55.1]] as [string, number][]).map(([label, left]) => (
-          <button
-            key={label} className="ova-hot" disabled={!!busy} title={label}
-            onClick={() => setNotice(`${label} login is coming soon.`)}
-            style={{ left: `${left}%`, top: '82.2%', width: '3.3%', height: '6.6%', borderRadius: 12 }}
-          />
-        ))}
-
-        {/* Guest name-entry overlay (the splash art has no input field) */}
-        {mode === 'guest' && (
-          <div style={{
-            position: 'absolute', left: '50%', top: '62%', transform: 'translate(-50%,-50%)',
-            width: 'min(90%, 420px)', zIndex: 5,
-            background: 'rgba(14,12,30,0.94)', border: '1px solid rgba(150,120,255,0.4)',
-            borderRadius: 14, padding: 18, boxShadow: '0 24px 70px rgba(0,0,0,0.6)',
-            backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <span style={{ color: '#b794f6', fontWeight: 800, letterSpacing: 2, fontSize: 12 }}>ENTER AS GUEST</span>
-              <button onClick={() => setMode('wallet')} style={{ background: 'none', border: 'none', color: '#8f89a3', cursor: 'pointer', fontSize: 12 }}>&larr; back</button>
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                value={name} onChange={e => setName(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && name.trim()) onLogin(name.trim()); }}
-                placeholder="Choose your champion name" autoFocus
-                style={{ flex: 1, padding: '11px 13px', fontSize: 14, background: 'rgba(10,10,20,0.8)', color: '#fff', border: '1px solid rgba(150,120,255,0.35)', borderRadius: 10, outline: 'none' }}
-              />
-              <button onClick={randomName} title="Random name" style={{ padding: '0 12px', background: 'rgba(138,43,226,0.2)', color: '#d6c4ff', border: '1px solid rgba(138,43,226,0.5)', borderRadius: 10, cursor: 'pointer', fontWeight: 700 }}>&#127922;</button>
-            </div>
-            <button
-              onClick={() => name.trim() && onLogin(name.trim())} disabled={!name.trim()}
-              style={{
-                marginTop: 12, width: '100%', padding: '12px', borderRadius: 10, border: 'none',
-                background: name.trim() ? 'linear-gradient(135deg,#7c3aed,#a855f7)' : 'rgba(60,55,80,0.45)',
-                color: name.trim() ? '#fff' : '#8a86a0', fontWeight: 800, letterSpacing: 2, textTransform: 'uppercase',
-                cursor: name.trim() ? 'pointer' : 'not-allowed',
-              }}
-            >Enter Arena</button>
-          </div>
-        )}
-
-        {/* Status toast: connecting / notice / error */}
-        {(busy === 'robinhood' || notice || err) && (
-          <div style={{
-            position: 'absolute', left: '50%', bottom: '2.5%', transform: 'translateX(-50%)',
-            zIndex: 6, maxWidth: '86%', textAlign: 'center',
-            padding: '9px 16px', borderRadius: 10, fontSize: 13,
-            background: err ? 'rgba(217,75,75,0.18)' : 'rgba(14,12,30,0.92)',
-            border: `1px solid ${err ? 'rgba(217,75,75,0.5)' : 'rgba(150,120,255,0.35)'}`,
-            color: err ? '#ffb8b8' : '#d9d3f0',
-            backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-          }}>
-            {busy === 'robinhood'
-              ? 'Connecting… approve the Robinhood Chain request in MetaMask.'
-              : (err || notice)}
-            {err && /context invalidated|reloaded or updated/i.test(err) && (
-              <button onClick={() => window.location.reload()} style={{ marginLeft: 10, padding: '4px 10px', borderRadius: 6, background: '#7c3aed', color: '#fff', fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 12 }}>Reload</button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
 
 }
 
