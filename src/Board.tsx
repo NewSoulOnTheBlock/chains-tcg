@@ -1002,17 +1002,11 @@ export function ChainsBoard(props: Props) {
         </pre>
       </details>
 
-      {/* Desktop-only floating action log on the right rail. Mirrors G.log
-          but always visible and auto-scrolls so the player can follow what
-          the bot/opponent just did. */}
-      {!mobile && <ActionLogRail entries={G.log} />}
-
-      {/* Chat */}
-      <ChatPanel
-        myId={myId}
-        messages={chatMessages ?? []}
-        sendChatMessage={sendChatMessage}
-      />
+      {/* Desktop: unified collapsible rail with ACTION LOG + CHAT tabs.
+          Mobile: keep the floating chat bubble (the rail becomes a drawer). */}
+      {!mobile
+        ? <MatchRail entries={G.log} myId={myId} messages={chatMessages ?? []} sendChatMessage={sendChatMessage} />
+        : <ChatPanel myId={myId} messages={chatMessages ?? []} sendChatMessage={sendChatMessage} />}
 
       {/* Proximity voice with your opponent (PeerJS WebRTC). Skipped in solo. */}
       {matchID && playerID && !isSolo && (
@@ -1205,6 +1199,96 @@ function ChatPanel({
           }}
         >Send</button>
       </div>
+    </div>
+  );
+}
+
+/** Unified right rail (desktop): ACTION LOG + CHAT tabs, collapsible. */
+function MatchRail({ entries, myId, messages, sendChatMessage }: {
+  entries: string[]; myId: string;
+  messages: Array<{ id: string; sender: string; payload: any }>;
+  sendChatMessage?: (msg: any) => void;
+}) {
+  const [tab, setTab] = useState<'log' | 'chat'>('log');
+  const [collapsed, setCollapsed] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [lastSeen, setLastSeen] = useState(0);
+  const logRef = React.useRef<HTMLDivElement>(null);
+  const chatRef = React.useRef<HTMLDivElement>(null);
+  const GOLD = '#E5B84B';
+
+  useEffect(() => { if (tab === 'log' && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [entries.length, tab]);
+  useEffect(() => {
+    if (tab === 'chat' && !collapsed) {
+      if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
+      setLastSeen(messages.length);
+    }
+  }, [messages.length, tab, collapsed]);
+  const unread = Math.max(0, messages.length - lastSeen);
+
+  function colorFor(line: string): string {
+    if (line.startsWith('— Turn')) return '#C45CFF';
+    if (/attack|damage|destroyed|kills/i.test(line)) return '#E45F76';
+    if (/draws|gains|heals/i.test(line)) return '#39E879';
+    if (/mulligan|keeps/i.test(line)) return '#FFD86A';
+    return '#cdd2e2';
+  }
+  function send() { const t = draft.trim(); if (!t || !sendChatMessage) return; sendChatMessage({ text: t }); setDraft(''); }
+
+  if (collapsed) {
+    return (
+      <button onClick={() => setCollapsed(false)} aria-label="Expand match rail" title="Expand rail" style={{
+        position: 'fixed', top: 80, right: 0, zIndex: 60, width: 34, height: 84, borderRadius: '10px 0 0 10px',
+        background: 'rgba(12,18,32,0.9)', border: `1px solid ${GOLD}55`, borderRight: 'none', color: GOLD, cursor: 'pointer', fontSize: 16,
+        display: 'grid', placeItems: 'center',
+      }}>
+        »{unread > 0 && <span style={{ position: 'absolute', top: 6, right: 6, background: '#E45F76', color: '#fff', fontSize: 9, fontWeight: 800, borderRadius: 8, minWidth: 16, height: 16, display: 'grid', placeItems: 'center', padding: '0 4px' }}>{unread > 9 ? '9+' : unread}</span>}
+      </button>
+    );
+  }
+  const tabBtn = (active: boolean): React.CSSProperties => ({
+    flex: 1, padding: '10px 8px', cursor: 'pointer', background: 'none', border: 'none',
+    fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 800, fontSize: 12, letterSpacing: 1.4,
+    color: active ? GOLD : '#989BB0', borderBottom: `2px solid ${active ? GOLD : 'transparent'}`,
+  });
+  return (
+    <div style={{
+      position: 'fixed', top: 80, right: 16, bottom: 100, width: 300, zIndex: 60,
+      background: 'rgba(12,18,32,0.86)', border: `1px solid ${GOLD}44`, borderRadius: 12,
+      boxShadow: '0 0 24px rgba(142,77,255,0.15), 0 10px 30px #000a', backdropFilter: 'blur(8px)',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${GOLD}22` }}>
+        <button onClick={() => setTab('log')} style={tabBtn(tab === 'log')}>ACTION LOG</button>
+        <button onClick={() => { setTab('chat'); setLastSeen(messages.length); }} style={tabBtn(tab === 'chat')}>
+          CHAT{unread > 0 && tab !== 'chat' && <span style={{ marginLeft: 6, background: '#E45F76', color: '#fff', fontSize: 9, borderRadius: 8, padding: '1px 5px' }}>{unread > 9 ? '9+' : unread}</span>}
+        </button>
+        <button onClick={() => setCollapsed(true)} aria-label="Collapse rail" title="Collapse" style={{ background: 'none', border: 'none', color: '#989BB0', cursor: 'pointer', fontSize: 16, padding: '0 12px' }}>«</button>
+      </div>
+      {tab === 'log' ? (
+        <div ref={logRef} style={{ flex: 1, overflow: 'auto', padding: '10px 12px', fontSize: 12, lineHeight: 1.5, fontFamily: 'system-ui' }}>
+          {entries.length === 0
+            ? <div style={{ opacity: 0.4 }}>(No actions yet)</div>
+            : entries.slice(-200).map((line, i) => <div key={i} style={{ color: colorFor(line), marginBottom: 3, wordBreak: 'break-word' }}>{line}</div>)}
+        </div>
+      ) : (
+        <>
+          <div ref={chatRef} style={{ flex: 1, overflow: 'auto', padding: '10px 12px', fontSize: 12, fontFamily: 'system-ui' }}>
+            {messages.length === 0 && <div style={{ color: '#6b7387', fontStyle: 'italic' }}>No messages yet.</div>}
+            {messages.map(m => {
+              const mine = m.sender === myId;
+              const text = typeof m.payload === 'string' ? m.payload : (m.payload && typeof m.payload.text === 'string' ? m.payload.text : JSON.stringify(m.payload));
+              return <div key={m.id} style={{ marginBottom: 5, color: mine ? '#39E879' : '#7fb3ff' }}><b>P{m.sender}{mine ? ' (you)' : ''}:</b> <span style={{ color: '#F4F2EA' }}>{text}</span></div>;
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 6, padding: 8, borderTop: `1px solid ${GOLD}22` }}>
+            <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') send(); }}
+              placeholder={sendChatMessage ? 'Message…' : 'Chat unavailable'} disabled={!sendChatMessage} aria-label="Chat message"
+              style={{ flex: 1, padding: '8px 10px', background: '#090D19', color: '#F4F2EA', border: '1px solid #2a3350', borderRadius: 8, fontSize: 12 }} />
+            <button onClick={send} disabled={!sendChatMessage || !draft.trim()} style={{ padding: '8px 14px', background: 'linear-gradient(180deg,#FFD86A,#c69533)', color: '#1a1408', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12 }}>Send</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
