@@ -67,7 +67,9 @@ export async function mintPack(): Promise<RevealedCard[]> {
   const [account] = await wc.getAddresses();
   const price = await fetchPackPrice();
 
-  const hash = await wc.writeContract({ account, address: CARD_PACK, abi: packAbi, functionName: 'mintPack', value: price });
+  // Explicit gas limit: this chain's estimateGas can return a bogus huge value for
+  // value-bearing calls, which then exceeds the per-tx cap. mintPack is ~430k gas.
+  const hash = await wc.writeContract({ account, address: CARD_PACK, abi: packAbi, functionName: 'mintPack', value: price, gas: 1_500_000n });
   const rcpt = await pub.waitForTransactionReceipt({ hash });
 
   for (const log of rcpt.logs) {

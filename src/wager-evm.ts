@@ -77,10 +77,10 @@ export async function depositWager(matchID: string, wagerWei: bigint): Promise<`
     address: WAGER_TOKEN, abi: erc20Abi, functionName: 'allowance', args: [account, WAGER_ESCROW],
   });
   if (allowance < wagerWei) {
-    const approveHash = await wc.writeContract({ account, address: WAGER_TOKEN, abi: erc20Abi, functionName: 'approve', args: [WAGER_ESCROW, wagerWei] });
+    const approveHash = await wc.writeContract({ account, address: WAGER_TOKEN, abi: erc20Abi, functionName: 'approve', args: [WAGER_ESCROW, wagerWei], gas: 150_000n });
     await publicClient.waitForTransactionReceipt({ hash: approveHash });
   }
-  const depositHash = await wc.writeContract({ account, address: WAGER_ESCROW, abi: escrowAbi, functionName: 'deposit', args: [id] });
+  const depositHash = await wc.writeContract({ account, address: WAGER_ESCROW, abi: escrowAbi, functionName: 'deposit', args: [id], gas: 400_000n });
   await publicClient.waitForTransactionReceipt({ hash: depositHash });
   return depositHash;
 }
@@ -90,7 +90,7 @@ export async function claimWinnings(): Promise<`0x${string}`> {
   await ensureRobinhoodChain();
   const wc = walletClient();
   const [account] = await wc.getAddresses();
-  const hash = await wc.writeContract({ account, address: WAGER_ESCROW, abi: escrowAbi, functionName: 'claim' });
+  const hash = await wc.writeContract({ account, address: WAGER_ESCROW, abi: escrowAbi, functionName: 'claim', gas: 300_000n });
   await publicClient.waitForTransactionReceipt({ hash });
   return hash;
 }
