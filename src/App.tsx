@@ -315,12 +315,12 @@ function Login({ onLogin, onFirstTime }: {
 
       {/* Splash art locked to its 1717:916 aspect ratio; every hotspot is a % of
           this box, so the transparent buttons stay glued to the painted ones. */}
-      <div style={{ position: 'relative', width: 'min(100vw, calc(100dvh * 1717 / 916))', aspectRatio: '1717 / 916', maxHeight: '100dvh' }}>
+      <div style={{ position: 'relative', display: 'inline-block', lineHeight: 0 }}>
         <img
           src="/login-splash.png"
           alt="On-Chain Virtual Arena — sign in"
           draggable={false}
-          style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain', userSelect: 'none' }}
+          style={{ display: 'block', maxWidth: '100vw', maxHeight: '100dvh', width: 'auto', height: 'auto', userSelect: 'none' }}
         />
 
         {/* Connect Wallet -> MetaMask on Robinhood Chain */}
@@ -1363,12 +1363,14 @@ function Landing({
   ];
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#07060f', display: 'grid', placeItems: 'center', fontFamily: F.body, color: C.textHi }}>
-      <div style={{ position: 'relative', width: 'min(100vw, calc(100dvh * 1683 / 935))', aspectRatio: '1683 / 935', maxHeight: '100dvh' }}>
+      {/* The image sizes itself to fit the viewport; the wrapper shrink-wraps to
+          the image's rendered box so % hotspots stay exactly on the artwork. */}
+      <div style={{ position: 'relative', display: 'inline-block', lineHeight: 0 }}>
         <img
           src="/hub-splash.png"
           alt="On-Chain Virtual Arena — main menu"
           draggable={false}
-          style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain', userSelect: 'none' }}
+          style={{ display: 'block', maxWidth: '100vw', maxHeight: '100dvh', width: 'auto', height: 'auto', userSelect: 'none' }}
         />
         {items.map(it => (
           <button
