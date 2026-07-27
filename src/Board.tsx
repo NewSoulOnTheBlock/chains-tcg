@@ -1779,7 +1779,7 @@ function Playmat(props: {
       {/* Background image — blurred + darkened so cards pop */}
       <div style={{
         position: 'absolute', inset: 0,
-        backgroundImage: 'url(/playmat.png)', backgroundSize: 'cover', backgroundPosition: 'center',
+        backgroundImage: 'url(/playmat.png?v=2)', backgroundSize: 'cover', backgroundPosition: 'center',
         filter: 'blur(2px) brightness(0.45) saturate(0.7)',
         zIndex: 0,
       }} />
