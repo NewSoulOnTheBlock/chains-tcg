@@ -127,18 +127,19 @@ function seatFrom(info: SeatInfo, playerName: string): Seat {
 /**
  * The chain slug sent to `/auth/nonce`, i.e. the server's IDENTITY NAMESPACE.
  *
- * The allowlist is `ethereum | base | arbitrum | polygon | solana`; there is no
- * `robinhood` value, even though Robinhood Chain (4663) is the only network
- * this game uses. An EVM signature is chain-agnostic ecrecover, so the slug
- * changes nothing but the `Chain ID` line in the message the user reads.
+ * This is `robinhood` — Robinhood Chain, EIP-155 4663, the only network the
+ * game runs on — and it is no longer hardcoded at the call site: `signIn()`
+ * below derives the slug from the chain id the wallet reports AFTER the network
+ * switch, and refuses to sign anything if that is not 4663. This constant is
+ * the expected answer, checked against, not asserted.
  *
- * Two consequences worth knowing:
- *   • the sign-in message says "Chain ID: 1" while the wallet is on 4663;
- *   • a profile is keyed on (chain, address), so changing this slug later
- *     would strand every existing account behind a new identity.
- * Adding a `robinhood` slug server-side is the fix; see the punch list.
+ * A profile is keyed on `(address, chain)`, so the slug is half the identity.
+ * It used to be `ethereum` as a stand-in, which meant the message the user read
+ * said "Chain ID: 1" while their wallet sat on 4663 and every account was filed
+ * under a chain the app never touches. Backend migration 0009 moved those rows
+ * to `robinhood`. Do not change this again without a matching migration.
  */
-const SIGN_IN_CHAIN: AuthChain = 'ethereum';
+const SIGN_IN_CHAIN: AuthChain = auth.APP_AUTH_CHAIN;
 
 // ── Login screen ────────────────────────────────────────────────────────────
 //
@@ -151,11 +152,11 @@ const SIGN_IN_CHAIN: AuthChain = 'ethereum';
 // `auth.signIn()` (src/api/auth.ts) owns the three-step handshake; this
 // component owns only the wallet CONNECTION and the chain choice.
 //
-// The chain slug is the server's own: ethereum | base | arbitrum | polygon |
-// solana. There is no `evm` — `src/wallet.ts` uses that coarser word for
-// provider selection and `auth.toAuthChain()` translates. An EVM signature is
-// plain ecrecover and chain-agnostic, so the slug only decides which `Chain ID`
-// line the user sees in the message they are asked to sign.
+// The chain slug is the server's own: robinhood | ethereum | base | arbitrum |
+// polygon | solana. There is no `evm` — `src/wallet.ts` uses that coarser word
+// for provider selection. This app uses `robinhood`, and derives it from the
+// wallet's real chain id rather than naming it, so the message the user reads
+// ("Chain ID: 4663") always describes the network they are actually on.
 
 /** Gold interlocking geometric emblem for the login hero. */
 function LoginEmblem({ size = 92 }: { size?: number }) {
@@ -193,26 +194,30 @@ function Login({ onSignedIn }: { onSignedIn: () => void }) {
   /**
    * Connect the wallet on Robinhood Chain, then sign the server's challenge.
    *
-   * `connectRobinhoodChain()` also switches (or adds) the network, so the
-   * player is on 4663 before anything else happens — the game runs nowhere
-   * else, and a wallet pointed at Ethereum mainnet would fail later, at pack
-   * purchase, with a much more confusing message.
+   * `connectRobinhoodChain()` switches (or adds) the network and does not
+   * return until it has read `eth_chainId` back and confirmed 4663, so a user
+   * who declines the switch gets a clear error here instead of a signature over
+   * a message describing a network they are not on.
    *
-   * The `chain` slug sent to `/auth/nonce` is a SERVER NAMESPACE, not the
-   * network the player is on. Its allowlist is
-   * `ethereum | base | arbitrum | polygon | solana` and there is no
-   * `robinhood` value, so `ethereum` is used as the identity namespace. This
-   * is safe — an EVM signature is plain ecrecover and chain-agnostic, so the
-   * slug only decides which `Chain ID` line appears in the message text — but
-   * it does mean the message the user reads says "Chain ID: 1" while they are
-   * on 4663. Adding a `robinhood` slug server-side is on the punch list.
+   * The slug then comes FROM that chain id, not from a constant. It is the
+   * server's identity namespace — `core.profiles` is `UNIQUE (address, chain)`
+   * — as well as the `Chain ID:` line the user reads, and the two must agree.
+   * The `!== SIGN_IN_CHAIN` check is belt and braces: `connectRobinhoodChain()`
+   * already guarantees it, and if that ever regresses this refuses to sign
+   * rather than quietly minting a second identity for the same wallet.
    */
   async function signIn() {
     setErr(''); setStage('connecting');
     try {
-      const { address } = await connectRobinhoodChain();
+      const { address, chainId } = await connectRobinhoodChain();
+      const chain = auth.authChainForEvmChainId(chainId);
+      if (chain === null || chain !== SIGN_IN_CHAIN) {
+        throw new Error(
+          `Wrong network: your wallet is on chain ${chainId}. Switch to Robinhood Chain (${ROBINHOOD_CHAIN.chainId}) and try again.`,
+        );
+      }
       setStage('signing');
-      await auth.signIn({ address, chain: SIGN_IN_CHAIN });
+      await auth.signIn({ address, chain });
       onSignedIn();
     } catch (e) {
       setErr(loginErrorText(e));
@@ -271,7 +276,10 @@ function Login({ onSignedIn }: { onSignedIn: () => void }) {
         ? 'linear-gradient(180deg, rgba(7,6,15,0.10) 0%, rgba(7,6,15,0.55) 55%, rgba(7,6,15,0.96) 100%)'
         : 'radial-gradient(55% 55% at 50% 66%, rgba(7,6,15,0.72), transparent 72%), linear-gradient(180deg, rgba(7,6,15,0.28), rgba(7,6,15,0.5))' }} />
       <button onClick={() => setMuted(m => !m)} aria-label={muted ? 'Unmute' : 'Mute'} style={{
-        position: 'fixed', top: 'calc(12px + env(safe-area-inset-top))', right: 14, zIndex: 5, width: 44, height: 44, borderRadius: 22,
+        // Left edge, vertically centred — clear of the sign-in card in the
+        // middle of the screen and of the notch/safe area at the top.
+        position: 'fixed', top: '50%', transform: 'translateY(-50%)',
+        left: 'max(14px, env(safe-area-inset-left))', zIndex: 5, width: 44, height: 44, borderRadius: 22,
         background: 'rgba(10,5,30,0.6)', border: '1px solid rgba(212,175,55,0.45)', color: '#D4AF37', fontSize: 17, cursor: 'pointer',
         backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
       }}>{muted ? <SoundOff size={18} /> : (playing ? <SoundOn size={18} /> : <Music size={18} />)}</button>
@@ -397,13 +405,13 @@ function BgMusic({ src, storageKey }: { src: string; storageKey: string }) {
   return (
     <>
       <audio ref={audioRef} src={src} loop preload="auto" />
-      {/* Docked to the vertical centre of the right edge: clears the in-game
-          bottom action bar and the top turn banner, and is thumb-reachable
-          either-handed. z-index sits under the board's right rail (60) and
-          under every modal, so it can never cover them. */}
+      {/* Docked to the vertical centre of the LEFT edge: clears the in-game
+          bottom action bar, the top turn banner, and the board's right rail
+          (which occupies the opposite edge). z-index sits under that rail (60)
+          and under every modal, so it can never cover them. */}
       <button
         onClick={toggle}
-        className="ova-plate ova-plate--obsidian ova-edge-stud ova-edge-stud--right"
+        className="ova-plate ova-plate--obsidian ova-edge-stud ova-edge-stud--left"
         aria-label={muted ? 'Unmute music' : 'Mute music'}
         aria-pressed={muted}
         title={muted ? 'Unmute music' : 'Mute music'}

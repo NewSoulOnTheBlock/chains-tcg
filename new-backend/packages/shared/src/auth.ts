@@ -27,7 +27,11 @@ export interface AccessTokenClaims {
   sub: string;
   /** Normalised wallet address. */
   addr: string;
-  /** Chain slug: `solana` | `ethereum` | `base` | `arbitrum` | `polygon`. */
+  /**
+   * Chain slug, from `CHAINS` in `chains.ts`:
+   * `solana` | `ethereum` | `base` | `arbitrum` | `polygon` | `robinhood`.
+   * This app signs in on `robinhood` (4663); the rest are accepted namespaces.
+   */
   chain: string;
   roles: string[];
   /** Equals `auth.sessions.id` of the session that minted this token. */

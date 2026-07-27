@@ -10,6 +10,18 @@ import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 
 export type WalletChain = 'evm' | 'solana';
 export type ConnectedWallet = { chain: WalletChain; address: string };
+
+/**
+ * An EVM connection that also reports the EIP-155 network the wallet is
+ * ACTUALLY on, read back from the provider after any switch.
+ *
+ * Sign-in needs this: the `chain` slug sent to `/auth/nonce` is the identity
+ * namespace of `core.profiles (address, chain)` AND the `Chain ID:` line the
+ * user reads in the message. Hardcoding the slug is how the message ended up
+ * claiming "Chain ID: 1" for a wallet sitting on 4663. Derive it from
+ * `chainId` instead — see `authChainForEvmChainId()` in `src/api/auth.ts`.
+ */
+export type ConnectedEvmWallet = ConnectedWallet & { chain: 'evm'; chainId: number };
 export type SolanaWalletKind = 'phantom' | 'solflare' | 'backpack' | 'jupiter';
 
 declare global {
@@ -214,11 +226,36 @@ export function detectEvmWallet(): { installed: boolean; label: string } {
   };
 }
 
+/** Read the wallet's current EIP-155 chain id. Hex string in, number out. */
+async function readEvmChainId(eth: any): Promise<number> {
+  const raw = await eth.request({ method: 'eth_chainId' });
+  const n = typeof raw === 'string' ? Number.parseInt(raw, 16) : Number(raw);
+  if (!Number.isFinite(n)) throw new Error('Wallet did not report a chain id.');
+  return n;
+}
+
+/** MetaMask/EIP-1193 user-rejection. 4001 is the spec code; some wallets only set the text. */
+function isUserRejection(e: any): boolean {
+  return e?.code === 4001 || /user rejected|user denied|rejected the request/i.test(String(e?.message ?? ''));
+}
+
 /**
  * Connect MetaMask (or any injected EVM wallet) and ensure it is on Robinhood
  * Chain, adding the network to the wallet if it isn't already there.
+ *
+ * This function is the ONLY authority on which network sign-in happens against.
+ * It does not return until it has read `eth_chainId` back from the provider and
+ * confirmed it is 4663 — a wallet that ignored or refused the switch produces a
+ * clear error here rather than a signature over a message describing a network
+ * the user is not on.
+ *
+ * Why the read-back matters: `wallet_switchEthereumChain` resolving is not proof
+ * of anything. `wallet_addEthereumChain` adds a network without necessarily
+ * selecting it, some wallets resolve the switch and then leave the user on a
+ * confirmation screen, and a multi-account wallet can change network out from
+ * under the page between calls.
  */
-export async function connectRobinhoodChain(): Promise<ConnectedWallet> {
+export async function connectRobinhoodChain(): Promise<ConnectedEvmWallet> {
   const eth = window.ethereum;
   if (!eth) throw new Error('No EVM wallet detected. Install MetaMask to sign in on Robinhood Chain.');
 
@@ -227,26 +264,48 @@ export async function connectRobinhoodChain(): Promise<ConnectedWallet> {
   if (!address) throw new Error('MetaMask returned no account.');
 
   // Make sure the wallet is pointed at Robinhood Chain.
-  try {
-    await eth.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: ROBINHOOD_CHAIN.chainIdHex }],
-    });
-  } catch (e: any) {
-    // 4902 = chain not added to the wallet yet → add it, which also switches.
-    if (e?.code === 4902 || /Unrecognized chain|not been added/i.test(String(e?.message ?? ''))) {
+  if ((await readEvmChainId(eth)) !== ROBINHOOD_CHAIN.chainId) {
+    try {
       await eth.request({
-        method: 'wallet_addEthereumChain',
-        params: [ROBINHOOD_CHAIN.params],
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: ROBINHOOD_CHAIN.chainIdHex }],
       });
-    } else if (e?.code === 4001) {
-      throw new Error('Network switch rejected. Approve the Robinhood Chain switch in MetaMask.');
-    } else {
-      throw e;
+    } catch (e: any) {
+      // 4902 = chain not added to the wallet yet → add it, which also switches.
+      if (e?.code === 4902 || /Unrecognized chain|not been added/i.test(String(e?.message ?? ''))) {
+        try {
+          await eth.request({
+            method: 'wallet_addEthereumChain',
+            params: [ROBINHOOD_CHAIN.params],
+          });
+        } catch (addErr: any) {
+          if (isUserRejection(addErr)) {
+            throw new Error(
+              'Robinhood Chain was not added. This game only runs on Robinhood Chain (4663) — approve adding the network in your wallet to sign in.',
+            );
+          }
+          throw addErr;
+        }
+      } else if (isUserRejection(e)) {
+        throw new Error(
+          'Network switch rejected. This game only runs on Robinhood Chain (4663) — approve the switch in your wallet to sign in.',
+        );
+      } else {
+        throw e;
+      }
     }
   }
 
-  return { chain: 'evm', address };
+  // Read back rather than trust. `wallet_addEthereumChain` in particular can
+  // succeed while leaving the wallet on its previous network.
+  const chainId = await readEvmChainId(eth);
+  if (chainId !== ROBINHOOD_CHAIN.chainId) {
+    throw new Error(
+      `Your wallet is still on chain ${chainId}. This game only runs on Robinhood Chain (${ROBINHOOD_CHAIN.chainId}) — switch networks in your wallet and try again.`,
+    );
+  }
+
+  return { chain: 'evm', address, chainId };
 }
 
 export async function connectSolana(): Promise<ConnectedWallet> {

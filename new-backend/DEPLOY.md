@@ -46,16 +46,64 @@ Production values that matter for correctness:
 ```
 AUTH_DOMAIN=ocva.online
 AUTH_URI=https://ocva.online
-ALLOWED_ORIGINS=https://ocva.online,https://www.ocva.online
+ALLOWED_ORIGINS=https://ocva.online,https://www.ocva.online,https://chains-tcg.vercel.app
 ```
 
 `AUTH_DOMAIN` is what a wallet displays and what binds a signature to this
 deployment. It is deliberately **not** `localhost` — a signature minted for one
-domain must not verify against another. `ALLOWED_ORIGINS` contains the two
-production web origins and **nothing else**; `http://localhost:5173` was
-deliberately **not** added, so a developer's local frontend cannot talk to
+domain must not verify against another. `http://localhost:5173` is deliberately
+**not** in `ALLOWED_ORIGINS`, so a developer's local frontend cannot talk to
 production from a browser. (Add it only if you accept widening CORS on a
 public host; server-to-server callers and curl are unaffected by CORS.)
+
+### 2.1 Adding a browser origin to CORS
+
+`ALLOWED_ORIGINS` is the gateway's exact-match allowlist. The entrypoint
+(`gateway/docker-entrypoint.d/05-cors-allowlist.envsh`) turns it into an
+anchored regex alternation with every metacharacter escaped, **refuses `*`
+outright**, and falls back to a match-nothing regex if the variable is empty.
+It fails closed.
+
+`https://chains-tcg.vercel.app` — the Vercel project's default domain, from the
+git remote `github.com/rez404/chains-tcg.git` — is on the list so that
+**preview and default-domain deployments work**. Without it every request from
+a Vercel preview build fails CORS while production on `ocva.online` looks fine,
+which is a confusing failure to debug.
+
+**Never use a wildcard or a suffix pattern.** `*.vercel.app` would authorise
+every site anyone has ever hosted on Vercel to call this API with a browser's
+credentials attached. List hostnames one at a time:
+
+```bash
+ssh root@167.233.212.65
+cd /opt/chains-tcg
+cp .env .env.bak.$(date +%s)                 # 600, root-owned — keep it that way
+nano .env                                    # append ,https://new-origin.example
+                                             # scheme included, no trailing slash,
+                                             # no spaces around the commas
+docker compose up -d gateway                 # re-render nginx.conf from the new env
+docker compose restart gateway               # nginx resolves upstream IPs at startup
+docker compose logs gateway | grep 'CORS allowlist'   # confirm what it built
+```
+
+`up -d gateway` is what re-reads `.env`; `restart` alone would keep the old
+environment. The gateway is the **only** place CORS headers come from — no
+service sets `Access-Control-*`, because two layers would emit duplicate
+`Access-Control-Allow-Origin` and browsers reject that outright.
+
+Verify from off-box, both directions:
+
+```bash
+curl -si -X OPTIONS https://api.ocva.online/auth/nonce \
+  -H 'Origin: https://chains-tcg.vercel.app' \
+  -H 'Access-Control-Request-Method: POST' | grep -i access-control-allow-origin
+# expect: access-control-allow-origin: https://chains-tcg.vercel.app
+
+curl -si -X OPTIONS https://api.ocva.online/auth/nonce \
+  -H 'Origin: https://evil.example' \
+  -H 'Access-Control-Request-Method: POST' | grep -ci access-control-allow-origin
+# expect: 0
+```
 
 ### ⚠ Placeholder wager keypairs — NO REAL MONEY
 

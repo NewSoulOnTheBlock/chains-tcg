@@ -20,13 +20,25 @@
 // ─── CHAIN SLUGS ────────────────────────────────────────────────────────────
 // Valid `chain` values are the SERVER's slugs:
 //
-//     ethereum | base | arbitrum | polygon | solana
+//     robinhood | ethereum | base | arbitrum | polygon | solana
+//
+// **This app signs in with `robinhood`** — Robinhood Chain, EIP-155 id 4663,
+// the only network the game runs on.
+//
+// The slug is NOT cosmetic, and it is not just the `Chain ID:` line in the
+// message. `core.profiles` is `UNIQUE (address, chain)`, so the slug is half of
+// the primary identity: the same wallet under two slugs is two profiles, with
+// two ids, two deck collections and two match histories. Changing which slug
+// this app sends strands every account created before the change. Do not.
+//
+// Derive it from the network the wallet is actually on —
+// `authChainForEvmChainId()` below — rather than hardcoding it. Hardcoding is
+// how sign-in ended up asking wallets sitting on 4663 to sign a message that
+// said "Chain ID: 1".
 //
 // There is no `evm` value — sending one is a 400. `src/wallet.ts` uses a
 // coarser `WalletChain = 'evm' | 'solana'` for provider selection; use
-// `toAuthChain()` below to translate, and note that an EVM signature is
-// chain-agnostic (plain ecrecover), so the slug only selects which `Chain ID`
-// line appears in the message the user reads.
+// `toAuthChain()` below to translate.
 //
 // ─── TOKENS ─────────────────────────────────────────────────────────────────
 // Storage policy lives in `session.ts` — read that file's header. Nothing here
@@ -52,17 +64,49 @@ export {
   setPersistence,
 } from './session.js';
 
+/**
+ * The slug this app signs in with. Robinhood Chain is the only network the game
+ * runs on, so it is also the only identity namespace real accounts live in.
+ */
+export const APP_AUTH_CHAIN = 'robinhood' as const satisfies AuthChain;
+
 /** Every slug the server accepts, in a form you can iterate for a chain picker. */
-export const AUTH_CHAINS = ['ethereum', 'base', 'arbitrum', 'polygon', 'solana'] as const;
+export const AUTH_CHAINS = ['robinhood', 'ethereum', 'base', 'arbitrum', 'polygon', 'solana'] as const;
 
 /** Human labels matching the server's own `CHAINS` table. */
 export const CHAIN_LABELS: Record<AuthChain, string> = {
+  robinhood: 'Robinhood Chain',
   ethereum: 'Ethereum',
   base: 'Base',
   arbitrum: 'Arbitrum One',
   polygon: 'Polygon',
   solana: 'Solana',
 };
+
+/**
+ * EIP-155 chain id → server slug, mirroring `CHAINS` in
+ * `new-backend/packages/shared/src/chains.ts`. Keep the two in step: a slug
+ * this app sends that the server does not know is a 400, and a slug that maps
+ * to the wrong id puts a misleading `Chain ID:` line in front of the user.
+ */
+export const EVM_CHAIN_IDS: Record<number, AuthChain> = {
+  4663: 'robinhood',
+  1: 'ethereum',
+  8453: 'base',
+  42161: 'arbitrum',
+  137: 'polygon',
+};
+
+/**
+ * Which slug describes the network a wallet is actually on? `null` for an id
+ * the server has no slug for — sign-in must FAIL there rather than fall back
+ * to a slug that names a different network, because the wallet would then be
+ * shown a message describing a chain it is not on and the resulting profile
+ * would be filed under an identity the user never chose.
+ */
+export function authChainForEvmChainId(chainId: number): AuthChain | null {
+  return EVM_CHAIN_IDS[chainId] ?? null;
+}
 
 /** Is this slug an EVM chain (as opposed to Solana)? */
 export function isEvmChain(chain: AuthChain): boolean {
@@ -71,14 +115,18 @@ export function isEvmChain(chain: AuthChain): boolean {
 
 /**
  * Translate `src/wallet.ts`'s coarse `'evm' | 'solana'` into a server slug.
- * EVM defaults to `ethereum`; pass `preferred` to pick another EVM slug.
+ *
+ * EVM defaults to `robinhood` — the network this app runs on — rather than
+ * `ethereum`. Prefer `authChainForEvmChainId()` where you have the wallet's
+ * real chain id; this is the fallback for callers that only have the coarse
+ * provider kind.
  */
 export function toAuthChain(
   walletChain: 'evm' | 'solana',
-  preferred: AuthChain = 'ethereum',
+  preferred: AuthChain = APP_AUTH_CHAIN,
 ): AuthChain {
   if (walletChain === 'solana') return 'solana';
-  return isEvmChain(preferred) ? preferred : 'ethereum';
+  return isEvmChain(preferred) ? preferred : APP_AUTH_CHAIN;
 }
 
 // ── Response types ──────────────────────────────────────────────────────────
@@ -95,7 +143,10 @@ export interface NonceChallenge {
   issuedAt: string;
   /** The deployment's `AUTH_DOMAIN`, as shown in the message. */
   domain: string;
-  /** A STRING even for EVM (`"1"`, `"8453"`, …); `"solana"` for Solana. */
+  /**
+   * A STRING even for EVM (`"4663"` for Robinhood Chain, `"1"`, `"8453"`, …);
+   * `"solana"` for Solana. Echoes the `Chain ID:` line inside `message`.
+   */
   chainId: string;
 }
 

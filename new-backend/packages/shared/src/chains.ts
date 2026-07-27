@@ -26,6 +26,19 @@ export const CHAINS = {
   base: { slug: 'base', kind: 'evm', label: 'Base', chainId: 8453 },
   arbitrum: { slug: 'arbitrum', kind: 'evm', label: 'Arbitrum One', chainId: 42161 },
   polygon: { slug: 'polygon', kind: 'evm', label: 'Polygon', chainId: 137 },
+  /**
+   * Robinhood Chain — the network the game actually runs on. An Arbitrum
+   * Orbit L2; EIP-155 id 4663 (0x1237) on mainnet, 46630 on testnet.
+   *
+   * It is an ordinary EVM chain, so it needs no new verifier: `verifyMessage`
+   * (EIP-191 ecrecover) is chain-agnostic. What the slug buys is a *correct*
+   * message — `Chain ID: 4663` matching the network the wallet is on — and a
+   * correct identity namespace in `core.profiles (address, chain)`.
+   *
+   * Migration 0009 moved the pre-existing `ethereum` rows here; do not rename
+   * this slug without a matching migration, or every account is stranded.
+   */
+  robinhood: { slug: 'robinhood', kind: 'evm', label: 'Robinhood Chain', chainId: 4663 },
 } as const satisfies Record<string, ChainSpec>;
 
 export type ChainSlug = keyof typeof CHAINS;

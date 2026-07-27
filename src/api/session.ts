@@ -61,8 +61,13 @@
 // nothing here is `SameSite`-protected — INTEGRATION.md §2 is explicit that
 // tokens travel in the `Authorization` header and never in cookies.
 
-/** Chain slugs the auth service accepts. `evm` is NOT one of them. */
-export type AuthChain = 'ethereum' | 'base' | 'arbitrum' | 'polygon' | 'solana';
+/**
+ * Chain slugs the auth service accepts. `evm` is NOT one of them.
+ *
+ * `robinhood` (Robinhood Chain, EIP-155 4663) is the one this app signs in
+ * with — it is the only network the game runs on.
+ */
+export type AuthChain = 'ethereum' | 'base' | 'arbitrum' | 'polygon' | 'solana' | 'robinhood';
 
 /** The credential pair plus the identity it belongs to. */
 export interface Session {

@@ -110,7 +110,15 @@ TTL. The client signs it verbatim; it is returned only so the wallet has the
 exact bytes. On verify the server rebuilds the string from its own stored copy —
 it will not verify a signature over anything it did not mint.
 
-Supported `chain` values: `solana`, `ethereum`, `base`, `arbitrum`, `polygon`.
+Supported `chain` values: `solana`, `ethereum`, `base`, `arbitrum`, `polygon`,
+`robinhood`.
+
+**The web app signs in with `robinhood`** — Robinhood Chain, EIP-155 id `4663`,
+the only network this game runs on. The slug is the identity namespace of
+`core.profiles (address, chain)` as well as the `Chain ID:` line the wallet
+shows, so it must match the network the wallet is actually on. The other slugs
+remain accepted (an EVM signature is chain-agnostic ecrecover) but produce
+*different profiles* for the same wallet.
 
 ### 2. Sign it and exchange it for tokens
 
