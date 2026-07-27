@@ -2061,8 +2061,10 @@ function Landing({
   const goCollection = () => { try { window.location.hash = 'collection'; } catch {} onProfile(); };
 
   const play = () => {
-    if (deckState !== 'valid') return;
-    if (liveRef.current) liveRef.current.textContent = `Starting ${mode} matchmaking.`;
+    // Always enter the matchmaking lobby — that's where deck selection (incl.
+    // chain Standard decks), create/join, challenges and the ranked queue live.
+    // Ranked still can't be queued with an invalid deck (enforced in the lobby).
+    if (liveRef.current) liveRef.current.textContent = `Entering ${mode} matchmaking.`;
     onPlay();
   };
 
@@ -2196,8 +2198,10 @@ function MatchmakingPanel({ mode, setMode, deckState, deckName, deckCount, deckF
   players: number | null; onPlay: () => void; onChangeDeck: () => void; loading: boolean; mobile: boolean;
 }) {
   const modeDesc = mode === 'ranked' ? 'Competitive ladder · Best-of-one' : 'Casual play · no rank at stake';
-  const playLabel = deckState === 'missing' ? 'SELECT A DECK' : deckState === 'invalid' ? 'DECK INCOMPLETE' : `PLAY ${mode.toUpperCase()}`;
-  const canPlay = deckState === 'valid';
+  // The button always opens the lobby (deck selection + matchmaking live there);
+  // the label reflects the current deck so the next step is clear.
+  const playLabel = deckState === 'missing' ? 'CHOOSE A DECK' : deckState === 'invalid' ? 'FIX DECK & PLAY' : `PLAY ${mode.toUpperCase()}`;
+  const canPlay = true;
   return (
     <section aria-label="Matchmaking" style={{ padding: 18, borderRadius: 16, background: MENU.panelPurple, border: `1px solid ${MENU.border}`, backdropFilter: 'blur(12px)', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
       <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.18em', color: MENU.gold }}>MATCHMAKING</div>
