@@ -5670,6 +5670,7 @@ function FooterStat({ label, value, color }: { label: string; value: number | st
 
 // ── In-match seat (waits if opponent not yet present) ───────────────────────
 function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
+  const mobile = useIsMobile(860);
   const ChainsClient = useMemo(() => Client({
     game: ChainsTCG,
     board: ChainsBoard,
@@ -5697,41 +5698,295 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
   const filled = players.filter(p => p.name).length;
   const isFull = filled === 2 && players.length === 2;
 
-  async function leave() {
-    try { await lobby.leaveMatch(GAME_NAME, seat.matchID, { playerID: seat.playerID, credentials: seat.credentials }); } catch {}
-    onLeave();
+  // "Opponent joined → entering the arena" interstitial before the game mounts.
+  // Guarded so it fires exactly once (prevents duplicate navigation/starts).
+  const [entered, setEntered] = useState(false);
+  const enterOnce = useRef(false);
+  useEffect(() => {
+    if (isFull && !enterOnce.current) {
+      enterOnce.current = true;
+      const t = setTimeout(() => setEntered(true), 1700);
+      return () => clearTimeout(t);
+    }
+  }, [isFull]);
+
+  // Fetch real avatars for whoever is seated (host now, opponent when they join).
+  const [avatars, setAvatars] = useState<Record<string, string | null>>({});
+  const fetchedRef = useRef<Set<string>>(new Set());
+  const nameKey = players.map(p => p.name || '').join('|');
+  useEffect(() => {
+    for (const p of players) {
+      if (p.name && !fetchedRef.current.has(p.name)) {
+        fetchedRef.current.add(p.name);
+        getProfileApi(p.name).then(pr => setAvatars(a => ({ ...a, [p.name!]: pr?.avatarUrl ?? null }))).catch(() => {});
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nameKey]);
+
+  // Leave-match flow with confirm + in-flight guard.
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [leaveErr, setLeaveErr] = useState('');
+  async function doLeave() {
+    if (leaving) return;
+    setLeaving(true); setLeaveErr('');
+    try {
+      await lobby.leaveMatch(GAME_NAME, seat.matchID, { playerID: seat.playerID, credentials: seat.credentials });
+      onLeave();
+    } catch {
+      setLeaveErr('Could not leave the match. Please try again.');
+      setLeaving(false);
+    }
   }
 
-  return (
-    <div style={{ background: '#000', minHeight: '100vh' }}>
-      <div style={{ padding: 6, background: '#111', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ color: '#aaa', fontFamily: 'system-ui', fontSize: 13 }}>
-          Match <span style={{ fontFamily: 'monospace', color: '#888' }}>{seat.matchID.slice(0, 8)}</span>
-          {' · '}You are <b style={{ color: '#fff' }}>{seat.playerName}</b> (P{seat.playerID})
-          {!isFull && <span style={{ marginLeft: 12, color: '#fc6' }}>Waiting for opponent…</span>}
-        </div>
-        <button onClick={leave} style={ghostBtn}>Leave</button>
+  // Invite link (unchanged logic) + copy/share.
+  const inviteUrl = window.location.origin + window.location.pathname + '#match=' + seat.matchID;
+  const [copied, setCopied] = useState<'' | 'link' | 'id'>('');
+  const flashCopied = (which: 'link' | 'id') => { setCopied(which); setTimeout(() => setCopied(''), 1600); };
+  function fallbackCopy(text: string) {
+    try { const el = document.createElement('textarea'); el.value = text; el.style.position = 'fixed'; el.style.opacity = '0';
+      document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el); } catch {}
+  }
+  async function copyInvite() { try { await navigator.clipboard.writeText(inviteUrl); } catch { fallbackCopy(inviteUrl); } flashCopied('link'); }
+  async function copyMatchId() { try { await navigator.clipboard.writeText(seat.matchID); } catch { fallbackCopy(seat.matchID); } flashCopied('id'); }
+  async function share() {
+    if ((navigator as any).share) {
+      try { await (navigator as any).share({ title: 'On-Chain Virtual Arena', text: 'Join my match on On-Chain Virtual Arena', url: inviteUrl }); return; } catch { /* cancelled → fall through */ }
+    }
+    copyInvite();
+  }
+
+  // Once the interstitial elapses and both seats are filled, mount the game.
+  if (entered && isFull) {
+    return (
+      <div style={{ background: '#000', minHeight: '100vh' }}>
+        <BattleMusic />
+        <WagerStatusBadge matchID={seat.matchID} compact />
+        <ChainsClient matchID={seat.matchID} playerID={seat.playerID} credentials={seat.credentials} />
       </div>
-      {!isFull ? (
-        <div style={{ padding: 24, color: '#ccc' }}>
-          <WagerStatusBadge matchID={seat.matchID} />
-          <h3>Share this link with your opponent:</h3>
-          <pre style={{ background: '#111', padding: 8, border: '1px solid #333', borderRadius: 4, color: '#9cf' }}>
-            {window.location.origin + window.location.pathname + '#match=' + seat.matchID}
-          </pre>
-          <div style={{ marginTop: 12, fontSize: 13, color: '#888' }}>
-            {players.map((p, i) => <div key={i}>Seat P{i}: {p.name ?? <i style={{ color: '#666' }}>open</i>}</div>)}
+    );
+  }
+
+  const youAt = Number(seat.playerID);
+  const p0 = players[0]?.name ?? (youAt === 0 ? seat.playerName : undefined);
+  const p1 = players[1]?.name ?? (youAt === 1 ? seat.playerName : undefined);
+  const opponentJoined = isFull;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, height: '100dvh', overflow: mobile ? 'auto' : 'hidden',
+      color: HUB.text, fontFamily: HUB_SANS, display: 'flex', flexDirection: 'column' }}>
+      <style>{`
+        @keyframes ml-spin { to { transform: rotate(360deg); } }
+        @keyframes ml-spin-rev { to { transform: rotate(-360deg); } }
+        @keyframes ml-pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+        @keyframes ml-dash { to { stroke-dashoffset: -40; } }
+        @keyframes ml-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+        @media (prefers-reduced-motion: reduce) {
+          .ml-anim { animation: none !important; }
+        }
+      `}</style>
+      <MatchChamberBackdrop />
+
+      {/* Top chrome */}
+      <div style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <HubEmblem size={30} />
+          <div style={{ lineHeight: 1 }}>
+            <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 10, letterSpacing: '0.22em', color: HUB.muted }}>ON-CHAIN</div>
+            <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 14, letterSpacing: '0.1em', color: HUB.goldHi }}>VIRTUAL ARENA</div>
           </div>
         </div>
+        <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, letterSpacing: '0.32em', fontSize: 13, color: HUB.goldHi, textShadow: `0 0 16px ${HUB.gold}66` }}>◇ MATCH LOBBY ◇</div>
+        <button onClick={() => setConfirmLeave(true)} style={{ padding: '9px 16px', borderRadius: 9, background: 'transparent',
+          border: `1px solid ${HUB.gold}`, color: HUB.goldHi, cursor: 'pointer', fontWeight: 800, letterSpacing: '0.06em', fontSize: 12 }}>LEAVE MATCH</button>
+      </div>
+
+      {/* Centered panel */}
+      <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, display: 'grid', placeItems: 'center', padding: mobile ? '8px 12px 28px' : '4px 20px 20px' }}>
+        <div style={{ position: 'relative', width: 'min(1140px, 100%)', maxHeight: '100%', overflow: mobile ? 'visible' : 'auto',
+          borderRadius: 16, padding: mobile ? '22px 16px' : '30px 40px 26px',
+          background: 'linear-gradient(180deg, rgba(11,14,28,0.86), rgba(7,9,18,0.9))',
+          border: `1px solid ${HUB.gold}55`, boxShadow: `0 30px 90px rgba(3,4,12,0.7), 0 0 60px rgba(142,77,255,0.18), inset 0 0 0 1px rgba(255,255,255,0.02)`,
+          backdropFilter: 'blur(8px)' }}>
+          {(['tl', 'tr', 'bl', 'br'] as const).map((k) => <ChamberCorner key={k} pos={k} />)}
+
+          <div style={{ textAlign: 'center' }}>
+            <h1 style={{ margin: 0, fontFamily: HUB_SERIF, fontWeight: 700, letterSpacing: '0.04em',
+              fontSize: mobile ? 34 : 'clamp(40px, 5vw, 60px)', lineHeight: 1.02,
+              background: `linear-gradient(180deg, #f7e6b0, ${HUB.gold} 55%, #a67c2e)`, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
+              textShadow: `0 2px 30px ${HUB.gold}33` }}>
+              {opponentJoined ? 'OPPONENT JOINED' : 'MATCH CREATED'}
+            </h1>
+            <div style={{ color: HUB.muted, fontSize: mobile ? 13 : 15, marginTop: 6 }}>
+              {opponentJoined ? 'Entering the arena…' : 'Your arena is ready. Invite an opponent to begin.'}
+            </div>
+
+            {/* Match ID control */}
+            <button onClick={copyMatchId} title="Copy match ID" style={{ marginTop: 14, display: 'inline-flex', alignItems: 'center', gap: 10,
+              padding: '8px 14px', borderRadius: 10, background: 'rgba(8,10,22,0.7)', border: `1px solid ${HUB.gold}44`, color: HUB.text, cursor: 'pointer' }}>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', color: HUB.muted }}>MATCH ID</span>
+              <span style={{ fontFamily: F.mono, fontSize: 14, color: HUB.goldHi }}>{seat.matchID.slice(0, 8)}</span>
+              <span style={{ color: copied === 'id' ? HUB.green : HUB.muted }}>{copied === 'id' ? '✓' : '⧉'}</span>
+            </button>
+          </div>
+
+          {/* Arcane waiting portal */}
+          <ArcaneWaiting joined={opponentJoined} entering={entered} />
+
+          {/* Seats */}
+          <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center', gap: mobile ? 12 : 22,
+            flexDirection: mobile ? 'column' : 'row', marginTop: 20 }}>
+            <SeatCard seat="P0" role="HOST" name={p0} avatar={p0 ? avatars[p0] : undefined} isYou={youAt === 0} joined mobile={mobile} />
+            <div style={{ display: 'grid', placeItems: 'center', flex: 'none' }}>
+              <VsRune mobile={mobile} />
+            </div>
+            <SeatCard seat="P1" role={p1 ? 'CHALLENGER' : 'OPEN'} name={p1} avatar={p1 ? avatars[p1] : undefined} isYou={youAt === 1} joined={!!p1} mobile={mobile} />
+          </div>
+
+          <WagerStatusBadge matchID={seat.matchID} />
+
+          {/* Invitation */}
+          {!opponentJoined && (
+            <div style={{ marginTop: 22, paddingTop: 18, borderTop: `1px solid ${HUB.border}` }}>
+              <div style={{ textAlign: 'center', fontFamily: HUB_SERIF, fontWeight: 700, letterSpacing: '0.16em', color: HUB.goldHi, fontSize: 14 }}>◇ INVITE YOUR OPPONENT ◇</div>
+              <div style={{ textAlign: 'center', color: HUB.muted, fontSize: 12.5, marginTop: 4 }}>Share this private link to fill the open seat.</div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap', alignItems: 'stretch' }}>
+                <input readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} aria-label="Invite link"
+                  style={{ flex: '1 1 320px', minWidth: 0, padding: '12px 14px', borderRadius: 10, background: 'rgba(6,8,18,0.8)',
+                    border: `1px solid ${HUB.border}`, color: HUB.cyan, fontFamily: F.mono, fontSize: 12.5, outline: 'none' }} />
+                <button onClick={copyInvite} style={{ ...hubGoldBtn(false), marginTop: 0, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 20px', fontSize: 13 }}>
+                  ⧉ {copied === 'link' ? 'LINK COPIED' : 'COPY INVITE LINK'}
+                </button>
+                <button onClick={share} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 20px', borderRadius: 10,
+                  background: `linear-gradient(180deg, ${HUB.purple}, ${HUB.violet})`, color: '#fff', border: `1px solid ${HUB.violet}`, cursor: 'pointer', fontWeight: 800, letterSpacing: '0.04em', fontSize: 13 }}>↗ SHARE</button>
+              </div>
+              <div style={{ textAlign: 'center', color: HUB.muted, fontSize: 12, marginTop: 14 }}>◇ The duel will begin automatically when Player 1 joins.</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {confirmLeave && (
+        <div onClick={() => !leaving && setConfirmLeave(false)} style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(3,4,10,0.78)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(440px, 100%)', borderRadius: 14, background: HUB.surface, border: `1px solid ${HUB.gold}44`, padding: 22 }}>
+            <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 20, color: HUB.text }}>Leave this match?</div>
+            <div style={{ color: HUB.muted, fontSize: 13.5, marginTop: 8, lineHeight: 1.5 }}>The open match will be closed and the invite link will stop working.</div>
+            {leaveErr && <div style={{ color: HUB.red, fontSize: 12.5, marginTop: 10 }}>{leaveErr}</div>}
+            <div style={{ display: 'flex', gap: 10, marginTop: 18, justifyContent: 'flex-end' }}>
+              <button onClick={() => setConfirmLeave(false)} disabled={leaving} style={{ padding: '10px 18px', borderRadius: 10, background: HUB.raised, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: leaving ? 'default' : 'pointer', fontWeight: 700, letterSpacing: '0.04em' }}>STAY</button>
+              <button onClick={doLeave} disabled={leaving} style={{ padding: '10px 18px', borderRadius: 10, background: leaving ? '#5a2530' : HUB.red, border: 'none', color: '#fff', cursor: leaving ? 'default' : 'pointer', fontWeight: 800, letterSpacing: '0.04em' }}>{leaving ? 'LEAVING…' : 'LEAVE MATCH'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MatchChamberBackdrop() {
+  return (
+    <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', inset: 0, background:
+        `radial-gradient(55% 45% at 50% 30%, rgba(142,77,255,0.16), transparent 70%),
+         radial-gradient(120% 100% at 50% 0%, #10132a 0%, #06060f 60%, #040409 100%)` }} />
+      {[[6, 40], [12, 66], [88, 44], [93, 70], [20, 82], [80, 84]].map(([l, t], i) => (
+        <div key={i} className="ml-anim" style={{ position: 'absolute', left: `${l}%`, top: `${t}%`, width: 3, height: 30,
+          background: 'linear-gradient(180deg, transparent, #b79cff, transparent)', opacity: 0.4, filter: 'blur(1px)',
+          transform: `rotate(${i % 2 ? 16 : -12}deg)`, animation: `ml-pulse ${3 + i}s ease-in-out infinite` }} />
+      ))}
+      <div style={{ position: 'absolute', inset: 0, boxShadow: 'inset 0 0 260px 70px rgba(0,0,0,0.85)' }} />
+    </div>
+  );
+}
+
+function ChamberCorner({ pos }: { pos: 'tl' | 'tr' | 'bl' | 'br' }) {
+  const base: React.CSSProperties = { position: 'absolute', width: 26, height: 26, borderColor: `${HUB.gold}aa`, borderStyle: 'solid', borderWidth: 0 };
+  const map: Record<string, React.CSSProperties> = {
+    tl: { top: 8, left: 8, borderTopWidth: 2, borderLeftWidth: 2, borderTopLeftRadius: 8 },
+    tr: { top: 8, right: 8, borderTopWidth: 2, borderRightWidth: 2, borderTopRightRadius: 8 },
+    bl: { bottom: 8, left: 8, borderBottomWidth: 2, borderLeftWidth: 2, borderBottomLeftRadius: 8 },
+    br: { bottom: 8, right: 8, borderBottomWidth: 2, borderRightWidth: 2, borderBottomRightRadius: 8 },
+  };
+  return <div aria-hidden style={{ ...base, ...map[pos] }} />;
+}
+
+function ArcaneWaiting({ joined, entering }: { joined: boolean; entering: boolean }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 18 }} role="status" aria-live="polite">
+      <div style={{ position: 'relative', width: 300, height: 60, display: 'grid', placeItems: 'center' }}>
+        {/* orbiting rune ring */}
+        <svg width="300" height="60" viewBox="0 0 300 60" style={{ position: 'absolute', inset: 0 }} aria-hidden>
+          <ellipse cx="150" cy="30" rx="120" ry="26" fill="none" stroke={`${HUB.violet}66`} strokeWidth="1.5" />
+          <ellipse className="ml-anim" cx="150" cy="30" rx="120" ry="26" fill="none" stroke={joined ? HUB.green : HUB.violet} strokeWidth="2"
+            strokeDasharray="6 12" style={{ animation: 'ml-dash 2.4s linear infinite', filter: `drop-shadow(0 0 6px ${joined ? HUB.green : HUB.violet})` }} />
+        </svg>
+        {/* side runes */}
+        <span className="ml-anim" style={{ position: 'absolute', left: 8, color: HUB.violet, fontSize: 18, animation: 'ml-float 3s ease-in-out infinite', filter: `drop-shadow(0 0 8px ${HUB.violet})` }}>✦</span>
+        <span className="ml-anim" style={{ position: 'absolute', right: 8, color: HUB.gold, fontSize: 18, animation: 'ml-float 3.6s ease-in-out infinite', filter: `drop-shadow(0 0 8px ${HUB.gold})` }}>◈</span>
+        <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: '0.14em', color: HUB.text, textAlign: 'center', padding: '0 40px' }}>
+          {entering ? 'ENTERING THE ARENA…' : joined ? 'OPPONENT JOINED' : 'WAITING FOR AN OPPONENT…'}
+        </span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+        <span className="ml-anim" style={{ width: 8, height: 8, borderRadius: '50%', background: HUB.cyan, boxShadow: `0 0 8px ${HUB.cyan}`, animation: 'ml-pulse 1.4s ease-in-out infinite' }} />
+        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.14em', color: HUB.cyan }}>LIVE</span>
+      </div>
+    </div>
+  );
+}
+
+function VsRune({ mobile }: { mobile: boolean }) {
+  const s = mobile ? 54 : 76;
+  return (
+    <div style={{ width: s, height: s, transform: 'rotate(45deg)', borderRadius: 10, display: 'grid', placeItems: 'center',
+      background: 'linear-gradient(135deg, rgba(20,16,40,0.9), rgba(40,28,80,0.9))', border: `1px solid ${HUB.gold}88`,
+      boxShadow: `0 0 24px ${HUB.violet}55` }}>
+      <span style={{ transform: 'rotate(-45deg)', fontFamily: HUB_SERIF, fontWeight: 800, fontSize: mobile ? 20 : 26, color: HUB.goldHi }}>VS</span>
+    </div>
+  );
+}
+
+function SeatCard({ seat, role, name, avatar, isYou, joined, mobile }: {
+  seat: string; role: string; name?: string; avatar?: string | null; isYou: boolean; joined: boolean; mobile: boolean;
+}) {
+  const active = joined;
+  return (
+    <div style={{ flex: mobile ? '1 1 auto' : '1 1 0', maxWidth: mobile ? '100%' : 360, minWidth: mobile ? 0 : 280,
+      position: 'relative', borderRadius: 14, padding: mobile ? '18px 16px' : '22px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+      background: active ? 'linear-gradient(180deg, rgba(18,15,38,0.9), rgba(10,9,22,0.9))' : 'rgba(10,10,22,0.5)',
+      border: active ? `1px solid ${HUB.gold}88` : `1px dashed ${HUB.violet}88`,
+      boxShadow: active ? `0 0 30px ${HUB.violet}33, inset 0 0 0 1px ${HUB.gold}33` : 'none' }}
+      className={active ? undefined : 'ml-anim'}>
+      {!active && <div aria-hidden className="ml-anim" style={{ position: 'absolute', inset: -1, borderRadius: 14, border: `1px solid ${HUB.violet}`, animation: 'ml-pulse 2s ease-in-out infinite', pointerEvents: 'none' }} />}
+      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.14em', color: active ? HUB.goldHi : HUB.violet }}>{seat} · {role}</div>
+
+      <div style={{ position: 'relative', width: mobile ? 92 : 108, height: mobile ? 92 : 108, borderRadius: '50%', display: 'grid', placeItems: 'center',
+        background: active ? `conic-gradient(from 0deg, ${HUB.gold}, ${HUB.violet}, ${HUB.gold})` : 'transparent',
+        border: active ? 'none' : `2px dashed ${HUB.violet}88`, padding: active ? 3 : 0 }}>
+        <div style={{ width: '100%', height: '100%', borderRadius: '50%', overflow: 'hidden', display: 'grid', placeItems: 'center',
+          background: 'radial-gradient(circle at 50% 35%, #1a1636, #0a0a16)' }}>
+          {joined && name
+            ? (avatar ? <img src={avatar} alt={`${name} avatar`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : <span style={{ fontSize: mobile ? 34 : 42, fontWeight: 800, color: HUB.violet, filter: `drop-shadow(0 0 10px ${HUB.violet})` }}>{name.slice(0, 1).toUpperCase()}</span>)
+            : <span className="ml-anim" style={{ fontSize: mobile ? 34 : 42, fontWeight: 800, color: HUB.violet, animation: 'ml-pulse 2s ease-in-out infinite' }}>?</span>}
+        </div>
+      </div>
+
+      {joined && name ? (
+        <>
+          <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: mobile ? 20 : 24, color: HUB.text, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {isYou && <span style={{ padding: '2px 10px', borderRadius: 6, background: `${HUB.violet}22`, border: `1px solid ${HUB.violet}88`, color: HUB.violet, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.08em' }}>YOU</span>}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: `${HUB.green}18`, border: `1px solid ${HUB.green}66`, color: HUB.green, fontSize: 11, fontWeight: 800 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: HUB.green, boxShadow: `0 0 6px ${HUB.green}` }} />READY
+            </span>
+          </div>
+        </>
       ) : (
         <>
-          <BattleMusic />
-          <WagerStatusBadge matchID={seat.matchID} compact />
-          <ChainsClient
-            matchID={seat.matchID}
-            playerID={seat.playerID}
-            credentials={seat.credentials}
-          />
+          <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: mobile ? 20 : 24, color: HUB.muted }}>WAITING…</div>
+          <div style={{ fontSize: 12, color: HUB.muted }}>Opponent seat available</div>
         </>
       )}
     </div>
