@@ -2011,85 +2011,423 @@ function RuleSearch({ onClose, onSelect }: { onClose: () => void; onSelect: (id:
 }
 
 // ── Landing screen (post-login hub) ─────────────────────────────────────────
+// ── Main menu hub design tokens (per concept palette) ───────────────────────
+const MENU = {
+  bg: '#080817', bgEl: '#0E1022', panel: 'rgba(17,19,40,0.88)', panelPurple: 'rgba(26,21,53,0.90)',
+  gold: '#E6C45C', goldHi: '#FFD875', violet: '#8B5CF6', cyan: '#55D8FF', success: '#39E6B0',
+  text: '#F6F3EB', text2: '#AAA5BA', border: 'rgba(230,196,92,0.22)', borderStrong: 'rgba(230,196,92,0.5)',
+};
+const MENU_SERIF = "'Cinzel', 'EB Garamond', Georgia, serif";
+
+function mIco(p: React.ReactNode, size = 18) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>{p}</svg>;
+}
+function nextUtcMidnight() { const d = new Date(); d.setUTCHours(24, 0, 0, 0); return d.getTime(); }
+function useNow(intervalMs = 1000) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), intervalMs); return () => clearInterval(t); }, [intervalMs]);
+  return now;
+}
+function fmtCountdown(ms: number) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+type QueueMode = 'ranked' | 'casual';
+
 function Landing({
   myName, onPlay, onMasterquest, onBoosters, onProfile, onRules, onLogout,
 }: { myName: string; onPlay: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
-  const [notice, setNotice] = useState('');
-  void myName;
-  const mobile = useIsMobile();
-  const ico = (p: React.ReactNode) => (
-    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>{p}</svg>
-  );
-  const items: { label: string; icon: React.ReactNode; onClick: () => void; primary?: boolean }[] = [
-    { label: 'Play · Ranked',   primary: true, icon: ico(<polygon points="6 4 20 12 6 20 6 4" />), onClick: onPlay },
-    { label: 'Play · Unranked', icon: ico(<><path d="M14.5 17.5 3 6V3h3l11.5 11.5" /><path d="m13 19 6-6" /><path d="m16 16 5 5" /></>), onClick: onPlay },
-    { label: 'Collection',      icon: ico(<><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z" /><path d="m3 8 9 5 9-5" /><path d="M12 13v8" /></>), onClick: onBoosters },
-    { label: 'Masters',         icon: ico(<><path d="M6 9a6 6 0 0 0 12 0V4H6Z" /><path d="M6 5H3v2a3 3 0 0 0 3 3" /><path d="M18 5h3v2a3 3 0 0 1-3 3" /><path d="M12 15v4" /><path d="M8 21h8" /></>), onClick: onMasterquest },
-    { label: 'Profile',         icon: ico(<><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>), onClick: onProfile },
-    { label: 'Rules',           icon: ico(<><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2Z" /><path d="M4 19a2 2 0 0 1 2-2h13" /></>), onClick: onRules },
-    { label: 'Settings',        icon: ico(<><circle cx="12" cy="12" r="3.2" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" /></>), onClick: () => setNotice('Settings — coming soon.') },
-    { label: 'Exit',            icon: ico(<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></>), onClick: onLogout },
-  ];
+  const mobile = useIsMobile(767);
+  const tablet = useIsMobile(1279);
+  const [prof, setProf] = useState<Profile | null>(null);
+  const [ranked, setRanked] = useState<PublicRankedProfile | null>(null);
+  const [season, setSeason] = useState<{ id: string; name: string; endsAt: number } | null>(null);
+  const [players, setPlayers] = useState<number | null>(null);
+  const [activeDeck, setActiveDeck] = useState<DeckEntry | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [mode, setMode] = useState<QueueMode>(() => (localStorage.getItem('ocva.queueMode') as QueueMode) || 'ranked');
+  const [muted, setMuted] = useState<boolean>(() => { try { return localStorage.getItem('ocva.muted') === '1'; } catch { return false; } });
+  const [copied, setCopied] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const liveRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      const [p, r, s, all, decks] = await Promise.all([
+        getProfileApi(myName).catch(() => null),
+        RankedAPI.profile(myName).catch(() => null),
+        RankedAPI.season().catch(() => null),
+        listProfilesApi().catch(() => [] as Profile[]),
+        listDecksApi(myName).catch(() => [] as DeckEntry[]),
+      ]);
+      if (!alive) return;
+      setProf(p); setRanked(r);
+      if (s) setSeason({ id: s.id, name: s.name, endsAt: s.endsAt });
+      setPlayers(all.length);
+      setActiveDeck(decks.find((d) => d.isActive) ?? decks[0] ?? null);
+      setLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [myName]);
+
+  useEffect(() => { try { localStorage.setItem('ocva.queueMode', mode); } catch {} }, [mode]);
+  useEffect(() => {
+    try { localStorage.setItem('ocva.muted', muted ? '1' : '0'); } catch {}
+    document.querySelectorAll('audio,video').forEach((a) => { (a as HTMLMediaElement).muted = muted; });
+  }, [muted]);
+
+  const games = prof ? prof.wins + prof.losses + prof.draws : 0;
+  const level = Math.max(1, Math.floor(Math.sqrt((games + 1) * 2.2)));
+  const xpForLvl = (l: number) => Math.round((l + 1) * (l + 1) / 2.2);
+  const xpPrev = xpForLvl(level - 1), xpNext = xpForLvl(level);
+  const xpInto = games - xpPrev, xpRange = Math.max(1, xpNext - xpPrev);
+  const placement = ranked?.placementMatchesRemaining ?? 0;
+
+  const deckCards = activeDeck?.cards ?? [];
+  const deckValid = activeDeck ? validateDeck(deckCards) : null;
+  const deckState: 'missing' | 'invalid' | 'valid' = !activeDeck ? 'missing' : deckValid!.ok ? 'valid' : 'invalid';
+  const deckFaction = deriveFavoriteFaction(deckCards);
+
+  const copyAddr = async () => {
+    if (!prof?.walletAddress) return;
+    try { await navigator.clipboard.writeText(prof.walletAddress); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  };
+
+  const goCollection = () => { try { window.location.hash = 'collection'; } catch {} onProfile(); };
+
+  const play = () => {
+    // Always enter the matchmaking lobby — that's where deck selection (incl.
+    // chain Standard decks), create/join, challenges and the ranked queue live.
+    // Ranked still can't be queued with an invalid deck (enforced in the lobby).
+    if (liveRef.current) liveRef.current.textContent = `Entering ${mode} matchmaking.`;
+    onPlay();
+  };
+
   return (
-    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#07060f', fontFamily: F.body, color: C.textHi }}>
-      {/* Clean arena artwork fills the screen (cover). */}
-      <img
-        src="/hub-bg.png?v=2"
-        alt=""
-        draggable={false}
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', userSelect: 'none', zIndex: 0 }}
+    <div style={{ position: 'fixed', inset: 0, overflow: mobile ? 'auto' : 'hidden', background: MENU.bg, fontFamily: F.body, color: MENU.text }}>
+      <style>{`@media (prefers-reduced-motion: reduce){ .menu-anim{ transition:none!important; animation:none!important; } }`}</style>
+      <img src="/hub-bg.png?v=2" alt="" draggable={false}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', userSelect: 'none', zIndex: 0 }} />
+      <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0, background: 'radial-gradient(120% 80% at 50% 100%, rgba(8,8,23,0.6), transparent 60%)' }} />
+      <div aria-live="polite" ref={liveRef} style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }} />
+
+      <PlayerHUD
+        name={prof?.name ?? myName} avatarUrl={prof?.avatarUrl ?? null} level={level}
+        xpInto={xpInto} xpRange={xpRange} placement={placement}
+        rankLabel={ranked && placement === 0 ? rankLabel(ranked) : null}
+        walletAddress={prof?.walletAddress ?? null} copied={copied} onCopy={copyAddr}
+        muted={muted} onToggleMute={() => setMuted((m) => !m)} onSettings={() => setSettingsOpen(true)}
+        loading={loading} mobile={mobile}
       />
-      {/* Atmospheric scrim: a vignette plus a left-edge falloff so the menu
-          plates separate cleanly from the artwork without dimming the art. */}
-      <div aria-hidden style={{
-        position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none',
-        background: mobile
-          ? 'linear-gradient(180deg, rgba(6,5,15,0.12) 0%, rgba(6,5,15,0.42) 52%, rgba(6,5,15,0.92) 100%)'
-          : 'linear-gradient(90deg, rgba(6,5,15,0.74) 0%, rgba(6,5,15,0.34) 26%, rgba(6,5,15,0) 46%),'
-            + 'radial-gradient(140% 120% at 50% 50%, transparent 44%, rgba(4,3,12,0.6) 100%)',
-      }} />
-      {/* "Built on Robinhood" mark, centered just below the main title. */}
-      <img
-        src="/built-on-robinhood.png?v=2"
-        alt="Built on Robinhood"
-        draggable={false}
-        style={{
-          position: 'absolute', zIndex: 2, left: '50%', top: mobile ? '30%' : '53%', transform: 'translate(-50%,-50%)',
-          width: mobile ? 'clamp(130px, 40vw, 200px)' : 'clamp(150px, 17vw, 260px)',
-          height: 'auto', pointerEvents: 'none', userSelect: 'none',
-          filter: 'drop-shadow(0 2px 10px rgba(0,0,0,0.5))',
-        }}
-      />
-      {/* Menu — left column on desktop, full-width bottom stack on mobile. */}
-      <nav style={mobile ? {
-        position: 'absolute', zIndex: 3, left: 0, right: 0, bottom: 'calc(2vh + env(safe-area-inset-bottom))',
-        display: 'flex', flexDirection: 'column', gap: 7, padding: '0 12px', maxHeight: '64vh', overflowY: 'auto',
-      } : {
-        position: 'absolute', zIndex: 3,
-        left: 'clamp(16px, 4vw, 72px)', top: '50%', transform: 'translateY(-34%)',
-        display: 'flex', flexDirection: 'column', gap: 8, width: 236, maxWidth: 'calc(100vw - 32px)',
-      }}>
-        {items.map(it => (
-          <button
-            key={it.label}
-            className={`ova-menu-item ${it.primary ? 'ova-menu-item--primary' : ''}`}
-            onClick={it.onClick}
-            title={it.label}
-          >
-            <span className="ova-menu-ico">{it.icon}</span>
-            <span>{it.label}</span>
-          </button>
-        ))}
-      </nav>
-      {notice && (
-        <div style={{
-          position: 'absolute', zIndex: 4, left: 'clamp(16px, 4vw, 72px)', bottom: '6vh',
-          fontSize: 12, color: '#c9a94a', background: 'rgba(14,12,30,0.92)',
-          border: '1px solid rgba(150,120,255,0.35)', borderRadius: 8, padding: '7px 12px',
-          backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-        }}>{notice}</div>
+
+      {/* Body panels */}
+      <div style={{ position: 'relative', zIndex: 3, height: mobile ? 'auto' : '100%',
+        display: mobile ? 'flex' : 'block', flexDirection: 'column', gap: 12,
+        padding: mobile ? '76px 12px 90px' : 0 }}>
+        <div style={mobile ? {} : { position: 'absolute', left: tablet ? 20 : 'clamp(24px, 4vw, 64px)', bottom: mobile ? undefined : 108, width: 'min(380px, 42vw)' }}>
+          <MatchmakingPanel mode={mode} setMode={setMode} deckState={deckState} deckName={activeDeck?.name ?? null}
+            deckCount={deckCards.length} deckFaction={deckFaction} deckIssue={deckValid?.issues?.[0]?.message ?? null}
+            players={players} onPlay={play} onChangeDeck={() => { try { window.location.hash = 'decks'; } catch {} onProfile(); }}
+            loading={loading} mobile={mobile} />
+        </div>
+
+        <div style={mobile ? {} : { position: 'absolute', right: tablet ? 20 : 'clamp(24px, 4vw, 64px)', bottom: mobile ? undefined : 108, width: 'min(340px, 40vw)' }}>
+          <ActivityPanel season={season} placement={placement} ranked={ranked} onViewEvent={onMasterquest} loading={loading} mobile={mobile} />
+        </div>
+      </div>
+
+      <NavDock onCollection={goCollection} onBoosters={onBoosters} onMasters={onMasterquest} onProfile={onProfile} onRules={onRules} onSettings={() => setSettingsOpen(true)} mobile={mobile} />
+
+      <img src="/built-on-robinhood.png?v=2" alt="Built on Robinhood" draggable={false}
+        style={{ position: mobile ? 'static' : 'absolute', zIndex: 2, left: '50%', bottom: mobile ? undefined : 70,
+          transform: mobile ? 'none' : 'translateX(-50%)', margin: mobile ? '10px auto 0' : undefined, display: 'block',
+          width: mobile ? 120 : 150, height: 'auto', pointerEvents: 'none', userSelect: 'none', opacity: 0.9,
+          filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.6))' }} />
+
+      {settingsOpen && (
+        <SettingsMenu muted={muted} onToggleMute={() => setMuted((m) => !m)} onClose={() => setSettingsOpen(false)}
+          onSignOut={() => { setSettingsOpen(false); setConfirmSignOut(true); }} onRules={onRules} />
       )}
+      {confirmSignOut && (
+        <ConfirmDialog title="Sign out?" body="You'll return to the sign-in screen. Your progress is saved to your profile."
+          confirmLabel="SIGN OUT" onConfirm={onLogout} onCancel={() => setConfirmSignOut(false)} />
+      )}
+    </div>
+  );
+}
+
+function PlayerHUD({ name, avatarUrl, level, xpInto, xpRange, placement, rankLabel: rl, walletAddress, copied, onCopy, muted, onToggleMute, onSettings, loading, mobile }: {
+  name: string; avatarUrl: string | null; level: number; xpInto: number; xpRange: number; placement: number; rankLabel: string | null;
+  walletAddress: string | null; copied: boolean; onCopy: () => void; muted: boolean; onToggleMute: () => void; onSettings: () => void; loading: boolean; mobile: boolean;
+}) {
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifs: string[] = [];
+  if (placement > 0) notifs.push(`${placement} placement matches left to earn your rank.`);
+  const xpPct = Math.max(0, Math.min(100, Math.round((xpInto / xpRange) * 100)));
+  const connected = !!walletAddress;
+  return (
+    <header style={{ position: mobile ? 'fixed' : 'absolute', top: 0, left: 0, right: 0, zIndex: 6, height: 66,
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '0 16px',
+      background: 'linear-gradient(180deg, rgba(6,6,18,0.92), rgba(6,6,18,0.62))', borderBottom: `1px solid ${MENU.border}`, backdropFilter: 'blur(8px)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+        <div style={{ width: 44, height: 44, borderRadius: '50%', flex: 'none', padding: 2, background: `conic-gradient(from 0deg, ${MENU.gold}, ${MENU.violet}, ${MENU.gold})` }}>
+          <div style={{ width: '100%', height: '100%', borderRadius: '50%', overflow: 'hidden', background: MENU.bgEl, display: 'grid', placeItems: 'center' }}>
+            {avatarUrl ? <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : <span style={{ fontWeight: 800, color: MENU.violet }}>{name.slice(0, 1).toUpperCase()}</span>}
+          </div>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 800, fontSize: 15, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>{name.toUpperCase()}</span>
+            {!mobile && <span style={{ fontSize: 11, fontWeight: 800, color: MENU.goldHi, letterSpacing: '0.06em' }}>LEVEL {level}</span>}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
+            <div style={{ width: mobile ? 90 : 150, height: 5, borderRadius: 999, background: 'rgba(255,255,255,0.12)', overflow: 'hidden' }}>
+              <div className="menu-anim" style={{ width: `${loading ? 0 : xpPct}%`, height: '100%', background: `linear-gradient(90deg, ${MENU.gold}, ${MENU.violet})`, transition: 'width .3s ease' }} />
+            </div>
+            {!mobile && <span style={{ fontSize: 11, color: MENU.text2 }}>{xpInto} / {xpRange} XP</span>}
+            <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.05em', color: placement > 0 ? MENU.goldHi : MENU.cyan,
+              padding: '2px 8px', borderRadius: 999, background: `${placement > 0 ? MENU.gold : MENU.cyan}1c`, border: `1px solid ${placement > 0 ? MENU.gold : MENU.cyan}55`, whiteSpace: 'nowrap' }}>
+              {placement > 0 ? `PLACEMENT · ${placement} LEFT` : (rl ? rl.toUpperCase() : 'UNRANKED')}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ position: 'relative' }}>
+          <button onClick={() => setNotifOpen((v) => !v)} aria-label="Notifications" aria-expanded={notifOpen} style={hudBtn()}>
+            {mIco(<><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></>)}
+            {notifs.length > 0 && <span aria-hidden style={{ position: 'absolute', top: 6, right: 6, width: 8, height: 8, borderRadius: '50%', background: MENU.goldHi, boxShadow: `0 0 6px ${MENU.goldHi}` }} />}
+          </button>
+          {notifOpen && (
+            <div role="menu" style={{ position: 'absolute', right: 0, top: 44, width: 260, padding: 12, borderRadius: 12, background: MENU.panel, border: `1px solid ${MENU.border}`, backdropFilter: 'blur(10px)', zIndex: 10 }}>
+              <div style={{ fontWeight: 800, fontSize: 12, letterSpacing: '0.1em', color: MENU.text2, marginBottom: 8 }}>NOTIFICATIONS</div>
+              {notifs.length === 0 ? <div style={{ fontSize: 13, color: MENU.text2 }}>You're all caught up.</div>
+                : notifs.map((n, i) => <div key={i} style={{ fontSize: 13, padding: '6px 0', borderTop: i ? `1px solid ${MENU.border}` : 'none' }}>{n}</div>)}
+            </div>
+          )}
+        </div>
+        {connected ? (
+          <button onClick={onCopy} title="Copy wallet address" style={{ ...hudBtn(), width: 'auto', gap: 8, padding: '0 12px', fontFamily: F.mono, fontSize: 12 }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: MENU.success, boxShadow: `0 0 6px ${MENU.success}` }} />
+            {shortAddr(walletAddress!)}<span style={{ color: copied ? MENU.success : MENU.text2 }}>{copied ? '✓' : '⧉'}</span>
+          </button>
+        ) : (
+          <span style={{ ...hudBtn(), width: 'auto', padding: '0 12px', fontSize: 12, color: MENU.text2 }}>Not linked</span>
+        )}
+        <button onClick={onToggleMute} aria-label={muted ? 'Unmute' : 'Mute'} style={hudBtn()}>{muted ? mIco(<><path d="M11 5 6 9H2v6h4l5 4V5Z" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></>) : mIco(<><path d="M11 5 6 9H2v6h4l5 4V5Z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /></>)}</button>
+        <button onClick={onSettings} aria-label="Settings" style={hudBtn()}>{mIco(<><circle cx="12" cy="12" r="3.2" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" /></>)}</button>
+      </div>
+    </header>
+  );
+}
+function hudBtn(): React.CSSProperties {
+  return { width: 38, height: 38, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10,
+    background: 'rgba(20,22,44,0.7)', border: `1px solid ${MENU.border}`, color: MENU.text, cursor: 'pointer' };
+}
+
+function MatchmakingPanel({ mode, setMode, deckState, deckName, deckCount, deckFaction, deckIssue, players, onPlay, onChangeDeck, loading, mobile }: {
+  mode: QueueMode; setMode: (m: QueueMode) => void; deckState: 'missing' | 'invalid' | 'valid';
+  deckName: string | null; deckCount: number; deckFaction: { name: string; color: string } | null; deckIssue: string | null;
+  players: number | null; onPlay: () => void; onChangeDeck: () => void; loading: boolean; mobile: boolean;
+}) {
+  const modeDesc = mode === 'ranked' ? 'Competitive ladder · Best-of-one' : 'Casual play · no rank at stake';
+  // The button always opens the lobby (deck selection + matchmaking live there);
+  // the label reflects the current deck so the next step is clear.
+  const playLabel = deckState === 'missing' ? 'CHOOSE A DECK' : deckState === 'invalid' ? 'FIX DECK & PLAY' : `PLAY ${mode.toUpperCase()}`;
+  const canPlay = true;
+  return (
+    <section aria-label="Matchmaking" style={{ padding: 18, borderRadius: 16, background: MENU.panelPurple, border: `1px solid ${MENU.border}`, backdropFilter: 'blur(12px)', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
+      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.18em', color: MENU.gold }}>MATCHMAKING</div>
+      <h2 style={{ margin: '4px 0 14px', fontFamily: MENU_SERIF, fontWeight: 700, fontSize: mobile ? 26 : 30, color: MENU.text }}>ENTER THE ARENA</h2>
+
+      <div role="tablist" aria-label="Match mode" style={{ display: 'flex', gap: 4, padding: 4, borderRadius: 12, background: 'rgba(8,8,22,0.6)', border: `1px solid ${MENU.border}` }}>
+        {(['ranked', 'casual'] as QueueMode[]).map((m) => {
+          const on = mode === m;
+          return (
+            <button key={m} role="tab" aria-selected={on} onClick={() => setMode(m)} className="menu-anim"
+              style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px', borderRadius: 9, cursor: 'pointer',
+                fontWeight: 800, letterSpacing: '0.06em', fontSize: 13, transition: 'all .18s ease',
+                color: on ? '#20170a' : MENU.text2, background: on ? `linear-gradient(180deg, ${MENU.goldHi}, ${MENU.gold})` : 'transparent', border: 'none' }}>
+              {m === 'ranked' ? mIco(<><path d="m14.5 17.5 5-5" /><path d="M3 21l6-6" /><path d="M14 3l7 7-4 4-7-7z" /></>, 15) : mIco(<><circle cx="12" cy="12" r="9" /><path d="m9 12 2 2 4-4" /></>, 15)}
+              {m.toUpperCase()}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 12.5, color: MENU.text2, margin: '10px 2px 12px' }}>{modeDesc}</div>
+
+      {/* Selected deck */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 12, background: 'rgba(8,8,22,0.55)', border: `1px solid ${MENU.border}` }}>
+        <span style={{ width: 30, height: 30, borderRadius: '50%', flex: 'none', display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 900,
+          background: `${deckFaction?.color ?? MENU.violet}22`, border: `1px solid ${deckFaction?.color ?? MENU.violet}88`, color: deckFaction?.color ?? MENU.violet }}>
+          {(deckFaction?.name ?? '?').slice(0, 1)}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {loading ? 'Loading…' : deckName ? deckName.toUpperCase() : 'NO DECK SELECTED'}
+          </div>
+          <div style={{ fontSize: 11.5, color: deckState === 'valid' ? MENU.success : deckState === 'invalid' ? '#FF616F' : MENU.text2 }}>
+            {deckName ? `${deckCount} / ${DECK_SIZE} cards` : 'Pick a deck to play'}{deckState === 'valid' ? ' · ready' : deckState === 'invalid' ? ' · incomplete' : ''}
+          </div>
+        </div>
+        <button onClick={onChangeDeck} style={{ background: 'none', border: 'none', color: MENU.violet, cursor: 'pointer', fontWeight: 800, fontSize: 11, letterSpacing: '0.06em' }}>CHANGE DECK</button>
+      </div>
+      {deckState === 'invalid' && deckIssue && <div style={{ fontSize: 11.5, color: '#FF616F', margin: '8px 2px 0' }}>⚠ {deckIssue}</div>}
+
+      <button onClick={onPlay} disabled={!canPlay} aria-disabled={!canPlay} className="menu-anim"
+        style={{ width: '100%', marginTop: 14, padding: '15px', borderRadius: 12, cursor: canPlay ? 'pointer' : 'not-allowed',
+          fontFamily: MENU_SERIF, fontWeight: 800, fontSize: 17, letterSpacing: '0.06em', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+          color: canPlay ? '#20170a' : '#efe6c9aa', background: canPlay ? `linear-gradient(180deg, ${MENU.goldHi}, ${MENU.gold} 55%, #b8912f)` : 'linear-gradient(180deg,#4a4028,#332b18)',
+          border: `1px solid ${canPlay ? '#8a6d24' : '#5a4c30'}`, boxShadow: canPlay ? `0 8px 26px rgba(230,196,92,0.4)` : 'none', transition: 'transform .15s ease, box-shadow .2s ease' }}
+        onMouseDown={(e) => { if (canPlay) e.currentTarget.style.transform = 'translateY(1px)'; }}
+        onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; }} onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; }}>
+        {canPlay && mIco(<><path d="m14.5 17.5 5-5" /><path d="M3 21l6-6" /><path d="M14 3l7 7-4 4-7-7z" /></>, 18)}
+        {playLabel}
+      </button>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 12, fontSize: 12, color: MENU.text2 }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: MENU.success, boxShadow: `0 0 6px ${MENU.success}` }} />
+        {players == null ? '…' : players} player{players === 1 ? '' : 's'} online
+      </div>
+    </section>
+  );
+}
+
+function ActivityPanel({ season, placement, ranked, onViewEvent, loading, mobile }: {
+  season: { id: string; name: string; endsAt: number } | null; placement: number; ranked: PublicRankedProfile | null; onViewEvent: () => void; loading: boolean; mobile: boolean;
+}) {
+  const now = useNow(1000);
+  const eventMs = nextUtcMidnight() - now;
+  // Real daily-quest tracker: won a match today? (set by the match-result flow)
+  const dayKey = todayKey();
+  const [questDone, setQuestDone] = useState<boolean>(() => { try { return localStorage.getItem(`ocva.daily.${dayKey}.win`) === '1'; } catch { return false; } });
+  useEffect(() => {
+    const check = () => { try { setQuestDone(localStorage.getItem(`ocva.daily.${dayKey}.win`) === '1'); } catch {} };
+    const t = setInterval(check, 5000); window.addEventListener('focus', check);
+    return () => { clearInterval(t); window.removeEventListener('focus', check); };
+  }, [dayKey]);
+  const placementDone = Math.max(0, 10 - placement);
+
+  return (
+    <aside aria-label="Activity" style={{ display: 'flex', flexDirection: mobile ? 'row' : 'column', gap: 12, overflowX: mobile ? 'auto' : 'visible' }}>
+      <ActCard title={`SEASON ${season ? String(season.name).replace(/\D/g, '') || '01' : '01'}`} mobile={mobile}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontFamily: MENU_SERIF, fontWeight: 700, fontSize: 16, color: MENU.goldHi }}>{placement > 0 ? 'PLACEMENT' : (ranked ? rankLabel(ranked) : 'UNRANKED')}</span>
+        </div>
+        {placement > 0 ? (
+          <>
+            <div style={{ fontSize: 12, color: MENU.text2, margin: '2px 0 8px' }}>{placement} matches left</div>
+            <Bar pct={loading ? 0 : (placementDone / 10) * 100} />
+            <div style={{ fontSize: 11, color: MENU.text2, marginTop: 4, textAlign: 'right' }}>{placementDone} / 10</div>
+          </>
+        ) : <div style={{ fontSize: 12, color: MENU.text2, marginTop: 4 }}>Ranked placement complete.</div>}
+      </ActCard>
+
+      <ActCard title="DAILY QUEST" mobile={mobile}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>Win 1 match</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0' }}>
+          <Bar pct={questDone ? 100 : 0} />
+          <span style={{ fontSize: 11, color: MENU.text2, whiteSpace: 'nowrap' }}>{questDone ? '1 / 1' : '0 / 1'}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 11, fontWeight: 800, color: MENU.cyan }}>+100 XP</span>
+          {questDone && <span style={{ fontSize: 11, fontWeight: 800, color: MENU.success }}>✓ COMPLETE</span>}
+        </div>
+      </ActCard>
+
+      <ActCard title="NEXT EVENT" mobile={mobile}>
+        <div style={{ fontFamily: MENU_SERIF, fontWeight: 700, fontSize: 16, color: MENU.text }}>DAILY $MASTER CUP</div>
+        <div style={{ fontFamily: F.mono, fontSize: 20, fontWeight: 700, color: MENU.cyan, margin: '4px 0 8px', letterSpacing: '0.04em' }}>{fmtCountdown(eventMs)}</div>
+        <button onClick={onViewEvent} style={{ background: 'none', border: 'none', color: MENU.violet, cursor: 'pointer', fontWeight: 800, fontSize: 11.5, letterSpacing: '0.06em', display: 'inline-flex', alignItems: 'center', gap: 6 }}>VIEW EVENT →</button>
+      </ActCard>
+    </aside>
+  );
+}
+function ActCard({ title, children, mobile }: { title: string; children: React.ReactNode; mobile: boolean }) {
+  return (
+    <div style={{ flex: mobile ? '0 0 78%' : 'none', minWidth: mobile ? 220 : 0, padding: 14, borderRadius: 14, background: MENU.panel, border: `1px solid ${MENU.border}`, backdropFilter: 'blur(10px)' }}>
+      <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.14em', color: MENU.gold, marginBottom: 8 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+function Bar({ pct }: { pct: number }) {
+  return <div style={{ flex: 1, height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
+    <div className="menu-anim" style={{ width: `${pct}%`, height: '100%', background: `linear-gradient(90deg, ${MENU.gold}, ${MENU.violet})`, transition: 'width .3s ease' }} />
+  </div>;
+}
+
+function NavDock({ onCollection, onBoosters, onMasters, onProfile, onRules, onSettings, mobile }: {
+  onCollection: () => void; onBoosters: () => void; onMasters: () => void; onProfile: () => void; onRules: () => void; onSettings: () => void; mobile: boolean;
+}) {
+  const primary = [
+    { label: 'Collection', icon: mIco(<><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z" /><path d="m3 8 9 5 9-5" /><path d="M12 13v8" /></>, 20), onClick: onCollection },
+    { label: 'Boosters', icon: mIco(<><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M4 9h16" /><path d="M12 3v18" /></>, 20), onClick: onBoosters },
+    { label: 'Masters', icon: mIco(<><path d="M6 9a6 6 0 0 0 12 0V4H6Z" /><path d="M6 5H3v2a3 3 0 0 0 3 3" /><path d="M18 5h3v2a3 3 0 0 1-3 3" /><path d="M12 15v4" /><path d="M8 21h8" /></>, 20), onClick: onMasters },
+    { label: 'Profile', icon: mIco(<><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>, 20), onClick: onProfile },
+  ];
+  const utils = [
+    { label: 'Rulebook', icon: mIco(<><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2Z" /><path d="M4 19a2 2 0 0 1 2-2h13" /></>, 20), onClick: onRules },
+    { label: 'Settings', icon: mIco(<><circle cx="12" cy="12" r="3.2" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" /></>, 20), onClick: onSettings },
+  ];
+  const Item = ({ it }: { it: { label: string; icon: React.ReactNode; onClick: () => void } }) => (
+    <button onClick={it.onClick} title={it.label} aria-label={it.label} className="menu-anim ova-dock-item"
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '8px 14px', minWidth: 62, minHeight: 44, borderRadius: 10,
+        background: 'none', border: 'none', color: MENU.text2, cursor: 'pointer', transition: 'color .18s ease, background .18s ease' }}
+      onMouseEnter={(e) => { e.currentTarget.style.color = MENU.goldHi; e.currentTarget.style.background = 'rgba(230,196,92,0.08)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = MENU.text2; e.currentTarget.style.background = 'none'; }}>
+      {it.icon}
+      <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em' }}>{it.label.toUpperCase()}</span>
+    </button>
+  );
+  return (
+    <nav aria-label="Main navigation" style={{ position: 'fixed', left: '50%', transform: 'translateX(-50%)', bottom: mobile ? 'calc(6px + env(safe-area-inset-bottom))' : 14, zIndex: 6,
+      display: 'flex', alignItems: 'center', gap: 2, padding: '6px 10px', borderRadius: 16, maxWidth: 'calc(100vw - 16px)', overflowX: 'auto',
+      background: 'rgba(10,11,26,0.9)', border: `1px solid ${MENU.border}`, backdropFilter: 'blur(12px)', boxShadow: '0 12px 30px rgba(0,0,0,0.5)' }}>
+      {primary.map((it) => <Item key={it.label} it={it} />)}
+      <span aria-hidden style={{ width: 1, height: 34, background: MENU.border, margin: '0 6px', flex: 'none' }} />
+      {utils.map((it) => <Item key={it.label} it={it} />)}
+    </nav>
+  );
+}
+
+function SettingsMenu({ muted, onToggleMute, onClose, onSignOut, onRules }: { muted: boolean; onToggleMute: () => void; onClose: () => void; onSignOut: () => void; onRules: () => void }) {
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 30, background: 'rgba(4,4,12,0.6)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(360px, 100%)', borderRadius: 16, background: MENU.bgEl, border: `1px solid ${MENU.border}`, padding: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <span style={{ fontFamily: MENU_SERIF, fontWeight: 700, fontSize: 18, color: MENU.goldHi }}>Settings</span>
+          <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', color: MENU.text2, fontSize: 22, cursor: 'pointer' }}>×</button>
+        </div>
+        <button onClick={onToggleMute} style={settingsRow()}><span>Sound</span><span style={{ color: muted ? MENU.text2 : MENU.success, fontWeight: 700 }}>{muted ? 'Off' : 'On'}</span></button>
+        <button onClick={() => { onClose(); onRules(); }} style={settingsRow()}><span>Rulebook</span><span style={{ color: MENU.text2 }}>→</span></button>
+        <button onClick={onSignOut} style={{ ...settingsRow(), color: '#FF616F' }}><span>Sign out</span><span>→</span></button>
+      </div>
+    </div>
+  );
+}
+function settingsRow(): React.CSSProperties {
+  return { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 14px', marginBottom: 8, minHeight: 44,
+    borderRadius: 10, background: MENU.panel, border: `1px solid ${MENU.border}`, color: MENU.text, cursor: 'pointer', fontSize: 14, fontWeight: 600 };
+}
+
+function ConfirmDialog({ title, body, confirmLabel, onConfirm, onCancel }: { title: string; body: string; confirmLabel: string; onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div onClick={onCancel} style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(4,4,12,0.7)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(400px, 100%)', borderRadius: 16, background: MENU.bgEl, border: `1px solid ${MENU.border}`, padding: 22 }}>
+        <div style={{ fontFamily: MENU_SERIF, fontWeight: 700, fontSize: 20 }}>{title}</div>
+        <div style={{ color: MENU.text2, fontSize: 13.5, marginTop: 8, lineHeight: 1.5 }}>{body}</div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
+          <button onClick={onCancel} style={{ padding: '10px 18px', borderRadius: 10, background: MENU.panel, border: `1px solid ${MENU.border}`, color: MENU.text, cursor: 'pointer', fontWeight: 700 }}>CANCEL</button>
+          <button onClick={onConfirm} style={{ padding: '10px 18px', borderRadius: 10, background: '#FF616F', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 800 }}>{confirmLabel}</button>
+        </div>
+      </div>
     </div>
   );
 }
