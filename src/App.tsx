@@ -16,6 +16,8 @@ import {
   createChallengeApi, listIncomingChallengesApi, listOutgoingChallengesApi, respondChallengeApi, type Challenge,
 } from './profiles';
 import { connectSolanaWith, connectSolana, getSolanaWallet, detectSolanaWallets, connectRobinhoodChain, detectEvmWallet, shortAddr, type ConnectedWallet, type SolanaWalletKind } from './wallet';
+import { color as C, font as F } from './theme';
+import { Button as UIButton } from './ui';
 import { CardHover, CardPreview } from './CardPreview';
 import { RankedAPI, tierColors, rankLabel, type PublicRankedProfile, type LeaderboardEntry } from './ranked-client';
 import { Connection } from '@solana/web3.js';
@@ -1620,54 +1622,54 @@ function Landing({
 }: { myName: string; onPlay: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
   const mobile = useIsMobile();
   return (
-    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#000', color: '#fff', fontFamily: 'system-ui' }}>
+    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: C.bg0, color: C.textHi, fontFamily: F.body }}>
       <img
         src="/intro.png"
-        alt=""
+        alt="On-Chain Virtual Arena splash art"
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0, imageRendering: 'pixelated' }}
       />
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.1) 55%, rgba(0,0,0,0.75) 100%)', zIndex: 1 }} />
-
-      {/* PixelTrail removed from Landing — its r3f Canvas was painting opaque
-          over the intro art ~1s after mount (right when the lazy chunk
-          resolved). Component file kept in src/PixelTrail.tsx for re-use
-          on another page later. */}
+      {/* Cinematic overlay: fade to the page surface + a soft violet ambient glow. */}
+      <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 1,
+        background: `radial-gradient(60% 50% at 18% 78%, rgba(124,92,255,0.22), transparent 70%),
+          linear-gradient(180deg, rgba(10,10,20,0.35) 0%, rgba(10,10,20,0.15) 45%, ${C.bg0} 100%)` }} />
 
       {/* Top bar */}
       <div style={{
         position: 'relative', zIndex: 2,
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: mobile ? '10px 12px' : '14px 22px',
+        padding: mobile ? '12px 14px' : '16px 24px',
         gap: 8, flexWrap: 'wrap',
       }}>
-        <div style={{ fontWeight: 800, fontSize: mobile ? 13 : 16, letterSpacing: 1.5, textShadow: '0 2px 8px #000' }}>
+        <div style={{ fontWeight: 800, fontSize: mobile ? 13 : 16, letterSpacing: 1.5, textShadow: '0 2px 12px rgba(0,0,0,0.7)' }}>
           <ShinyBrand text="ON-CHAIN VIRTUAL ARENA" />
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, color: '#ddd', textShadow: '0 1px 4px #000' }}>Signed in as <b>{myName}</b></span>
-          <button onClick={onLogout} style={ghostBtn}>Sign out</button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{
+            fontSize: 12, color: C.textMid, background: 'rgba(18,18,31,0.6)',
+            border: `1px solid ${C.border}`, borderRadius: 999, padding: '5px 12px',
+            backdropFilter: 'blur(8px)',
+          }}>Signed in as <b style={{ color: C.textHi }}>{myName}</b></span>
+          <UIButton variant="ghost" onClick={onLogout}>Sign out</UIButton>
         </div>
       </div>
 
       {/* Action menu */}
       <div style={{
         position: 'absolute',
-        left: mobile ? '50%' : '8vw',
+        left: mobile ? '50%' : '7vw',
         transform: mobile ? 'translateX(-50%)' : undefined,
-        right: mobile ? undefined : undefined,
-        bottom: mobile ? '6vh' : '10vh',
+        bottom: mobile ? '5vh' : '8vh',
         zIndex: 2,
         display: 'flex', flexDirection: 'column', gap: 10,
-        width: mobile ? 'calc(100vw - 24px)' : undefined,
-        minWidth: mobile ? undefined : 220,
-        maxWidth: mobile ? 360 : undefined,
+        width: mobile ? 'calc(100vw - 28px)' : 320,
+        maxWidth: 360,
       }}>
-        <MenuBtn primary onClick={onPlay}>▶  PLAY · RANKED</MenuBtn>
-        <MenuBtn onClick={onMasterquest}>🗺  MASTERQUEST</MenuBtn>
-        <MenuBtn onClick={onBoosters}>📦  BOOSTERS</MenuBtn>
-        <MenuBtn onClick={onProfile}>👤  PROFILE</MenuBtn>
-        <MenuBtn onClick={onRules}>📖  RULES</MenuBtn>
-        <MenuBtn onClick={() => window.open('https://x.com/MemeticMasters', '_blank', 'noopener')}>📰  NEWS</MenuBtn>
+        <MenuRow primary icon={MENU_ICONS.play} label="Play · Ranked" desc="Queue a live match" onClick={onPlay} />
+        <MenuRow icon={MENU_ICONS.map}  label="Masterquest"  desc="Campaign vs. the 5 chains" onClick={onMasterquest} />
+        <MenuRow icon={MENU_ICONS.box}  label="Boosters"     desc="Open packs, mint cards"   onClick={onBoosters} />
+        <MenuRow icon={MENU_ICONS.user} label="Profile"      desc="Decks, record, wallet"    onClick={onProfile} />
+        <MenuRow icon={MENU_ICONS.book} label="Rules"        desc="How the arena works"      onClick={onRules} />
+        <MenuRow icon={MENU_ICONS.news} label="News"         desc="Latest on X"              onClick={() => window.open('https://x.com/MemeticMasters', '_blank', 'noopener')} />
       </div>
 
       {/* $MASTER contract address footer */}
@@ -1717,45 +1719,50 @@ function ContractAddressFooter() {
   );
 }
 
-function MenuBtn({ children, onClick, primary, ranked }: { children: React.ReactNode; onClick: () => void; primary?: boolean; ranked?: boolean }) {
-  // Translucent white frosted-glass fills so the gold PixelTrail underneath
-  // can flash through the buttons on hover. Primary/Ranked keep a tinted
-  // wash to stay distinguishable but are still see-through.
-  const bg = ranked
-    ? 'linear-gradient(90deg, rgba(192,132,252,0.28), rgba(123,44,191,0.22))'
-    : primary
-      ? 'linear-gradient(90deg, rgba(255,179,71,0.32), rgba(255,126,26,0.22))'
-      : 'rgba(255,255,255,0.14)';
-  const shadow = ranked
-    ? '0 6px 24px rgba(192,132,252,0.35)'
-    : primary ? '0 6px 24px rgba(255,126,26,0.35)' : '0 4px 16px rgba(0,0,0,0.45)';
-  const renderedChildren = typeof children === 'string'
-    ? <ShinyButtonLabel text={children} />
-    : children;
+// Inline SVG icons for the main menu (no icon-library dependency).
+const svg = (path: React.ReactNode) => (
+  <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>{path}</svg>
+);
+const MENU_ICONS = {
+  play: svg(<polygon points="6 4 20 12 6 20 6 4" />),
+  map:  svg(<><polygon points="9 4 15 6 21 4 21 18 15 20 9 18 3 20 3 6 9 4" /><line x1="9" y1="4" x2="9" y2="18" /><line x1="15" y1="6" x2="15" y2="20" /></>),
+  box:  svg(<><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z" /><path d="M3 8l9 5 9-5" /><path d="M12 13v8" /></>),
+  user: svg(<><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>),
+  book: svg(<><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2Z" /><path d="M4 19a2 2 0 0 1 2-2h13" /></>),
+  news: svg(<><rect x="3" y="4" width="18" height="16" rx="2" /><line x1="7" y1="9" x2="13" y2="9" /><line x1="7" y1="13" x2="17" y2="13" /><line x1="7" y1="17" x2="17" y2="17" /></>),
+  chevron: svg(<polyline points="9 6 15 12 9 18" />),
+};
+
+function MenuRow({ icon, label, desc, onClick, primary }: {
+  icon: React.ReactNode; label: string; desc: string; onClick: () => void; primary?: boolean;
+}) {
   return (
     <button
       onClick={onClick}
+      className="ocva-card ocva-card--hover"
       style={{
-        padding: '14px 22px',
-        background: bg,
-        color: '#fff',
-        border: '1px solid rgba(255,255,255,0.45)',
-        borderRadius: 6,
-        fontWeight: 800,
-        fontSize: 16,
-        letterSpacing: 1.2,
-        cursor: 'pointer',
-        textAlign: 'left',
-        backdropFilter: 'blur(6px)',
-        WebkitBackdropFilter: 'blur(6px)',
-        boxShadow: shadow,
-        transition: 'transform 0.08s ease, background 0.15s ease',
-        textShadow: '0 1px 4px rgba(0,0,0,0.85)',
+        display: 'flex', alignItems: 'center', gap: 14, width: '100%', textAlign: 'left',
+        cursor: 'pointer', padding: '13px 15px', fontFamily: F.body, color: C.textHi,
+        background: primary
+          ? 'linear-gradient(135deg, rgba(124,92,255,0.24), rgba(124,92,255,0.08))'
+          : 'rgba(18,18,31,0.72)',
+        borderColor: primary ? C.accent : C.border,
+        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
       }}
-      onMouseDown={e => (e.currentTarget.style.transform = 'translateY(1px)')}
-      onMouseUp={e => (e.currentTarget.style.transform = 'translateY(0)')}
-      onMouseLeave={e => (e.currentTarget.style.transform = 'translateY(0)')}
-    >{renderedChildren}</button>
+    >
+      <span style={{
+        flex: '0 0 auto', width: 38, height: 38, borderRadius: 10,
+        display: 'grid', placeItems: 'center',
+        background: primary ? 'rgba(124,92,255,0.28)' : C.bg3,
+        color: primary ? C.accentHi : C.textMid,
+      }}>{icon}</span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'block', fontWeight: 700, fontSize: 15, letterSpacing: '0.005em' }}>{label}</span>
+        <span style={{ display: 'block', fontSize: 12, color: C.textLo, marginTop: 1 }}>{desc}</span>
+      </span>
+      <span style={{ flex: '0 0 auto', color: primary ? C.accentHi : C.textLo }}>{MENU_ICONS.chevron}</span>
+    </button>
   );
 }
 
