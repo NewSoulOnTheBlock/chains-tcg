@@ -1772,21 +1772,35 @@ function Playmat(props: {
       width: '100%',
       maxWidth: 'min(1280px, calc(100dvh - 280px))',
       aspectRatio: '1 / 1',
-      margin: '8px auto', borderRadius: 10, overflow: 'hidden',
-      boxShadow: '0 0 30px #000a inset, 0 4px 24px #000c',
+      margin: '8px auto', borderRadius: 16, overflow: 'hidden',
+      border: '1px solid rgba(229,184,75,0.45)',
+      boxShadow: '0 0 40px rgba(142,77,255,0.15), 0 0 60px #000a inset, 0 10px 40px #000c',
       isolation: 'isolate',
     }}>
-      {/* Background image — blurred + darkened so cards pop */}
+      {/* Obsidian mat surface — the arena scene, heavily darkened + navy-tinted so cards pop. */}
       <div style={{
         position: 'absolute', inset: 0,
         backgroundImage: 'url(/playmat.png?v=2)', backgroundSize: 'cover', backgroundPosition: 'center',
-        filter: 'blur(2px) brightness(0.45) saturate(0.7)',
+        filter: 'blur(2px) brightness(0.28) saturate(0.6)',
         zIndex: 0,
       }} />
       <div style={{
-        position: 'absolute', inset: 0,
-        background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.55) 100%)',
-        zIndex: 0,
+        position: 'absolute', inset: 0, zIndex: 0,
+        background: 'radial-gradient(120% 90% at 50% 50%, rgba(8,13,24,0.35) 0%, rgba(5,7,17,0.82) 100%)',
+      }} />
+      {/* Violet lane light */}
+      <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0,
+        background: 'radial-gradient(50% 30% at 50% 50%, rgba(142,77,255,0.13), transparent 70%)' }} />
+      {/* Luminous center divider between the two halves */}
+      <div aria-hidden style={{
+        position: 'absolute', left: '2%', right: '2%', top: '50%', height: 2, transform: 'translateY(-1px)', zIndex: 0,
+        background: 'linear-gradient(90deg, transparent, rgba(196,92,255,0.85), rgba(255,216,106,0.55), rgba(196,92,255,0.85), transparent)',
+        boxShadow: '0 0 14px rgba(196,92,255,0.55)',
+      }} />
+      {/* Built on Robinhood watermark — low-contrast, behind all cards/zones. */}
+      <img src="/built-on-robinhood.png?v=2" alt="" aria-hidden style={{
+        position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
+        width: 118, opacity: 0.1, zIndex: 0, pointerEvents: 'none',
       }} />
       <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
       {/* ─── OPPONENT SIDE (rotated for face-to-face feel) ─── */}
