@@ -1405,6 +1405,572 @@ function ExampleTurn({ highlight }: { highlight: (s: string) => React.ReactNode 
   );
 }
 
+// ── Rulebook (redesigned, data-driven) ─────────────────────────────────────
+const RB = {
+  bg: '#09081A', bgEl: '#0E0D21', panel: '#17142D', panelActive: '#211744', panelHover: '#262047',
+  border: 'rgba(230,196,92,0.22)', borderStrong: 'rgba(230,196,92,0.55)',
+  gold: '#E6C45C', goldBright: '#FFD875', violet: '#8B5CF6',
+  text: '#F4F1E8', text2: '#AAA4BC', success: '#55E58B', danger: '#FF616F', blue: '#57A8FF',
+};
+
+type RBId = 'goal' | 'setup' | 'card-types' | 'gas-system' | 'turn-order' | 'combat' | 'advanced-rules' | 'example-turn' | 'ui-cheat-sheet';
+type HL = (s: string) => React.ReactNode;
+
+function rbHighlight(q: string): HL {
+  return (text) => {
+    const query = q.trim();
+    if (!query) return text;
+    const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
+    return String(text).split(re).map((part, i) =>
+      part.toLowerCase() === query.toLowerCase()
+        ? <mark key={i} style={{ background: 'rgba(230,196,92,0.4)', color: '#fff', borderRadius: 2, padding: '0 2px' }}>{part}</mark>
+        : <React.Fragment key={i}>{part}</React.Fragment>);
+  };
+}
+
+interface RBChapter { id: RBId; num: string; title: string; icon: string; accent: string; summary: string; keywords: string[]; search: string; content: (h: HL) => React.ReactNode; }
+
+const RB_CHAPTERS: RBChapter[] = [
+  { id: 'goal', num: '01', title: 'Goal', icon: '🏆', accent: RB.gold,
+    summary: 'Reduce your opponent’s life from 20 → 0. Last player standing wins.',
+    keywords: ['life', 'win', 'victory', '20'], search: 'goal life 20 reduce opponent zero win last player standing victory check',
+    content: (h) => (
+      <div>
+        <p style={{ fontSize: 18, fontWeight: 600, color: RB.text, margin: '0 0 8px' }}>
+          {h('Reduce your opponent’s life from 20 to 0.')}<br />{h('Last player standing wins.')}
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26, flexWrap: 'wrap', margin: '18px 0 6px' }}>
+          <LifeOrb label="Start" value={20} color={RB.success} />
+          <div aria-hidden style={{ fontSize: 30, color: RB.goldBright, fontWeight: 900 }}>➜</div>
+          <LifeOrb label="Win" value={0} color={RB.danger} />
+        </div>
+        <RuleCallout title="Victory Check" text="If every opponent is at 0 life, the match ends immediately." />
+      </div>
+    ) },
+  { id: 'setup', num: '02', title: 'Setup', icon: '⚔️', accent: RB.violet,
+    summary: 'Choose a 60-card deck, draw 7 cards, and begin at 20 life.',
+    keywords: ['deck', '60', 'draw', 'hand', 'mulligan', 'chain'], search: 'setup chain bnb solana ethereum robinhood base 60 card deck draw 7 hand 20 life first player no draw',
+    content: (h) => (
+      <div>
+        <p>{h('Each player picks one of 5 chains, shuffles their 60-card deck, draws 7 cards, and starts at 20 life.')}</p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '14px 0' }}>
+          {COLORS.map((c) => (
+            <span key={c} style={{ padding: '7px 14px', borderRadius: 999, background: `${COLOR_META[c].hex}22`, color: COLOR_META[c].hex, border: `1px solid ${COLOR_META[c].hex}66`, fontWeight: 700, fontSize: 13 }}>{COLOR_META[c].name}</span>
+          ))}
+        </div>
+        <ul style={{ marginLeft: 18, lineHeight: 1.8 }}>
+          <li>{h('60-card deck in your chain color.')}</li>
+          <li>{h('Draw 7 cards. Start at 20 life.')}</li>
+          <li>{h('Max hand size 7 — discard down at end of turn.')}</li>
+          <li>{h('The first player skips their turn-1 draw.')}</li>
+        </ul>
+      </div>
+    ) },
+  { id: 'card-types', num: '03', title: 'Card Types', icon: '🃏', accent: RB.blue,
+    summary: 'Nodes, Memes, Machines, and Moves make up your toolkit.',
+    keywords: ['node', 'meme', 'machine', 'aura', 'move'], search: 'card types node meme machine aura move creature power toughness permanent one-shot instant enchant',
+    content: (h) => <CardTypesGrid highlight={h} /> },
+  { id: 'gas-system', num: '04', title: 'Gas System', icon: '⛽', accent: RB.violet,
+    summary: 'Tap Nodes to fuel your cards. Unspent Gas drains every turn.',
+    keywords: ['gas', 'mana', 'cost', 'tap', 'node'], search: 'gas mana cost tap node color pool drain end of turn empty mixed fuel',
+    content: (h) => (
+      <div>
+        <p>{h('Nodes generate Gas. Cards cost Gas. Gas drains at end of your turn — spend it or lose it.')}</p>
+        <GasFlowViz />
+        <ul style={{ marginLeft: 18, marginTop: 10, lineHeight: 1.8 }}>
+          <li>{h('Tap a Node → +1 Gas of its color.')}</li>
+          <li>{h('A cost can be one color or mixed.')}</li>
+          <li>{h('Unspent Gas evaporates when your turn ends.')}</li>
+        </ul>
+      </div>
+    ) },
+  { id: 'turn-order', num: '05', title: 'Turn Order', icon: '🔄', accent: RB.gold,
+    summary: 'Untap → Draw → Main → Combat → End.',
+    keywords: ['turn', 'phase', 'untap', 'draw', 'main', 'combat', 'end'], search: 'turn phase untap draw main combat attack block damage end discard summoning sick haste',
+    content: (h) => (
+      <div>
+        <p style={{ marginTop: 0 }}>{h('Every turn moves through five phases in order.')}</p>
+        <TurnTimeline highlight={h} />
+      </div>
+    ) },
+  { id: 'combat', num: '06', title: 'Combat', icon: '⚔️', accent: RB.danger,
+    summary: 'Declare attackers, let the defender block, then resolve damage.',
+    keywords: ['combat', 'attack', 'block', 'damage', 'blocker'], search: 'combat attack declare attackers blockers unblocked hits life simultaneous damage power toughness destroy',
+    content: (h) => (
+      <div>
+        <ul style={{ marginLeft: 18, lineHeight: 1.85 }}>
+          <li><b style={{ color: RB.gold }}>Declare attackers</b> — {h('Tap your untapped, non-summoning-sick Memes to attack.')}</li>
+          <li><b style={{ color: RB.gold }}>Blocking</b> — {h('The defender assigns blockers from untapped Memes. Unblocked attackers hit life directly.')}</li>
+          <li><b style={{ color: RB.gold }}>Simultaneous damage</b> — {h('Attacker and blocker deal their Power to each other at the same time. Damage ≥ toughness destroys a Meme.')}</li>
+          <li><b style={{ color: RB.gold }}>To the graveyard</b> — {h('Destroyed Memes go to the graveyard.')}</li>
+        </ul>
+      </div>
+    ) },
+  { id: 'advanced-rules', num: '07', title: 'Advanced Rules', icon: '📖', accent: RB.violet,
+    summary: 'Summoning sickness, blockers, simultaneous damage, hand size.',
+    keywords: ['summoning', 'sickness', 'haste', 'graveyard', 'hand'], search: 'advanced summoning sickness haste blockers simultaneous damage graveyard discard max hand 7 discard down',
+    content: (h) => (
+      <div>
+        <ul style={{ marginLeft: 18, lineHeight: 1.85 }}>
+          <li><b style={{ color: RB.gold }}>Summoning sickness</b> — {h('Memes can’t attack the turn they enter (unless they have haste).')}</li>
+          <li><b style={{ color: RB.gold }}>Blocking</b> — {h('Defender chooses blockers from untapped Memes. Unblocked attackers hit life directly.')}</li>
+          <li><b style={{ color: RB.gold }}>Simultaneous damage</b> — {h('Attacker and blocker deal Power to each other. Damage ≥ toughness destroys it.')}</li>
+          <li><b style={{ color: RB.gold }}>Graveyard</b> — {h('Destroyed Memes, used Moves go here. Some cards interact with the graveyard.')}</li>
+          <li><b style={{ color: RB.gold }}>Max hand 7</b> — {h('Discard down at end of turn.')}</li>
+        </ul>
+      </div>
+    ) },
+  { id: 'example-turn', num: '08', title: 'Example Turn', icon: '🎮', accent: RB.blue,
+    summary: 'Walk through Turn 1 step-by-step.',
+    keywords: ['example', 'walkthrough', 'turn 1'], search: 'example turn 1 play purple node tap gain gas cast pepe warrior end walkthrough',
+    content: (h) => <ExampleTurn highlight={h} /> },
+  { id: 'ui-cheat-sheet', num: '09', title: 'UI Cheat Sheet', icon: '🖥️', accent: RB.gold,
+    summary: 'Quick clicks for the in-match UI.',
+    keywords: ['ui', 'click', 'controls', 'buttons'], search: 'ui click node tap card hand play meme attack blocker end turn button cheat sheet controls',
+    content: (h) => (
+      <div>
+        <ul style={{ marginLeft: 18, lineHeight: 1.85 }}>
+          <li>{h('Click an untapped Node → tap for Gas.')}</li>
+          <li>{h('Click a card in hand → play it (Moves then ask for a target).')}</li>
+          <li>{h('Click your own untapped Meme → mark attacker. Press "Attack with N".')}</li>
+          <li>{h('During declare blockers → click your Meme, then click the attacker to block.')}</li>
+          <li>{h('Press End Turn to pass.')}</li>
+        </ul>
+      </div>
+    ) },
+];
+
+const RB_KEY_TERMS: { term: string; to: RBId; color: string }[] = [
+  { term: 'Node', to: 'card-types', color: RB.gold },
+  { term: 'Gas', to: 'gas-system', color: RB.violet },
+  { term: 'Meme', to: 'card-types', color: RB.blue },
+  { term: 'Machine', to: 'card-types', color: RB.danger },
+  { term: 'Move', to: 'card-types', color: RB.success },
+];
+
+const RB_QUICKSTART: { n: number; title: string; sub: string; color: string; to: RBId }[] = [
+  { n: 1, title: 'Play Nodes', sub: 'Build your board', color: RB.gold, to: 'card-types' },
+  { n: 2, title: 'Generate Gas', sub: 'Fuel your cards', color: RB.violet, to: 'gas-system' },
+  { n: 3, title: 'Cast Memes', sub: 'Deploy your units', color: RB.blue, to: 'card-types' },
+  { n: 4, title: 'Attack', sub: 'Pressure your rival', color: RB.danger, to: 'combat' },
+  { n: 5, title: 'Reduce 20 → 0', sub: 'Last player standing', color: RB.success, to: 'goal' },
+];
+
+function readRbHash(): RBId {
+  const h = (typeof window !== 'undefined' ? window.location.hash : '').replace('#', '');
+  return RB_CHAPTERS.some((c) => c.id === h) ? (h as RBId) : 'goal';
+}
+
+function RulebookPage({ onBack }: { onBack: () => void }) {
+  const narrow = useIsMobile(1279);
+  const phone = useIsMobile(767);
+  const [activeId, setActiveId] = useState<RBId>(readRbHash);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [hlQuery, setHlQuery] = useState('');
+  const [muted, setMuted] = useState<boolean>(() => { try { return localStorage.getItem('ocva.muted') === '1'; } catch { return false; } });
+  const mainRef = useRef<HTMLDivElement | null>(null);
+  const activeIdx = RB_CHAPTERS.findIndex((c) => c.id === activeId);
+  const active = RB_CHAPTERS[activeIdx];
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+
+  const go = useCallback((id: RBId, opts?: { hl?: string; scroll?: boolean }) => {
+    setActiveId(id);
+    setHlQuery(opts?.hl ?? '');
+    try { window.history.replaceState(null, '', `#${id}`); } catch {}
+    if (opts?.scroll !== false) {
+      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      setTimeout(() => mainRef.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }), 40);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen(true); }
+      if (e.key === 'Escape') setSearchOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    const onHash = () => setActiveId(readRbHash());
+    window.addEventListener('hashchange', onHash);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('hashchange', onHash); };
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem('ocva.muted', muted ? '1' : '0'); } catch {}
+    document.querySelectorAll('audio,video').forEach((a) => { (a as HTMLMediaElement).muted = muted; });
+  }, [muted]);
+
+  const h = rbHighlight(hlQuery);
+  const below = RB_CHAPTERS.filter((_, i) => i > activeIdx);
+
+  return (
+    <div style={{ minHeight: '100dvh', background: RB.bg, color: RB.text, fontFamily: RULES_FONT, position: 'relative' }}>
+      <style>{`
+        @media (prefers-reduced-motion: reduce){ .rb-anim{ transition:none !important; animation:none !important; } }
+        .rb-scroll::-webkit-scrollbar{ width:8px; } .rb-scroll::-webkit-scrollbar-thumb{ background:${RB.panelHover}; border-radius:4px; }
+        .rb-snap{ scroll-snap-type:x mandatory; } .rb-snap > *{ scroll-snap-align:start; }
+      `}</style>
+      <RBParticles />
+
+      <RulebookHeader onBack={onBack} onOpenSearch={() => setSearchOpen(true)} isMac={isMac} narrow={narrow} />
+
+      <div style={{ position: 'relative', zIndex: 1, maxWidth: 1520, margin: '0 auto', padding: phone ? '14px 14px 60px' : '20px 24px 60px' }}>
+        {/* Hero */}
+        <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : '1.15fr 0.85fr', gap: 22, alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.22em', color: RB.gold }}>ON-CHAIN VIRTUAL ARENA</div>
+            <h1 style={{ fontFamily: RULES_HEAD, fontWeight: 800, fontSize: phone ? 40 : 'clamp(44px, 5vw, 68px)', lineHeight: 1.02, margin: '6px 0 10px',
+              background: `linear-gradient(180deg, #ffe9a8, ${RB.gold} 55%, #a6802f)`, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>
+              Master the Arena
+            </h1>
+            <p style={{ fontSize: 17, color: RB.text2, margin: '0 0 14px' }}>Everything you need to play, build, and win.</p>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '7px 14px', borderRadius: 999, background: RB.panel, border: `1px solid ${RB.border}`, fontSize: 13, fontWeight: 600 }}>
+              <span aria-hidden>📖</span> {RB_CHAPTERS.length} chapters · 8 min read
+            </span>
+          </div>
+          <TutorialPreview muted={muted} />
+        </div>
+
+        {/* Quick start */}
+        <QuickStartPath onGo={(id) => go(id)} phone={phone} />
+
+        {/* Workspace */}
+        <div style={{ display: 'grid', gap: 18, marginTop: 20,
+          gridTemplateColumns: narrow ? '1fr' : '230px minmax(0, 1fr) 288px', alignItems: 'start' }}>
+          {!narrow ? (
+            <ChapterNavigation chapters={RB_CHAPTERS} activeId={activeId} activeIdx={activeIdx} onGo={(id) => go(id)} />
+          ) : (
+            <ChapterDropdown chapters={RB_CHAPTERS} activeId={activeId} onGo={(id) => go(id)} />
+          )}
+
+          <div ref={mainRef}>
+            <RuleChapter chapter={active} idx={activeIdx} total={RB_CHAPTERS.length} h={h}
+              onPrev={() => go(RB_CHAPTERS[Math.max(0, activeIdx - 1)].id)}
+              onNext={() => go(RB_CHAPTERS[Math.min(RB_CHAPTERS.length - 1, activeIdx + 1)].id)} />
+            {below.map((c) => <RuleAccordion key={c.id} chapter={c} onOpen={() => go(c.id)} />)}
+            <div style={{ textAlign: 'center', fontSize: 13, color: RB.text2, fontStyle: 'italic', marginTop: 16 }}>That’s the whole game. Have fun.</div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <AtAGlance />
+            <KeywordGlossary onGo={(id) => go(id)} />
+            <StillStuck onGo={() => go('example-turn')} />
+          </div>
+        </div>
+      </div>
+
+      {/* Floating mute */}
+      <button onClick={() => setMuted((m) => !m)} aria-label={muted ? 'Unmute' : 'Mute'} className="rb-anim"
+        style={{ position: 'fixed', right: 18, bottom: 18, zIndex: 20, width: 48, height: 48, borderRadius: '50%', display: 'grid', placeItems: 'center',
+          background: RB.panel, border: `1px solid ${RB.borderStrong}`, color: RB.goldBright, cursor: 'pointer', fontSize: 18, boxShadow: '0 6px 20px rgba(0,0,0,0.5)' }}>
+        {muted ? '🔇' : '🔊'}
+      </button>
+
+      {searchOpen && <RuleSearch onClose={() => setSearchOpen(false)} onSelect={(id, q) => { go(id, { hl: q }); setSearchOpen(false); }} />}
+    </div>
+  );
+}
+
+function RBParticles() {
+  return (
+    <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', inset: 0, background:
+        `radial-gradient(60% 40% at 50% 0%, rgba(139,92,246,0.10), transparent 70%), radial-gradient(120% 90% at 50% 0%, ${RB.bgEl} 0%, ${RB.bg} 60%)` }} />
+      {Array.from({ length: 12 }).map((_, i) => (
+        <span key={i} className="rb-anim" style={{ position: 'absolute', left: `${(i * 61) % 100}%`, top: `${(i * 37) % 100}%`,
+          width: 2 + (i % 3), height: 2 + (i % 3), borderRadius: '50%', background: i % 3 === 0 ? RB.violet : RB.gold, opacity: 0.35,
+          boxShadow: `0 0 6px ${i % 3 === 0 ? RB.violet : RB.gold}` }} />
+      ))}
+    </div>
+  );
+}
+
+function RulebookHeader({ onBack, onOpenSearch, isMac, narrow }: { onBack: () => void; onOpenSearch: () => void; isMac: boolean; narrow: boolean }) {
+  return (
+    <div style={{ position: 'sticky', top: 0, zIndex: 12, height: 62, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+      padding: '0 20px', background: 'rgba(9,8,26,0.82)', backdropFilter: 'blur(10px)', borderBottom: `1px solid ${RB.border}` }}>
+      <button onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 14px', borderRadius: 9,
+        background: RB.panel, border: `1px solid ${RB.border}`, color: RB.text, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>← Back</button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span aria-hidden style={{ color: RB.gold, opacity: 0.6 }}>◇</span>
+        <span style={{ fontFamily: RULES_HEAD, fontWeight: 800, letterSpacing: '0.28em', fontSize: 15, color: RB.gold }}>RULEBOOK</span>
+        <span aria-hidden style={{ color: RB.gold, opacity: 0.6 }}>◇</span>
+      </div>
+      <button onClick={onOpenSearch} aria-label="Search rules" style={{ display: 'flex', alignItems: 'center', gap: 8, width: narrow ? 'auto' : 300,
+        padding: '9px 12px', borderRadius: 9, background: RB.panel, border: `1px solid ${RB.border}`, color: RB.text2, cursor: 'pointer', fontSize: 13 }}>
+        <span aria-hidden>🔍</span>
+        {!narrow && <span style={{ flex: 1, textAlign: 'left' }}>Search rules…</span>}
+        <kbd style={{ padding: '2px 7px', fontSize: 11, background: 'rgba(0,0,0,0.4)', borderRadius: 5, color: RB.text2, border: `1px solid ${RB.border}` }}>{isMac ? '⌘ K' : 'Ctrl K'}</kbd>
+      </button>
+    </div>
+  );
+}
+
+function TutorialPreview({ muted }: { muted: boolean }) {
+  const vidRef = useRef<HTMLVideoElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [duration, setDuration] = useState('');
+  const play = () => { const v = vidRef.current; if (!v) return; v.play().then(() => setPlaying(true)).catch(() => {}); };
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  return (
+    <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', borderRadius: 14, overflow: 'hidden',
+      border: `1px solid ${RB.border}`, boxShadow: '0 14px 40px rgba(0,0,0,0.5), 0 0 30px rgba(139,92,246,0.12)', background: '#000' }}>
+      <video ref={vidRef} src="/rules-intro.mp4" poster="/intro.png" preload="metadata" playsInline controls={playing} muted={muted}
+        aria-label="On-Chain Virtual Arena tutorial video" onLoadedMetadata={(e) => setDuration(fmt((e.currentTarget as HTMLVideoElement).duration || 0))}
+        onPause={() => setPlaying(false)} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+      {!playing && (
+        <button onClick={play} aria-label="Play tutorial" className="rb-anim" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center',
+          background: 'linear-gradient(180deg, rgba(9,8,26,0.15), rgba(9,8,26,0.55))', border: 'none', cursor: 'pointer' }}>
+          <span style={{ width: 74, height: 74, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(9,8,26,0.5)',
+            border: `2px solid ${RB.goldBright}`, boxShadow: `0 0 26px ${RB.gold}88`, color: RB.goldBright, fontSize: 26, paddingLeft: 6 }}>▶</span>
+          <div style={{ position: 'absolute', left: 14, bottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.14em', color: RB.gold }}>60-SECOND OVERVIEW</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>Watch tutorial</div>
+          </div>
+          {duration && <div style={{ position: 'absolute', right: 12, bottom: 12, padding: '3px 9px', borderRadius: 6, background: 'rgba(0,0,0,0.6)', border: `1px solid ${RB.border}`, fontSize: 12, color: RB.text }}>{duration}</div>}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function QuickStartPath({ onGo, phone }: { onGo: (id: RBId) => void; phone: boolean }) {
+  return (
+    <div style={{ marginTop: 20, padding: phone ? '16px 12px' : '18px 22px', borderRadius: 16, background: RB.panel, border: `1px solid ${RB.border}` }}>
+      <div style={{ textAlign: 'center', fontFamily: RULES_HEAD, fontWeight: 700, letterSpacing: '0.26em', fontSize: 14, color: RB.gold, marginBottom: 14 }}>◇ LEARN IN 30 SECONDS ◇</div>
+      <div className={phone ? 'rb-snap rb-scroll' : ''} style={{ display: 'flex', alignItems: 'stretch', gap: phone ? 10 : 8, overflowX: phone ? 'auto' : 'visible' }}>
+        {RB_QUICKSTART.map((s, i) => (
+          <React.Fragment key={s.n}>
+            <button onClick={() => onGo(s.to)} className="rb-anim" style={{ flex: phone ? '0 0 78%' : '1 1 0', minWidth: phone ? 220 : 0,
+              display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 12, cursor: 'pointer', textAlign: 'left',
+              background: RB.bgEl, border: `1px solid ${s.color}44`, color: RB.text, transition: 'transform .18s ease, box-shadow .18s ease' }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = `0 8px 20px -8px ${s.color}`; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; }}>
+              <span style={{ width: 42, height: 42, flex: 'none', borderRadius: '50%', display: 'grid', placeItems: 'center', fontWeight: 900, fontSize: 17,
+                color: '#0a0a14', background: `radial-gradient(circle at 35% 30%, ${s.color}, ${s.color}99)`, boxShadow: `0 0 16px ${s.color}66` }}>{s.n}</span>
+              <span>
+                <div style={{ fontSize: 14, fontWeight: 800, color: s.color }}>{s.title}</div>
+                <div style={{ fontSize: 12, color: RB.text2 }}>{s.sub}</div>
+              </span>
+            </button>
+            {i < RB_QUICKSTART.length - 1 && !phone && <span aria-hidden style={{ alignSelf: 'center', color: RB.gold, opacity: 0.5, fontSize: 16, flex: 'none' }}>→</span>}
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChapterNavigation({ chapters, activeId, activeIdx, onGo }: { chapters: RBChapter[]; activeId: RBId; activeIdx: number; onGo: (id: RBId) => void }) {
+  return (
+    <nav aria-label="Chapters" style={{ position: 'sticky', top: 78, alignSelf: 'start', padding: 12, borderRadius: 14, background: RB.panel, border: `1px solid ${RB.border}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 4px 10px', borderBottom: `1px solid ${RB.border}`, marginBottom: 8 }}>
+        <span style={{ fontFamily: RULES_HEAD, fontSize: 12, letterSpacing: '0.2em', fontWeight: 700, color: RB.gold }}>CHAPTERS</span>
+        <span style={{ fontSize: 11, color: RB.text2 }}>{activeIdx + 1} of {chapters.length}</span>
+      </div>
+      <div style={{ position: 'relative' }}>
+        <div aria-hidden style={{ position: 'absolute', left: 15, top: 8, bottom: 8, width: 2, background: RB.border }} />
+        {chapters.map((c, i) => {
+          const active = c.id === activeId;
+          return (
+            <button key={c.id} onClick={() => onGo(c.id)} aria-current={active ? 'true' : undefined} className="rb-anim"
+              style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 10px', marginBottom: 2,
+                borderRadius: 8, cursor: 'pointer', textAlign: 'left', fontFamily: RULES_FONT, fontSize: 13.5, fontWeight: active ? 700 : 500,
+                color: active ? RB.goldBright : RB.text, background: active ? RB.panelActive : 'transparent',
+                border: `1px solid ${active ? RB.borderStrong : 'transparent'}`, boxShadow: active ? `0 0 14px rgba(230,196,92,0.18)` : 'none', transition: 'all .18s ease' }}>
+              <span aria-hidden style={{ width: 10, height: 10, borderRadius: '50%', flex: 'none', zIndex: 1,
+                background: active ? RB.gold : (i < activeIdx ? RB.gold : RB.bgEl), border: `2px solid ${active || i < activeIdx ? RB.gold : RB.border}`,
+                boxShadow: active ? `0 0 10px ${RB.gold}` : 'none' }} />
+              <span aria-hidden style={{ fontSize: 15 }}>{c.icon}</span>
+              <span>{c.title}</span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+function ChapterDropdown({ chapters, activeId, onGo }: { chapters: RBChapter[]; activeId: RBId; onGo: (id: RBId) => void }) {
+  return (
+    <div style={{ padding: 12, borderRadius: 14, background: RB.panel, border: `1px solid ${RB.border}` }}>
+      <label htmlFor="rb-chapter-select" style={{ display: 'block', fontFamily: RULES_HEAD, fontSize: 12, letterSpacing: '0.2em', fontWeight: 700, color: RB.gold, marginBottom: 8 }}>CHAPTERS</label>
+      <select id="rb-chapter-select" value={activeId} onChange={(e) => onGo(e.target.value as RBId)}
+        style={{ width: '100%', padding: '12px 12px', borderRadius: 9, background: RB.bgEl, border: `1px solid ${RB.border}`, color: RB.text, fontSize: 15, minHeight: 44 }}>
+        {chapters.map((c) => <option key={c.id} value={c.id}>{c.num} · {c.title}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function RuleChapter({ chapter, idx, total, h, onPrev, onNext }: { chapter: RBChapter; idx: number; total: number; h: HL; onPrev: () => void; onNext: () => void }) {
+  return (
+    <section aria-labelledby={`rb-${chapter.id}-title`} style={{ padding: 22, borderRadius: 14, background: RB.panelActive, border: `1px solid ${RB.borderStrong}`, boxShadow: '0 14px 40px rgba(0,0,0,0.5)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
+        <span aria-hidden style={{ width: 46, height: 46, flex: 'none', borderRadius: 11, display: 'grid', placeItems: 'center', fontSize: 22,
+          background: 'linear-gradient(135deg, rgba(230,196,92,0.2), rgba(139,92,246,0.2))', border: `1px solid ${RB.border}` }}>{chapter.icon}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.16em', color: RB.gold }}>CHAPTER {chapter.num}</div>
+          <h2 id={`rb-${chapter.id}-title`} style={{ margin: 0, fontFamily: RULES_HEAD, fontWeight: 700, fontSize: 28, color: RB.text }}>{chapter.title}</h2>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={onPrev} disabled={idx === 0} className="rb-anim" style={navBtn(idx === 0)}>← Previous</button>
+          <button onClick={onNext} disabled={idx === total - 1} className="rb-anim" style={navBtn(idx === total - 1, true)}>Next →</button>
+        </div>
+      </div>
+      <div style={{ fontSize: 15, lineHeight: 1.7, color: RB.text }}>{chapter.content(h)}</div>
+    </section>
+  );
+}
+function navBtn(disabled: boolean, primary?: boolean): React.CSSProperties {
+  return { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 9, whiteSpace: 'nowrap',
+    background: primary ? RB.bgEl : 'transparent', border: `1px solid ${RB.border}`, color: disabled ? RB.text2 : RB.text,
+    cursor: disabled ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 12.5, opacity: disabled ? 0.5 : 1 };
+}
+
+function RuleAccordion({ chapter, onOpen }: { chapter: RBChapter; onOpen: () => void }) {
+  return (
+    <button onClick={onOpen} aria-expanded={false} aria-controls={`rb-${chapter.id}-title`} className="rb-anim"
+      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 14, padding: '16px 18px', marginTop: 12, borderRadius: 12, cursor: 'pointer',
+        background: RB.panel, border: `1px solid ${RB.border}`, color: RB.text, textAlign: 'left', minHeight: 44, transition: 'background .18s ease, border-color .18s ease' }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = RB.panelHover; e.currentTarget.style.borderColor = RB.borderStrong; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = RB.panel; e.currentTarget.style.borderColor = RB.border; }}>
+      <span style={{ fontFamily: RULES_HEAD, fontWeight: 800, fontSize: 22, color: RB.gold, flex: 'none' }}>{chapter.num}</span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'block', fontFamily: RULES_HEAD, fontWeight: 700, fontSize: 18, color: RB.text }}>{chapter.title}</span>
+        <span style={{ display: 'block', fontSize: 13, color: RB.text2, marginTop: 2 }}>{chapter.summary}</span>
+      </span>
+      <span aria-hidden style={{ color: RB.gold, fontSize: 16, flex: 'none' }}>▾</span>
+    </button>
+  );
+}
+
+function RuleCallout({ title, text }: { title: string; text: string }) {
+  return (
+    <div style={{ marginTop: 16, display: 'flex', gap: 12, padding: '14px 16px', borderRadius: 12, background: 'rgba(230,196,92,0.06)', border: `1px solid ${RB.borderStrong}` }}>
+      <span aria-hidden style={{ fontSize: 20, color: RB.gold }}>🛡️</span>
+      <div>
+        <div style={{ fontWeight: 800, color: RB.goldBright, fontSize: 14 }}>{title}</div>
+        <div style={{ fontSize: 13.5, color: RB.text2, marginTop: 3 }}>{text}</div>
+      </div>
+    </div>
+  );
+}
+
+function AtAGlance() {
+  const rows = [
+    { icon: '❤️', label: 'Starting Life', value: '20', color: RB.success },
+    { icon: '🃏', label: 'Opening Hand', value: '7', color: RB.violet },
+    { icon: '📚', label: 'Deck Size', value: '60', color: RB.blue },
+  ];
+  return (
+    <div style={{ padding: 16, borderRadius: 14, background: RB.panel, border: `1px solid ${RB.border}` }}>
+      <div style={{ fontFamily: RULES_HEAD, fontSize: 12, letterSpacing: '0.18em', fontWeight: 700, color: RB.gold, marginBottom: 12 }}>AT A GLANCE</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {rows.map((r) => (
+          <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 8, borderBottom: `1px solid ${RB.border}` }}>
+            <span aria-hidden style={{ fontSize: 16 }}>{r.icon}</span>
+            <span style={{ flex: 1, fontSize: 13.5, color: RB.text2 }}>{r.label}</span>
+            <span style={{ fontSize: 20, fontWeight: 800, color: r.color }}>{r.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function KeywordGlossary({ onGo }: { onGo: (id: RBId) => void }) {
+  return (
+    <div style={{ padding: 16, borderRadius: 14, background: RB.panel, border: `1px solid ${RB.border}` }}>
+      <div style={{ fontFamily: RULES_HEAD, fontSize: 12, letterSpacing: '0.18em', fontWeight: 700, color: RB.gold, marginBottom: 12 }}>KEY TERMS</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {RB_KEY_TERMS.map((t) => (
+          <button key={t.term} onClick={() => onGo(t.to)} className="rb-anim" style={{ padding: '7px 12px', borderRadius: 8, cursor: 'pointer',
+            background: `${t.color}18`, border: `1px solid ${t.color}66`, color: t.color, fontWeight: 700, fontSize: 13 }}>{t.term}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StillStuck({ onGo }: { onGo: () => void }) {
+  return (
+    <div style={{ padding: 16, borderRadius: 14, background: 'linear-gradient(160deg, rgba(139,92,246,0.14), rgba(23,20,45,0.6))', border: `1px solid ${RB.border}` }}>
+      <div style={{ fontFamily: RULES_HEAD, fontSize: 18, fontWeight: 700, color: RB.goldBright }}>Still stuck?</div>
+      <div style={{ fontSize: 13.5, color: RB.text2, margin: '6px 0 14px' }}>See a full turn walkthrough.</div>
+      <button onClick={onGo} className="rb-anim" style={{ width: '100%', padding: '12px', borderRadius: 10, cursor: 'pointer', minHeight: 44,
+        background: 'transparent', border: `1px solid ${RB.borderStrong}`, color: RB.goldBright, fontWeight: 800, letterSpacing: '0.04em', fontSize: 13,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>View Example Turn →</button>
+    </div>
+  );
+}
+
+function RuleSearch({ onClose, onSelect }: { onClose: () => void; onSelect: (id: RBId, q: string) => void }) {
+  const [q, setQ] = useState('');
+  const [sel, setSel] = useState(0);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const results = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    if (!query) return RB_CHAPTERS.map((c) => ({ c, snippet: c.summary }));
+    return RB_CHAPTERS.map((c) => {
+      const hay = `${c.title} ${c.summary} ${c.search} ${c.keywords.join(' ')}`.toLowerCase();
+      if (!hay.includes(query)) return null;
+      const src = `${c.summary} ${c.search}`;
+      const at = src.toLowerCase().indexOf(query);
+      const snippet = at >= 0 ? '…' + src.slice(Math.max(0, at - 24), at + query.length + 30).trim() + '…' : c.summary;
+      return { c, snippet };
+    }).filter(Boolean) as { c: RBChapter; snippet: string }[];
+  }, [q]);
+
+  useEffect(() => { setSel(0); }, [q]);
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSel((s) => Math.min(results.length - 1, s + 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setSel((s) => Math.max(0, s - 1)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (results[sel]) onSelect(results[sel].c.id, q); }
+    else if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+  };
+  const hl = rbHighlight(q);
+
+  return (
+    <div onClick={onClose} role="dialog" aria-modal="true" aria-label="Search rules"
+      style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(4,4,12,0.72)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '10vh 16px 16px' }}>
+      <div onClick={(e) => e.stopPropagation()} onKeyDown={onKey} style={{ width: 'min(640px, 100%)', maxHeight: '76vh', display: 'flex', flexDirection: 'column',
+        borderRadius: 14, background: RB.bgEl, border: `1px solid ${RB.borderStrong}`, boxShadow: '0 30px 80px rgba(0,0,0,0.6)', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: `1px solid ${RB.border}` }}>
+          <span aria-hidden style={{ color: RB.gold }}>🔍</span>
+          <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search rules… (combat, gas, summoning sickness)" aria-label="Search rules"
+            style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: RB.text, fontSize: 16, fontFamily: RULES_FONT }} />
+          <kbd style={{ padding: '2px 7px', fontSize: 11, background: 'rgba(0,0,0,0.4)', borderRadius: 5, color: RB.text2 }}>Esc</kbd>
+        </div>
+        <div className="rb-scroll" role="listbox" style={{ overflowY: 'auto', padding: 8 }}>
+          {results.length === 0 ? (
+            <div style={{ padding: 26, textAlign: 'center', color: RB.text2 }}>
+              <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden>🔎</div>
+              No rules found for “{q}”. Try “combat”, “gas”, or “setup”.
+            </div>
+          ) : results.map((r, i) => (
+            <button key={r.c.id} role="option" aria-selected={i === sel} onMouseEnter={() => setSel(i)} onClick={() => onSelect(r.c.id, q)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+                background: i === sel ? RB.panelActive : 'transparent', border: `1px solid ${i === sel ? RB.borderStrong : 'transparent'}`, color: RB.text, marginBottom: 2 }}>
+              <span aria-hidden style={{ fontSize: 18, flex: 'none' }}>{r.c.icon}</span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>{hl(r.c.title)}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: RB.gold }}>CH {r.c.num}</span>
+                </span>
+                <span style={{ display: 'block', fontSize: 12.5, color: RB.text2, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hl(r.snippet)}</span>
+              </span>
+              <span aria-hidden style={{ color: RB.text2, fontSize: 12, flex: 'none' }}>↵</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Landing screen (post-login hub) ─────────────────────────────────────────
 function Landing({
   myName, onPlay, onMasterquest, onBoosters, onProfile, onRules, onLogout,
@@ -6532,7 +7098,7 @@ export default function App() {
       {view === 'profile'
         ? <ProfilePage myName={name} onBack={() => goto('landing')} />
         : view === 'rules'
-          ? <RulesPage onBack={() => goto('landing')} />
+          ? <RulebookPage onBack={() => goto('landing')} />
           : view === 'boosters'
             ? <BoostersPage myName={name} onBack={() => goto('landing')} />
             : view === 'masterquest'
