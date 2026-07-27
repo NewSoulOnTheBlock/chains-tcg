@@ -1,16 +1,13 @@
-# Render.com blueprint for Chains TCG.
-# Deploys a Node web service that runs the boardgame.io server + REST API
-# and serves the built React app, backed by a managed Postgres database.
-
-databases:
-  - name: chains-tcg-db
-    plan: free                # free Postgres on Render
-    databaseName: chains
-    user: chains
+# Render.com blueprint for On-Chain Virtual Arena.
+# Deploys a Node web service that runs the boardgame.io server + REST API.
+# The database lives on Supabase (managed Postgres) — set DATABASE_URL to the
+# Supabase connection string. (Render only hosts the persistent server; Supabase
+# hosts the DB; the frontend is on Vercel and talks to this service via
+# VITE_SERVER_BASE.)
 
 services:
   - type: web
-    name: chains-tcg
+    name: onchain-virtual-arena
     runtime: node
     plan: free
     region: oregon
@@ -19,17 +16,17 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 20
+      # ---- Supabase Postgres ----
       - key: DATABASE_URL
-        fromDatabase:
-          name: chains-tcg-db
-          property: connectionString
+        sync: false            # Supabase → Project Settings → Database → Connection string (URI).
+                               # Use the pooler / "Session" URI (port 6543 or 5432) and append ?sslmode=require if needed.
       - key: PGSSL
-        value: "1"            # Render Postgres requires SSL
+        value: "1"            # Supabase requires SSL.
       - key: ALLOW_ORIGIN
-        value: "https://www.masterstcg.com,https://masterstcg.com"
-        # Comma-separated list of allowed origins for socket.io + REST. Include both apex and www.
+        value: "https://chains-tcg.vercel.app,https://www.masterstcg.com,https://masterstcg.com"
+        # Comma-separated allowed origins for socket.io + REST. Includes the Vercel frontend.
       - key: HELIUS_API_KEY
-        sync: false           # required to populate the Memetic Masters library — paste your Helius API key
+        sync: false           # required to populate the NFT library — paste your Helius API key
       - key: MEMETIC_MASTERS_COLLECTION
         sync: false           # optional: Metaplex collection mint to filter on (recommended); leave unset to filter by name
       - key: MEMETIC_MASTERS_NAME_MATCH
