@@ -3,7 +3,7 @@
 // Virtual Arena. Buying a pack mints 5 random cards + 1 foil random card as NFTs
 // on Robinhood Chain (CardPack contract). Built on the shared design tokens.
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, Suspense, Component, type ReactNode } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { useGLTF, OrbitControls, Center, Bounds } from '@react-three/drei';
 import { color as C, font as F, radius as R, shadow as SH } from './theme';
@@ -71,9 +71,13 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
             <div style={{ fontFamily: F.display, fontWeight: 700, fontSize: 'clamp(26px,5vw,40px)', letterSpacing: '-0.01em' }}>Genesis Booster</div>
             <div style={{ color: C.textMid, fontSize: 14, marginTop: 6 }}>5 random cards + 1 guaranteed foil · minted on Robinhood Chain</div>
 
-            {/* 3D pack */}
-            <div style={{ display: 'grid', placeItems: 'center', margin: '14px 0 20px', height: 380 }}>
-              <Pack3D spinning={phase === 'minting'} />
+            {/* 3D pack — isolated so a WebGL/GLB failure can never blank the page. */}
+            <div style={{ display: 'grid', placeItems: 'center', margin: '14px 0 20px', minHeight: 380 }}>
+              <PackErrorBoundary fallback={<StaticPack spinning={phase === 'minting'} />}>
+                <Suspense fallback={<StaticPack spinning={phase === 'minting'} loading />}>
+                  <Pack3D spinning={phase === 'minting'} />
+                </Suspense>
+              </PackErrorBoundary>
             </div>
 
             <Button variant="primary" onClick={open} disabled={phase === 'minting'}
@@ -109,7 +113,6 @@ function PackModel() {
   const { scene } = useGLTF('/booster-pack.glb');
   return <primitive object={scene} />;
 }
-useGLTF.preload('/booster-pack.glb');
 
 function Pack3D({ spinning }: { spinning?: boolean }) {
   return (
@@ -117,14 +120,43 @@ function Pack3D({ spinning }: { spinning?: boolean }) {
       <ambientLight intensity={0.75} />
       <directionalLight position={[4, 6, 5]} intensity={1.5} />
       <directionalLight position={[-5, -1, -4]} intensity={0.55} color="#9d86ff" />
-      <Suspense fallback={null}>
-        <Bounds fit clip observe margin={1.15}>
-          <Center><PackModel /></Center>
-        </Bounds>
-      </Suspense>
+      {/* No inner <Suspense>: the model's loading state bubbles to the DOM-level
+          <Suspense> so we can show the styled StaticPack while the GLB downloads. */}
+      <Bounds fit clip observe margin={1.15}>
+        <Center><PackModel /></Center>
+      </Bounds>
       <OrbitControls enableZoom={false} enablePan={false} autoRotate autoRotateSpeed={spinning ? 9 : 1.8} />
     </Canvas>
   );
+}
+
+/** Styled CSS booster pack — shown while the 3D model loads and if WebGL/GLB fails. */
+function StaticPack({ spinning, loading }: { spinning?: boolean; loading?: boolean }) {
+  return (
+    <div style={{
+      position: 'relative', width: 220, height: 300, borderRadius: 18, overflow: 'hidden',
+      background: 'linear-gradient(150deg, #2a1b5e 0%, #7c5cff 42%, #d9b45a 100%)',
+      border: '1px solid rgba(255,255,255,0.25)', boxShadow: `${SH.lg}, ${SH.glow}`,
+      animation: spinning ? 'ova-pack-shake .5s ease-in-out infinite' : 'ova-pack-float 5s ease-in-out infinite',
+    }}>
+      <div aria-hidden style={{ position: 'absolute', top: 0, bottom: 0, width: '45%',
+        background: 'linear-gradient(100deg, transparent, rgba(255,255,255,0.5), transparent)', animation: 'ova-sheen 2.8s linear infinite' }} />
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 16 }}>
+        <div style={{ fontFamily: F.display, fontWeight: 700, fontSize: 13, letterSpacing: '0.28em', color: '#0d0a1e' }}>ON-CHAIN</div>
+        <div style={{ fontFamily: F.display, fontWeight: 700, fontSize: 22, lineHeight: 1, color: '#fff', textShadow: '0 2px 8px rgba(0,0,0,0.5)', textAlign: 'center' }}>VIRTUAL<br />ARENA</div>
+        <div style={{ marginTop: 8, fontSize: 10, fontWeight: 800, letterSpacing: '0.2em', color: '#0d0a1e', background: 'rgba(255,255,255,0.55)', borderRadius: 999, padding: '4px 10px' }}>
+          {loading ? 'LOADING 3D…' : 'GENESIS SET'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+class PackErrorBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(e: unknown) { console.warn('[boosters] 3D pack failed, using fallback:', e); }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
 function CardTile({ card, delay }: { card: RevealedCard; delay: number }) {
