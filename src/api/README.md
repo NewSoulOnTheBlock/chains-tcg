@@ -225,9 +225,13 @@ Both arrive as `code: "bad_request"`:
 |---|---|---|
 | body/param validation (zod) | `{path, message, code}` | no `details.reason` |
 | deck legality | `{code, message}` — no `path` | `details.reason === 'invalid_deck'` |
+| card ownership | `{code:'unowned', cardId, need, owned, message}` | `details.reason === 'unowned_cards'` |
 
 Use `decks.isDeckLegalityError(e)` / `decks.deckIssues(e)` rather than
 inspecting `details` by hand.
+
+⚠️ `ApiError.issues` keeps only `{path, message, code}` — it **drops** `cardId`,
+`need` and `owned`. Use `collection.unownedIssues(e)` when you need the numbers.
 
 ### Rate limits and retries
 
@@ -356,3 +360,52 @@ positional and operator-configurable.
 2. **`GET /auth/me` sits behind the `/auth/` bucket** (5 r/min burst 10 at the
    gateway), which is far tighter than the `/api/` bucket. It is not a pollable
    route. Use `GET /api/profiles/me` for anything repeated.
+
+---
+
+## 10. Card ownership
+
+Ownership used to live in `localStorage["ocva.collection.<name>"]`. It does not
+any more: it is derived from the player's real CardPack (ERC-721) holdings on
+Robinhood Chain and projected into `core.card_ownership`, and the game service
+refuses **ranked and wager** seating for a deck the collection does not cover.
+Casual and solo stay ungated.
+
+| Call | Route | Notes |
+|---|---|---|
+| `collection.getMine()` | `GET /wager/collection` | cheap, reads the stored snapshot |
+| `collection.sync()` | `POST /wager/collection/sync` | rescans the chain — **6 per 5 min per profile** |
+
+Neither takes an identifier. The address comes from the proven session, and
+there is deliberately no "collection by wallet" route (audit finding H-2).
+**Do not add one.**
+
+### Three things that are easy to get wrong
+
+1. **`node_*` ids never come back.** The on-chain index is the 80 non-Node
+   cards, and seating skips Basic Nodes outright. The client synthesises the
+   Node grant locally (`STARTING_NODES` in `src/collection.ts`). Never render
+   "0 owned" for a Node, and never cap one at the display grant — they are
+   unlimited.
+2. **An empty `cards` map is ambiguous — branch on `synced`.** `synced` is the
+   existence of the profile's `core.card_ownership_sync` row, written on every
+   successful sync whether or not it found anything. `synced: false` means "we
+   have never looked" (prompt a scan); `synced: true` with an empty map means
+   "you genuinely own nothing". `syncedAt` / `syncedBlock` are display only and
+   are null exactly when `synced` is false. Getting this backwards tells a
+   paying customer their collection is gone.
+3. **The snapshot replaces, it never merges.** CardPack NFTs are tradeable, so
+   a reconcile deletes what is gone. An additive client would make "sell your
+   collection and keep playing it" the cheapest exploit in the product.
+
+### Seating rejections
+
+| Status | `details.reason` | Whose deck | Detail |
+|---|---|---|---|
+| 400 | `unowned_cards` | the caller's | `issues[]` with `cardId` / `need` / `owned` |
+| 409 | `host_deck_unowned` | the host's | **none, by design** — a decklist must never cross the table (H-7) |
+
+`error-text.ts` carries the copy for both, plus every 503 the sync path can
+raise (`card_pack_unconfigured`, `card_chain_unreachable`, …). All of those
+leave the stored snapshot untouched, so keep showing the last known collection
+rather than emptying it.

@@ -18,12 +18,14 @@ import {
   ApiError, SOCKET_URL,
   type AuthChain, type LobbyEntry, type OwnProfile, type SeatInfo,
 } from './api';
-import { errorText, errorIssues, isDeckBlocked } from './error-text';
+import { errorText, errorHeadline, errorIssues, isDeckBlocked, isHostDeckUnowned } from './error-text';
 import { RANKED_AVAILABLE, RANKED_UNAVAILABLE_MESSAGE } from './ranked-client';
 import { connectRobinhoodChain, detectEvmWallet, shortAddr, ROBINHOOD_CHAIN } from './wallet';
-// `validateOwnedDeck` / `deckCap` still exist and are the RANKED gate — see
-// `src/collection.ts`. They are intentionally not used by the deck builder.
-import { getCollection } from './collection';
+// Card ownership is SERVER state now (`src/api/collection.ts`). `useCollection`
+// is a subscription to the cached snapshot; `ownershipIssues` mirrors the
+// server's ranked/wager seating check. Ownership is shown in the deck builder,
+// never enforced there — casual and solo are deliberately ungated.
+import { useCollection, ownershipIssues, ownedCount, refreshCollection, syncCollection } from './collection';
 import { color as C, font as F, surface as SURF, edge as EDGE, depth as DEPTH } from './theme';
 import { Button as UIButton, goldPlate, obsidianPlate, engravedPanel } from './ui';
 import { SettingsPage, PREFS_EVENT } from './Settings';
@@ -2386,7 +2388,7 @@ function ProfilePage({ myName, onBack, onSettings }: { myName: string; onBack: (
               <DeckWorkspace myName={myName} mobile={mobile} onDecksChanged={reloadDecks} />
             )}
             {tab === 'collection' && (
-              <CollectionTab myName={myName} walletAddress={prof?.walletAddress ?? null} mobile={mobile} />
+              <CollectionTab walletAddress={prof?.walletAddress ?? null} mobile={mobile} />
             )}
             {tab === 'achievements' && (
               <AchievementsTab prof={prof} ranked={ranked} deck={favoriteCards} mobile={mobile} />
@@ -2670,31 +2672,68 @@ function hubGoldBtn(disabled: boolean): React.CSSProperties {
 }
 
 // ── Collection tab ──────────────────────────────────────────────────────────
-function CollectionTab({ myName, walletAddress, mobile }: { myName: string; walletAddress: string | null; mobile: boolean }) {
+function CollectionTab({ walletAddress, mobile }: { walletAddress: string | null; mobile: boolean }) {
   const [chain, setChain] = useState<Color | 'all'>('all');
   const [type, setType] = useState<'all' | CardType>('all');
   const [ownedOnly, setOwnedOnly] = useState(true);
-  const [tick, setTick] = useState(0);
-  const owned = useMemo(() => getCollection(myName), [myName, tick]);
-  useEffect(() => {
-    const on = () => setTick((t) => t + 1);
-    window.addEventListener('ocva:collection-changed', on); window.addEventListener('focus', on);
-    return () => { window.removeEventListener('ocva:collection-changed', on); window.removeEventListener('focus', on); };
-  }, []);
+  // Ownership comes from `GET /wager/collection`, derived from the player's real
+  // CardPack NFT holdings. `owned` is the display copy (server snapshot + the
+  // implicit Node grant + any pack the chain indexer has not caught up with).
+  const collection = useCollection();
+  const owned = collection.cards;
+  useEffect(() => { void refreshCollection(); }, []);
   const cards = useMemo(() => BUILDABLE_CARDS.filter((c) =>
     (chain === 'all' || c.color === chain) && (type === 'all' || c.type === type) && (!ownedOnly || (owned[c.id] ?? 0) > 0)), [chain, type, ownedOnly, owned]);
   const totalOwned = useMemo(() => BUILDABLE_CARDS.reduce((s, c) => s + (owned[c.id] ?? 0), 0), [owned]);
   const uniqueOwned = useMemo(() => BUILDABLE_CARDS.filter((c) => (owned[c.id] ?? 0) > 0).length, [owned]);
   const connected = !!walletAddress;
+  // `needsSync` is NOT "you own nothing" — the server cannot yet tell a player
+  // who has never synced from one who genuinely holds no cards, so an
+  // unconfirmed snapshot is treated as unknown and prompts a scan instead of
+  // announcing an empty collection.
+  const { needsSync, loading, error, pendingCount, syncedAt, syncedBlock } = collection;
+  const offline = collection.source === 'cache' && !needsSync;
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ padding: '10px 14px', borderRadius: 12, background: HUB.raised, border: `1px solid ${HUB.border}`,
+      <div style={{ padding: '10px 14px', borderRadius: 12, background: HUB.raised,
+        border: `1px solid ${needsSync ? HUB.gold + '77' : HUB.border}`,
         display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <span style={{ width: 9, height: 9, borderRadius: '50%', background: connected ? HUB.cyan : HUB.muted }} />
-        <span style={{ fontSize: 13, color: HUB.text }}>
-          You own <b style={{ color: HUB.goldHi }}>{totalOwned}</b> cards ({uniqueOwned} unique). Every collection starts with 20 of each chain Node — open <b>Boosters</b> to unlock the rest.{connected ? ` Mints land in ${shortAddr(walletAddress!)}.` : ''}
+        <span style={{ width: 9, height: 9, borderRadius: '50%', background: connected ? HUB.cyan : HUB.muted, flex: 'none' }} />
+        <span style={{ fontSize: 13, color: HUB.text, flex: '1 1 260px', minWidth: 0 }}>
+          {needsSync ? (
+            <>Your collection has not been read from the chain yet. <b>Scan the chain</b> to load the cards your wallet holds — Basic Nodes are always free.</>
+          ) : (
+            <>You own <b style={{ color: HUB.goldHi }}>{totalOwned}</b> cards ({uniqueOwned} unique). Every collection includes 20 of each chain Node for free — open <b>Boosters</b> to unlock the rest.{connected ? ` Mints land in ${shortAddr(walletAddress!)}.` : ''}</>
+          )}
         </span>
+        <button onClick={() => { void syncCollection(); }} disabled={loading}
+          title="Re-read your CardPack NFTs from Robinhood Chain"
+          style={{ padding: '8px 13px', borderRadius: 9, flex: 'none', cursor: loading ? 'default' : 'pointer',
+            background: needsSync ? `${HUB.gold}22` : HUB.surface, color: needsSync ? HUB.goldHi : HUB.text,
+            border: `1px solid ${needsSync ? HUB.gold : HUB.border}`, fontSize: 11.5, fontWeight: 800, letterSpacing: '0.06em',
+            opacity: loading ? 0.6 : 1, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Refresh size={12} /> {loading ? 'SCANNING…' : 'SCAN CHAIN'}
+        </button>
       </div>
+
+      {(error || pendingCount > 0 || offline) && (
+        <div role="status" style={{ fontSize: 11.5, color: error ? HUB.red : HUB.muted, display: 'flex', alignItems: 'center', gap: 6 }}>
+          {error ? <Warning size={12} /> : <Hourglass size={12} />}
+          {error
+            ? error
+            : pendingCount > 0
+              ? `${pendingCount} newly minted card${pendingCount === 1 ? '' : 's'} still being indexed on-chain — they will settle shortly.`
+              : 'Showing your last saved collection.'}
+        </div>
+      )}
+      {!error && !needsSync && syncedAt && (
+        <div style={{ fontSize: 11, color: HUB.muted }}>
+          Last scanned {new Date(syncedAt).toLocaleString()}
+          {/* The chain's own clock — the one that means something when a
+              player's wallet and this page disagree. */}
+          {syncedBlock !== null && ` · block ${syncedBlock.toLocaleString()}`}.
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <ChainChips value={chain} onChange={setChain} />
@@ -2710,7 +2749,11 @@ function CollectionTab({ myName, walletAddress, mobile }: { myName: string; wall
       <div className="hub-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'grid',
         gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 150 : 190}px, 1fr))`, gap: 12, alignContent: 'start', paddingBottom: 8 }}>
         {cards.length === 0 ? (
-          <div style={{ gridColumn: '1 / -1', textAlign: 'center', color: HUB.muted, padding: 30 }}>No owned cards here yet — open a booster pack to start your collection.</div>
+          <div style={{ gridColumn: '1 / -1', textAlign: 'center', color: HUB.muted, padding: 30 }}>
+            {needsSync
+              ? 'We have not read your cards from the chain yet — hit SCAN CHAIN above to load them.'
+              : 'No owned cards here yet — open a booster pack to start your collection.'}
+          </div>
         ) : cards.map((def) => (
           <HubCardTile key={def.id} def={def} inDeck={0} cap={owned[def.id] ?? 0} owned={owned[def.id] ?? 0}
             deckFull={false} onAdd={undefined} showAdd={false} />
@@ -2787,8 +2830,14 @@ function HubChip({ label, selected, onClick, accent }: { label: string; selected
 }
 
 // ── Card tile (memoized) ────────────────────────────────────────────────────
-const HubCardTile = React.memo(function HubCardTile({ def, inDeck, cap, deckFull, onAdd, showAdd = true, owned }: {
+const HubCardTile = React.memo(function HubCardTile({ def, inDeck, cap, deckFull, onAdd, showAdd = true, owned, ownedHint }: {
   def: CardDef; inDeck: number; cap: number; deckFull: boolean; onAdd?: () => void; showAdd?: boolean; owned?: number;
+  /**
+   * Server-confirmed copies owned, shown as a NON-BLOCKING badge. Unlike
+   * `owned`, it never locks the tile: the server ungates casual and solo, so
+   * the builder shows the constraint rather than enforcing it.
+   */
+  ownedHint?: number;
 }) {
   const meta = COLOR_META[def.color];
   const atCap = inDeck >= cap;
@@ -2832,6 +2881,12 @@ const HubCardTile = React.memo(function HubCardTile({ def, inDeck, cap, deckFull
             </span>
             <span style={{ fontSize: 10.5, color: notOwned ? '#E0525E' : atCap ? HUB.gold : HUB.muted }}>
               {owned != null ? (showAdd ? `${inDeck} / ${capLabel} owned` : `${capLabel} owned`) : `${inDeck}/${capLabel}`}
+              {owned == null && ownedHint != null && (ownedHint > 0 || inDeck > ownedHint) && (
+                <span title={inDeck > ownedHint ? 'Fine for casual and solo — ranked and wager need cards you own' : 'Copies in your collection'}
+                  style={{ color: inDeck > ownedHint ? HUB.gold : HUB.muted, opacity: inDeck > ownedHint ? 1 : 0.8 }}>
+                  {' · '}{ownedHint} owned
+                </span>
+              )}
             </span>
           </div>
           {showAdd && (
@@ -2875,15 +2930,10 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
   const [activationIssues, setActivationIssues] = useState<string[]>([]);
   const liveRef = useRef<HTMLDivElement>(null);
 
-  // Owned-card collection (boosters + starting Nodes). Custom decks may only use owned cards.
-  const [ownedTick, setOwnedTick] = useState(0);
-  const owned = useMemo(() => getCollection(myName), [myName, ownedTick]);
-  useEffect(() => {
-    const on = () => setOwnedTick((t) => t + 1);
-    window.addEventListener('ocva:collection-changed', on);
-    window.addEventListener('focus', on);
-    return () => { window.removeEventListener('ocva:collection-changed', on); window.removeEventListener('focus', on); };
-  }, []);
+  // Owned-card collection, from the server. Shown, never enforced — see the
+  // note on `v60` below and `ownedIssues` further down.
+  const collection = useCollection();
+  useEffect(() => { void refreshCollection(); }, []);
 
   const countsFrom = (cards: string[]) => { const n: Record<string, number> = {}; for (const id of cards) n[id] = (n[id] ?? 0) + 1; return n; };
 
@@ -2916,6 +2966,34 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
   // new player to node-only decks, which is the opposite of the intent.
   const v60 = useMemo(() => validateDeck(deckList), [deckList]);
   const copyIssues = useMemo(() => validateDeck(deckList, { requireSize: false }).issues, [deckList]);
+  /**
+   * Ownership advisory, mirroring the server's ranked/wager seating check
+   * (`400 details.reason = 'unowned_cards'`).
+   *
+   * ADVISORY, NOT A GATE. The server ungates casual, so this deck stays
+   * savable, activatable and playable — it just cannot enter ranked or a wager
+   * until the collection covers it. Returns `[]` while ownership is unknown
+   * (signed out, or never synced), because "we have not looked" must never
+   * render as "you own none of this".
+   */
+  const ownedIssues = useMemo(
+    () => ownershipIssues(deckList).map((i) => i.message),
+    // `collection` is the dependency that matters: the answer changes when the
+    // snapshot does, not only when the decklist does.
+    [deckList, collection],
+  );
+  /**
+   * Copies the player actually owns, for a non-blocking badge in the library.
+   *
+   * `undefined` hides it, which is the right answer twice over: Basic Nodes are
+   * free and unlimited (the server skips them entirely), and an unconfirmed
+   * snapshot must never render as "0 owned".
+   */
+  const ownedHintFor = useCallback((id: string): number | undefined => {
+    if (isBasicNode(id)) return undefined;
+    if (collection.needsSync || collection.source === 'signed-out') return undefined;
+    return ownedCount(id);
+  }, [collection]);
   const legality: 'EMPTY' | 'INCOMPLETE' | 'INVALID' | 'READY' =
     total === 0 ? 'EMPTY' : total < DECK_SIZE ? 'INCOMPLETE' : v60.ok ? 'READY' : 'INVALID';
   const dirty = JSON.stringify([...deckList].sort()) !== savedSnapshot;
@@ -3102,7 +3180,7 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
       counts={counts} bump={bump} copyIssues={copyIssues} v60={v60} dirty={dirty}
       canSave={!!deckName.trim() && !saving}
       canActivate={!!deckName.trim() && total === DECK_SIZE && v60.ok && !saving}
-      activationIssues={activationIssues}
+      activationIssues={activationIssues} ownedIssues={ownedIssues}
       saving={saving} status={status} onSave={save} onActivate={makeActive} onClear={clearDeck} onNew={newDeck}
       onOpenLibrary={() => setShowLibrary(true)} savedCount={decks.length} editingId={editingId}
     />
@@ -3167,14 +3245,16 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
               <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 150 : 176}px, 1fr))`, gap: 12 }}>
                 {visible.map((def) => (
                   <HubCardTile key={def.id} def={def} inDeck={counts[def.id] ?? 0}
-                    cap={isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC} deckFull={deckFull} onAdd={() => bump(def.id, +1)} />
+                    cap={isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC} deckFull={deckFull} onAdd={() => bump(def.id, +1)}
+                    ownedHint={ownedHintFor(def.id)} />
                 ))}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {visible.map((def) => (
                   <LibraryRow key={def.id} def={def} inDeck={counts[def.id] ?? 0}
-                    cap={isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC} deckFull={deckFull} onAdd={() => bump(def.id, +1)} />
+                    cap={isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC} deckFull={deckFull} onAdd={() => bump(def.id, +1)}
+                    ownedHint={ownedHintFor(def.id)} />
                 ))}
               </div>
             )}
@@ -3207,7 +3287,11 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
   );
 }
 
-function LibraryRow({ def, inDeck, cap, deckFull, onAdd, owned }: { def: CardDef; inDeck: number; cap: number; deckFull: boolean; onAdd: () => void; owned?: number }) {
+function LibraryRow({ def, inDeck, cap, deckFull, onAdd, owned, ownedHint }: {
+  def: CardDef; inDeck: number; cap: number; deckFull: boolean; onAdd: () => void; owned?: number;
+  /** Non-blocking "N owned" badge — see `HubCardTile`. */
+  ownedHint?: number;
+}) {
   const meta = COLOR_META[def.color];
   const cost = def.cost ? Object.values(def.cost).reduce((s, n) => s + (n ?? 0), 0) : null;
   const atCap = inDeck >= cap;
@@ -3225,6 +3309,10 @@ function LibraryRow({ def, inDeck, cap, deckFull, onAdd, owned }: { def: CardDef
         <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{def.name}</span>
         <span style={{ fontSize: 10.5, color: HUB.muted, display: 'inline-flex', gap: 5, alignItems: 'center' }}><span style={{ width: 8, height: 8, borderRadius: 2, background: meta.hex }} />{def.type}</span>
         {notOwned && <span style={{ fontSize: 9.5, fontWeight: 800, color: '#E0525E' }}>LOCKED</span>}
+        {owned == null && ownedHint != null && (ownedHint > 0 || inDeck > ownedHint) && (
+          <span title={inDeck > ownedHint ? 'Fine for casual and solo — ranked and wager need cards you own' : 'Copies in your collection'}
+            style={{ fontSize: 10, flex: 'none', color: inDeck > ownedHint ? HUB.gold : HUB.muted }}>{ownedHint} owned</span>
+        )}
         <span style={{ fontSize: 11, color: notOwned ? '#E0525E' : atCap ? HUB.gold : HUB.muted, width: 60, textAlign: 'right' }}>{inDeck} / {ownLabel}</span>
         <button onClick={onAdd} disabled={disabled} aria-label={notOwned ? `${def.name} — not owned` : `Add ${def.name}`} style={{ width: 30, height: 30, borderRadius: 8, flex: 'none',
           background: disabled ? HUB.raised : `linear-gradient(180deg, ${HUB.purple}, ${HUB.violet})`, color: disabled ? HUB.muted : '#fff',
@@ -3243,11 +3331,19 @@ function CurrentDeckPanel(props: {
   canActivate: boolean;
   /** Per-issue detail from a rejected activation. */
   activationIssues: string[];
+  /**
+   * Cards this deck uses that the player's collection does not cover.
+   *
+   * ADVISORY ONLY. The server gates ranked and wager on ownership and leaves
+   * casual ungated, so this never disables Save or Set Active — it explains
+   * which modes the deck can enter.
+   */
+  ownedIssues: string[];
   saving: boolean; status: { msg: string; ok: boolean } | null;
   onSave: () => void; onActivate: () => void; onClear: () => void; onNew: () => void;
   onOpenLibrary: () => void; savedCount: number; editingId: string | null;
 }) {
-  const { deckName, setDeckName, total, legality, counts, bump, copyIssues, v60, dirty, canSave, canActivate, activationIssues, saving, status, onSave, onActivate, onClear, onNew, onOpenLibrary, savedCount } = props;
+  const { deckName, setDeckName, total, legality, counts, bump, copyIssues, v60, dirty, canSave, canActivate, activationIssues, ownedIssues, saving, status, onSave, onActivate, onClear, onNew, onOpenLibrary, savedCount } = props;
   const [editingName, setEditingName] = useState(false);
   const legColor = legality === 'READY' ? HUB.green : legality === 'INVALID' ? HUB.red : HUB.gold;
   const pct = Math.min(100, (total / DECK_SIZE) * 100);
@@ -3351,6 +3447,22 @@ function CurrentDeckPanel(props: {
           <ul style={{ margin: '0 0 10px', paddingLeft: 18, fontSize: 12, color: HUB.red, lineHeight: 1.6 }}>
             {activationIssues.map((msg, i) => <li key={i}>{msg}</li>)}
           </ul>
+        )}
+        {/* Ownership is a RANKED/WAGER entry requirement, not a deck-legality
+            rule — the server ungates casual. Gold (advisory), not red, and it
+            never disables the buttons below. */}
+        {ownedIssues.length > 0 && (
+          <div style={{ marginBottom: 10, padding: '9px 11px', borderRadius: 9,
+            background: `${HUB.gold}12`, border: `1px solid ${HUB.gold}55` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11.5, fontWeight: 800, letterSpacing: '0.04em', color: HUB.goldHi }}>
+              <Warning size={13} /> PLAYABLE IN CASUAL &amp; SOLO — NOT RANKED OR WAGER
+            </div>
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 11.5, color: HUB.text, lineHeight: 1.55 }}>
+              {ownedIssues.slice(0, 4).map((msg, i) => <li key={i}>{msg}</li>)}
+              {ownedIssues.length > 4 && <li style={{ color: HUB.muted }}>…and {ownedIssues.length - 4} more.</li>}
+            </ul>
+            <div style={{ marginTop: 5, fontSize: 11, color: HUB.muted }}>Open boosters to mint the cards you are missing, or swap them out.</div>
+          </div>
         )}
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={onClear} style={{ padding: '12px 18px', borderRadius: 10, background: HUB.surface, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: 'pointer', fontWeight: 700, letterSpacing: '0.06em', fontSize: 12 }}>CLEAR</button>
@@ -4211,7 +4323,7 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
 
 // ── Lobby screen ────────────────────────────────────────────────────────────
 function Lobby({
-  myName, onJoined, onBack, onViewProfile, onSolo, onDeckScreen,
+  myName, onJoined, onBack, onViewProfile, onSolo, onDeckScreen, linkProblem, onDismissLinkProblem,
 }: {
   myName: string;
   onJoined: (seat: Seat) => void;
@@ -4220,6 +4332,15 @@ function Lobby({
   onSolo: () => void;
   /** Send the player to the deck builder — the only fix for `no_active_deck`. */
   onDeckScreen: () => void;
+  /**
+   * Why a `#match=<id>` invite link could not be opened.
+   *
+   * The join happens in `App`, above this screen, but the lobby is where the
+   * player is dropped and where they can act — so the banner is rendered here,
+   * next to the list of matches they can actually join.
+   */
+  linkProblem: LinkProblem | null;
+  onDismissLinkProblem: () => void;
 }) {
   const mobile = useIsMobile();
   const [matches, setMatches] = useState<LobbyEntry[]>([]);
@@ -4243,14 +4364,21 @@ function Lobby({
   /**
    * ONE place where a thrown value becomes lobby UI.
    *
-   * `no_active_deck` / `invalid_active_deck` are not errors the player can
-   * retry their way out of — they need the deck screen — so they get their own
-   * state with a working button instead of a red banner.
+   * `no_active_deck` / `invalid_active_deck` / `unowned_cards` are not errors
+   * the player can retry their way out of — they need the deck screen — so they
+   * get their own state with a working button instead of a red banner.
+   * `unowned_cards` also names each offending card in `details.issues`, which
+   * the banner renders as a list; `errorHeadline` keeps them out of the heading
+   * so they are not printed twice.
+   *
+   * `host_deck_unowned` is the opposite case: somebody ELSE's deck failed
+   * re-validation, it deliberately carries no card detail, and there is nothing
+   * for this player to fix. Plain message, and the caller refreshes the lobby.
    */
   const report = useCallback((e: unknown) => {
     if (isDeckBlocked(e)) {
       setError('');
-      setDeckProblem({ message: errorText(e), issues: errorIssues(e) });
+      setDeckProblem({ message: errorHeadline(e), issues: errorIssues(e) });
       return;
     }
     setDeckProblem(null);
@@ -4388,6 +4516,10 @@ function Lobby({
       await enterMatch(created.matchID);
     } catch (e) {
       report(e);
+      // The host's deck stopped being legal between listing and joining, so the
+      // list on screen is stale — drop the dead entry rather than leaving a
+      // button that can only fail.
+      if (isHostDeckUnowned(e)) void refresh();
     } finally { setBusy(null); }
   }
 
@@ -4470,9 +4602,24 @@ function Lobby({
           />
         )}
 
+        {linkProblem && (
+          <div style={{ maxWidth: 1480, margin: '12px auto 0', padding: '0 22px', width: '100%' }}>
+            <ProblemBanner
+              problem={linkProblem}
+              actionLabel={linkProblem.action === 'decks' ? 'Open deck builder' : 'Refresh matches'}
+              onFix={() => {
+                if (linkProblem.action === 'decks') { onDeckScreen(); return; }
+                onDismissLinkProblem();
+                void refresh();
+              }}
+              onDismiss={onDismissLinkProblem}
+            />
+          </div>
+        )}
+
         {deckProblem && (
           <div style={{ maxWidth: 1480, margin: '12px auto 0', padding: '0 22px', width: '100%' }}>
-            <DeckBlockedBanner problem={deckProblem} onFix={onDeckScreen} />
+            <ProblemBanner problem={deckProblem} actionLabel="Open deck builder" onFix={onDeckScreen} />
           </div>
         )}
 
@@ -4588,15 +4735,20 @@ function Lobby({
 }
 
 /**
- * The server refused to seat the player because of their active deck.
+ * The server refused to seat the player, and there is exactly one useful next
+ * step.
  *
- * This is deliberately not a red error box: `no_active_deck` and
- * `invalid_active_deck` are both fixed in exactly one place, and the banner's
- * job is to get the player there. `invalid_active_deck` also carries per-issue
- * detail saying what is wrong — show it rather than a summary.
+ * Deliberately not a red error box. `no_active_deck`, `invalid_active_deck` and
+ * `unowned_cards` are all fixed in the deck builder; a dead invite link is
+ * fixed by picking another match. In every case the banner's job is to name the
+ * problem and hand over a working button, so the action label is the caller's.
+ * Reasons that carry per-issue detail (`unowned_cards` names each card) list it
+ * rather than collapsing to a summary.
  */
-function DeckBlockedBanner({ problem, onFix }: {
-  problem: { message: string; issues: string[] }; onFix: () => void;
+function ProblemBanner({ problem, onFix, actionLabel, onDismiss }: {
+  problem: { message: string; issues: string[] }; onFix: () => void; actionLabel: string;
+  /** When given, adds a dismiss control. Used for advisories the player can ignore. */
+  onDismiss?: () => void;
 }) {
   return (
     <div role="alert" style={{
@@ -4613,7 +4765,13 @@ function DeckBlockedBanner({ problem, onFix }: {
           </ul>
         )}
       </div>
-      <button onClick={onFix} style={LOBBY_GOLD_BTN}>Open deck builder</button>
+      <button onClick={onFix} style={LOBBY_GOLD_BTN}>{actionLabel}</button>
+      {onDismiss && (
+        <button onClick={onDismiss} aria-label="Dismiss"
+          style={{ background: 'none', border: 'none', color: '#d9c98e', cursor: 'pointer', display: 'inline-flex', padding: 4 }}>
+          <Close size={16} />
+        </button>
+      )}
     </div>
   );
 }
@@ -5757,6 +5915,44 @@ function SeatCard({ seat, role, name, avatar, isYou, joined, mobile }: {
 type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile' | 'ranked' | 'solo' | 'boosters' | 'masterquest' | 'settings';
 
 /**
+ * The match id from an invite deep link (`…/#match=<id>`), or `null`.
+ *
+ * The hash is shared with the profile hub's tab state, so read it early and
+ * hold the result — see the `matchLink` state in `App`.
+ */
+function readMatchLink(): string | null {
+  try {
+    const m = window.location.hash.match(/match=([\w-]+)/);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
+
+/**
+ * Drop the `#match=` hash once the link has been resolved one way or another,
+ * so a refresh does not re-attempt a join that already failed. The query string
+ * is preserved — it can carry things this app does not own.
+ */
+function clearMatchLink(): void {
+  try { window.history.replaceState(null, '', window.location.pathname + window.location.search); } catch { /* ignore */ }
+}
+
+/**
+ * Why an invite link did not open, and the one thing worth doing about it.
+ *
+ * Always rendered in the LOBBY, whatever the cause. Bouncing the player
+ * straight to the deck builder — which is what a `no_active_deck` link used to
+ * do — is silent: they arrive somewhere they did not ask to be with no idea the
+ * invite was the reason. A banner beside the match list says what happened and
+ * still hands them the right button.
+ */
+type LinkProblem = {
+  message: string;
+  issues: string[];
+  /** `'decks'` when the player's own deck is what the server refused. */
+  action: 'lobby' | 'decks';
+};
+
+/**
  * Print-mode renderer used by scripts/render-cards.mjs. Lays out every card in
  * the catalogue as a 280×400 CardPreview wrapped in a div with
  * data-card-id="<id>" so a Playwright script can grab each one individually.
@@ -6128,6 +6324,38 @@ export default function App() {
   const [soloCfg, setSoloCfg] = useState<{ difficulty: Difficulty; mode: SoloMode; color: Color; customDeck: string[] | null } | null>(null);
   const soloStartRef = useRef<number>(0);
 
+  // ── Invite deep link ──────────────────────────────────────────────────────
+  //
+  // `#match=<id>` is read ONCE, in this initialiser, which runs during App's
+  // very first render — before any child effect exists and therefore before
+  // anything else can rewrite the hash. The profile hub also owns the hash
+  // (`#overview` / `#decks` / …) and rewrites it whenever its tab changes; it
+  // happens not to fire on mount for a `#match=` hash today, but relying on
+  // that is one tab click away from eating every invite link.
+  //
+  // Holding it in state rather than re-reading the URL also makes the link
+  // survive sign-in: App stays mounted while `<Login>` is on screen, so the id
+  // captured before the wallet signature is still here after it.
+  const [matchLink, setMatchLink] = useState<string | null>(() => readMatchLink());
+  /** Why the last invite link could not be opened. Rendered by the lobby. */
+  const [linkProblem, setLinkProblem] = useState<LinkProblem | null>(null);
+  /**
+   * `true` once the seat restored from session storage has been re-verified
+   * against the server (or there was nothing to verify).
+   *
+   * The deep-link effect waits for this. Without it, a seat cached from a match
+   * that has since finished would make an invite look like "you are already in
+   * a match" for the second or two before the check comes back.
+   */
+  const [seatChecked, setSeatChecked] = useState(false);
+
+  // A second invite arriving in the same session (clicking another link).
+  useEffect(() => {
+    const onHash = () => { const id = readMatchLink(); if (id) { setMatchLink(id); setLinkProblem(null); } };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
   useEffect(() => sessionApi.onSessionChange((s) => {
     setSignedIn(s !== null);
     if (s === null) {
@@ -6139,6 +6367,8 @@ export default function App() {
       setSoloCfg(null);
       setSoloSetup(false);
       setView('landing');
+      setLinkProblem(null);
+      setSeatChecked(false);
       sess.del('seat'); sess.del('view');
     }
   }), []);
@@ -6159,6 +6389,11 @@ export default function App() {
     }
   }, []);
   useEffect(() => { if (signedIn) void reloadProfile(); }, [signedIn, reloadProfile]);
+
+  // Card ownership is server state keyed to the wallet, so it has to be re-read
+  // whenever the identity changes. Cheap (no chain access) and non-blocking: a
+  // failure leaves the cached snapshot on screen rather than emptying it.
+  useEffect(() => { if (signedIn) void refreshCollection(); }, [signedIn]);
 
   // Any screen can ask for a profile re-read after renaming.
   useEffect(() => {
@@ -6193,7 +6428,8 @@ export default function App() {
   // is the authority on whether we are still in that match — and a
   // non-participant gets 404 (never 403), so any error means "drop it".
   useEffect(() => {
-    if (!seat || !signedIn) return;
+    if (!signedIn) return;
+    if (!seat) { setSeatChecked(true); return; }
     let cancelled = false;
     (async () => {
       try {
@@ -6205,7 +6441,10 @@ export default function App() {
           setSeat(seatFrom(info, seat.playerName));
         }
       } catch {
+        if (cancelled) return;
         sess.del('seat'); setSeat(null);
+      } finally {
+        if (!cancelled) setSeatChecked(true);
       }
     })();
     return () => { cancelled = true; };
@@ -6214,17 +6453,52 @@ export default function App() {
 
   // Deep-link: `#match=ID` joins that match. The server decides the seat — the
   // client cannot name one, and cannot send a deck either.
+  //
+  // ─── EVERY OUTCOME IS VISIBLE ───────────────────────────────────────────────
+  // This used to swallow a failure into `console.warn`, which is the worst
+  // possible answer: the player clicks an invite, the page looks like it
+  // ignored them, and the hash has already been stripped so a refresh does not
+  // even retry. The overwhelmingly common case is a 409 `match_not_open` —
+  // somebody else took the second seat while the link sat in a chat window —
+  // and the server is right to refuse it. So: name the reason, drop the player
+  // in the lobby where there are other matches, and let them retry from there.
   useEffect(() => {
-    if (seat || !signedIn || !name) return;
-    const m = window.location.hash.match(/match=([\w-]+)/);
-    if (!m) return;
-    const matchID = m[1];
+    if (!matchLink || !signedIn || !name || !seatChecked) return;
+
+    // ─── ALREADY SITTING IN A MATCH ─────────────────────────────────────────
+    // Previously this was a bare `if (seat) return`, so a seat cached in
+    // session storage from an older match swallowed every invite with no
+    // feedback whatsoever. Two deliberate outcomes now:
+    //
+    //   same match  — the link is where they already are; consume it.
+    //   other match — HOLD the link. Following it would abandon a live game,
+    //                 so it never wins the race, but it is not thrown away
+    //                 either: this effect re-runs when the seat clears
+    //                 (`leftSeat`, or the boot re-verification dropping a
+    //                 finished one) and the join is attempted then. Either it
+    //                 works, or the lobby banner below names the reason. The
+    //                 one thing that cannot happen any more is silence.
+    if (seat) {
+      if (seat.matchID === matchLink) { clearMatchLink(); setMatchLink(null); setLinkProblem(null); }
+      return;
+    }
+
+    const matchID = matchLink;
+    let cancelled = false;
     (async () => {
+      /** Land the player in the lobby with the reason on screen and a way out. */
+      const fail = (message: string, issues: string[] = [], action: LinkProblem['action'] = 'lobby') => {
+        if (cancelled) return;
+        setLinkProblem({ message, issues, action });
+        goto('lobby');
+      };
+
       try {
         // Already seated? `getSeat` tells us, and hands back our credentials.
         try {
           const mine = await lobbyApi.getSeat(matchID);
-          window.history.replaceState(null, '', window.location.pathname);
+          if (cancelled) return;
+          clearMatchLink(); setMatchLink(null); setLinkProblem(null);
           joinedSeat(seatFrom(mine, name));
           return;
         } catch (e) {
@@ -6232,24 +6506,56 @@ export default function App() {
           if (!(e instanceof ApiError && e.isNotFound)) throw e;
         }
         const joined = await lobbyApi.join(matchID);
-        window.history.replaceState(null, '', window.location.pathname);
+        if (cancelled) return;
+        clearMatchLink(); setMatchLink(null); setLinkProblem(null);
         joinedSeat({
           matchID, seat: joined.seat, playerID: joined.playerID,
           credentials: joined.credentials, playerName: name,
         });
       } catch (e) {
-        window.history.replaceState(null, '', window.location.pathname);
+        if (cancelled) return;
+        clearMatchLink();
+        setMatchLink(null);
+
+        // The joiner's OWN deck is the problem (`no_active_deck`,
+        // `invalid_active_deck`, `unowned_cards`). The deck builder is the only
+        // fix, and `unowned_cards` names each offending card — show them.
         if (isDeckBlocked(e)) {
-          // No legal active deck — the deck screen is the only useful place.
-          try { window.location.hash = 'decks'; } catch {}
-          goto('profile');
+          fail(errorHeadline(e), errorIssues(e), 'decks');
           return;
         }
-        console.warn('auto-join failed:', errorText(e));
+
+        // Seated between the `getSeat` 404 and the join — take the seat we now
+        // hold rather than reporting a conflict the player cannot act on.
+        if (e instanceof ApiError && e.reason === 'already_seated') {
+          try {
+            const mine = await lobbyApi.getSeat(matchID);
+            if (cancelled) return;
+            setLinkProblem(null);
+            joinedSeat(seatFrom(mine, name));
+            return;
+          } catch { /* fall through to the generic message */ }
+        }
+
+        // No `details.reason` on this one: a match that does not exist and one
+        // that is private-and-not-for-you are the SAME 404 by design, so the
+        // client must not claim to know which.
+        if (e instanceof ApiError && e.isNotFound) {
+          fail('That invite link is not valid any more.',
+            ['The match may have been cancelled, or the invite was for somebody else.']);
+          return;
+        }
+
+        // Everything else — `match_not_open`, `match_incomplete`,
+        // `host_deck_unowned`, `setup_rejected`, rate limits, network failures.
+        // `errorHeadline` keeps any per-issue detail out of the heading so the
+        // list below it does not repeat the same text.
+        fail(errorHeadline(e), errorIssues(e));
       }
     })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signedIn, name, seat]);
+  }, [matchLink, signedIn, name, seat, seatChecked]);
 
   async function logout() {
     sess.del('seat'); sess.del('view');
@@ -6327,7 +6633,7 @@ export default function App() {
         : view === 'rules'
           ? <RulebookPage onBack={() => goto('landing')} />
           : view === 'boosters'
-            ? <BoostersPage myName={name} onBack={() => goto('landing')} />
+            ? <BoostersPage onBack={() => goto('landing')} />
             : view === 'masterquest'
               ? <MasterquestPage myName={name} onBack={() => goto('landing')} />
             : view === 'view-profile' && viewedProfile
@@ -6342,6 +6648,8 @@ export default function App() {
                       onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
                       onSolo={() => setSoloSetup(true)}
                       onDeckScreen={() => { try { window.location.hash = 'decks'; } catch {} goto('profile'); }}
+                      linkProblem={linkProblem}
+                      onDismissLinkProblem={() => setLinkProblem(null)}
                     />
                   : <Landing myName={name} profile={profile} onPlay={() => goto('lobby')} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onSettings={() => goto('settings')} />}
     </>

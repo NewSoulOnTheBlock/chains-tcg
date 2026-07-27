@@ -38,10 +38,33 @@ const REASON_TEXT: Record<string, string> = {
   invalid_active_deck: 'Your active deck is no longer legal. Fix it and activate it again.',
   self_challenge: 'You cannot challenge yourself.',
   too_many_open_matches: 'You already have 3 open matches. Cancel one before creating another.',
-  match_not_open: 'That match is no longer open.',
+  // `match_not_open` is the join path's most common refusal, and it covers four
+  // situations the server does not distinguish: the match already started, it
+  // filled up, it was cancelled, or it went void. Say all of it — a player who
+  // clicked an invite needs to know the link is dead, not merely "not open".
+  match_not_open: 'That match is no longer open — it has already started, filled up, or been cancelled.',
   already_seated: 'You are already seated in that match.',
-  match_incomplete: 'That match could not be started.',
+  match_incomplete: 'That match cannot be started — the host is no longer available.',
   setup_rejected: 'The server refused to start that match.',
+
+  // ── card ownership ───────────────────────────────────────────────────────
+  // Ranked and wager seating check the active deck against the player's real
+  // CardPack holdings. `details.issues` names each offending card, so the
+  // headline stays short and the list carries the detail.
+  unowned_cards: 'Ranked and wager matches only use cards you own, and your active deck has some you do not.',
+  // The HOST's deck failed re-validation as you tried to join. It deliberately
+  // carries no card detail — a decklist must never cross the table — and there
+  // is nothing the joining player can fix, so point them elsewhere.
+  host_deck_unowned: 'That match can no longer be started — the host no longer owns every card in their deck. Pick another match.',
+
+  // ── collection sync (all 503, all leave the stored snapshot untouched) ────
+  card_pack_unconfigured: 'Card syncing is not available on this deployment yet.',
+  card_index_out_of_sync: 'Card syncing is temporarily unavailable. Your collection is unchanged.',
+  card_chain_mismatch: 'Card syncing is temporarily unavailable. Your collection is unchanged.',
+  card_chain_unavailable: 'The card chain could not be reached. Your collection is unchanged — try again shortly.',
+  card_chain_error: 'The card chain could not be read. Your collection is unchanged — try again shortly.',
+  card_chain_unreachable: 'The card chain could not be reached. Your collection is unchanged — try again shortly.',
+  card_enumeration_unavailable: 'Your holdings were too large to scan just now. Your collection is unchanged.',
 
   // ── wager ────────────────────────────────────────────────────────────────
   unknown_stake_tier: 'That stake is no longer offered.',
@@ -105,6 +128,21 @@ export function errorText(err: unknown): string {
 }
 
 /**
+ * The one-line summary WITHOUT the per-issue detail appended.
+ *
+ * For UI that renders `errorIssues()` as its own list — `DeckBlockedBanner` and
+ * the deck panel both do — `errorText()` would repeat every issue inside the
+ * headline as well. Use this for the heading and `errorIssues()` for the list.
+ */
+export function errorHeadline(err: unknown): string {
+  if (err instanceof ApiError && !err.isNetworkError && !err.isRateLimited) {
+    const reason = err.reason;
+    if (reason !== null && REASON_TEXT[reason]) return REASON_TEXT[reason];
+  }
+  return errorText(err);
+}
+
+/**
  * Per-issue text from `details.issues`, ready to render as a list.
  *
  * Two producers populate this array with different shapes: zod body validation
@@ -117,10 +155,31 @@ export function errorIssues(err: unknown): string[] {
   return err.issues.map((i) => (i.path ? `${i.path}: ${i.message}` : i.message));
 }
 
-/** `true` when the caller should send the player to the deck screen. */
+/**
+ * `true` when the caller should send the player to the deck screen.
+ *
+ * `unowned_cards` belongs here: the player's own active deck contains cards
+ * their collection does not cover, and the fix is to edit the deck (or sync a
+ * pack they have just opened). It is NOT retryable and it is NOT a red box.
+ *
+ * `host_deck_unowned` deliberately does NOT belong here — that is somebody
+ * else's deck, and the joining player has nothing to fix. See `isHostDeckUnowned`.
+ */
 export function isDeckBlocked(err: unknown): boolean {
   return (
     err instanceof ApiError &&
-    (err.reason === 'no_active_deck' || err.reason === 'invalid_active_deck')
+    (err.reason === 'no_active_deck' ||
+      err.reason === 'invalid_active_deck' ||
+      err.reason === 'unowned_cards')
   );
+}
+
+/**
+ * `409 { reason: 'host_deck_unowned' }` — the match's HOST no longer owns every
+ * card in their deck, so the match cannot start. Carries no card detail by
+ * design (a decklist must never leak across the table). The joining player's
+ * only move is to pick a different match, so refresh the lobby and say so.
+ */
+export function isHostDeckUnowned(err: unknown): boolean {
+  return err instanceof ApiError && err.reason === 'host_deck_unowned';
 }

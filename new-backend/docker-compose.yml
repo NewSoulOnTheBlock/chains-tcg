@@ -237,8 +237,24 @@ services:
       # ---- booster shop
       BOOSTER_PRICE_WEI: "${BOOSTER_PRICE_WEI:-3500000000000000}"
       BOOSTER_SUPPLY_CAP: ${BOOSTER_SUPPLY_CAP:-2000}
-      # Empty => digital redemption answers 503 instead of inventing card ids.
+      # Empty => digital redemption answers 503 instead of inventing card ids,
+      # and it must STAY empty: real card ownership comes from CardPack below.
       BOOSTER_CARD_POOL: "${BOOSTER_CARD_POOL:-}"
+
+      # ---- card ownership (CardPack ERC-721 on Robinhood Chain / 4663)
+      # Read directly, NOT through rpc-proxy: the proxy is pinned to one network
+      # by EVM_RPC_URL and cannot see chain 4663. The endpoint below is public
+      # and keyless, so no credential enters this service (H-5 is about
+      # credentials, and there is none here).
+      # Empty address => the sync route answers 503 rather than concluding that
+      # every player owns nothing, which a destructive reconcile would act on.
+      CARD_PACK_ADDRESS: "${CARD_PACK_ADDRESS:-}"
+      CARD_PACK_CHAIN_ID: ${CARD_PACK_CHAIN_ID:-4663}
+      CARD_PACK_RPC_URL: "${CARD_PACK_RPC_URL:-https://rpc.mainnet.chain.robinhood.com}"
+      CARD_PACK_DEPLOY_BLOCK: ${CARD_PACK_DEPLOY_BLOCK:-0}
+      CARD_PACK_LOG_WINDOW: ${CARD_PACK_LOG_WINDOW:-500000}
+      CARD_PACK_MAX_TOKEN_SCAN: ${CARD_PACK_MAX_TOKEN_SCAN:-20000}
+      CARD_PACK_TIMEOUT_MS: ${CARD_PACK_TIMEOUT_MS:-15000}
 
       # ---- settlement worker
       SETTLEMENT_ENABLED: ${SETTLEMENT_ENABLED:-true}

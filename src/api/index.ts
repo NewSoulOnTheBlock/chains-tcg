@@ -15,6 +15,7 @@
 
 // ── Namespaces ──────────────────────────────────────────────────────────────
 export * as auth from './auth.js';
+export * as collection from './collection.js';
 export * as decks from './decks.js';
 export * as lobby from './lobby.js';
 export * as profiles from './profiles.js';
@@ -54,6 +55,7 @@ export type { AuthMode, RequestOptions } from './http.js';
 
 // ── Domain types, flat, so consumers do not need the namespace to annotate ──
 export type { AuthProfile, MeResponse, NonceChallenge, TokenResponse, VerifyResponse } from './auth.js';
+export type { CollectionView, OwnedCards, SyncResult, UnownedCardIssue } from './collection.js';
 export type { Deck, DeckIssue } from './decks.js';
 export type {
   CreatedMatch,

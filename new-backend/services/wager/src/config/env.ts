@@ -126,10 +126,16 @@ export const wagerEnvSchema = z.object({
    * rpc-proxy cannot serve this — it is pinned to a different network.
    */
   CARD_PACK_RPC_URL: z.string().url().default('https://rpc.mainnet.chain.robinhood.com'),
-  /** Block CardPack was deployed at. Scanning below it only wastes requests. */
+  /**
+   * Block CardPack was deployed at. Scanning below it only wastes requests, and
+   * public nodes prune old state, so a lower bound is worth setting.
+   */
   CARD_PACK_DEPLOY_BLOCK: z.coerce.number().int().min(0).default(0),
-  /** Blocks per `eth_getLogs` window. The full range is always covered. */
-  CARD_PACK_LOG_WINDOW: z.coerce.number().int().min(1_000).max(1_000_000).default(50_000),
+  /**
+   * Blocks per `eth_getLogs` window, used only when the node refuses the whole
+   * range in one request. The full span is always covered either way.
+   */
+  CARD_PACK_LOG_WINDOW: z.coerce.number().int().min(1_000).max(10_000_000).default(500_000),
   /** Bound on the `nextId` fallback scan. Exceeding it fails the sync, never truncates it. */
   CARD_PACK_MAX_TOKEN_SCAN: z.coerce.number().int().min(1).max(200_000).default(20_000),
   CARD_PACK_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(15_000),

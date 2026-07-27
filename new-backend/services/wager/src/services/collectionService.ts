@@ -21,7 +21,13 @@ import type { PoolClient } from 'pg';
 import { AppError, getPool, withTransaction } from '../platform/shared.js';
 import type { AuthContext } from '../platform/shared.js';
 import { log } from '../platform/logger.js';
-import { lastSyncedAt, listOwnedCards, reconcileChainCards } from '../db/ownership.js';
+import {
+  listOwnedCards,
+  readSyncState,
+  reconcileChainCards,
+  recordSync,
+  type OwnedCardRow,
+} from '../db/ownership.js';
 import { assertMatchesChain, cardIdForIndex } from '../nft/cardCatalogue.js';
 import type { CardPackReader } from '../chain/cardPackReader.js';
 
@@ -30,44 +36,93 @@ export interface CollectionServiceDeps {
   cardPack: CardPackReader | null;
 }
 
+/**
+ * What the caller owns, and whether the server has ever looked.
+ *
+ * THE `synced` FLAG IS NOT DECORATION. An empty `cards` means two different
+ * things, and the difference is the difference between two messages to the
+ * player:
+ *
+ *   `synced: false`  the server has never enumerated this wallet. The honest
+ *                    thing to say is "sync your collection". Saying "you own no
+ *                    cards" here is the server asserting something false about
+ *                    the player's property, typically right before refusing
+ *                    them a ranked seat over it.
+ *   `synced: true`   the server enumerated the wallet and it held nothing. Now
+ *                    "you own no cards" is true, and prompting for another sync
+ *                    is just noise.
+ *
+ * Before 0011 these were indistinguishable — `syncedAt` came from
+ * `max(updated_at)` over the ownership rows, which is null in both cases.
+ *
+ * BACKWARD COMPATIBILITY: `cards`, `distinct`, `total` and `syncedAt` keep their
+ * names, types and meanings; `synced` and `syncedBlock` are additive. The only
+ * change a existing client can observe is that `syncedAt` is now null in
+ * strictly fewer cases — it was already null for a synced-but-empty profile, and
+ * now it is not.
+ */
 export interface CollectionView {
-  /** Card id → quantity owned. Cards not owned are absent, never zero. */
+  /** Card id → quantity owned, summed across chain and booster rows. Absent, never zero. */
   cards: Record<string, number>;
   /** Distinct card ids owned. */
   distinct: number;
   /** Cards owned in total, counting duplicates. */
   total: number;
   /**
-   * When this snapshot was last written, or null if it never has been.
+   * Whether a chain sync has EVER completed for this profile.
    *
-   * Derived from `max(updated_at)`, so it is also null for a player who owns
-   * nothing — "never synced" and "synced, owns nothing" are indistinguishable
-   * until the sync-state table exists. Callers must not treat null as proof of
-   * a stale snapshot.
+   * Read from the existence of the profile's `core.card_ownership_sync` row,
+   * which is written on every successful sync whether or not it found any
+   * cards. This is the field to branch on; the two timestamps below are for
+   * display.
+   */
+  synced: boolean;
+  /**
+   * When the last successful sync committed, ISO-8601, or null if there has
+   * never been one. Null now means exactly `synced === false`.
    */
   syncedAt: string | null;
+  /**
+   * Head block that snapshot is true as of, or null if never synced.
+   *
+   * The chain's own clock. `syncedAt` answers "how long ago by our clock",
+   * which nothing on chain can be compared against; this one composes with
+   * re-orgs, a lagging RPC endpoint, and any second reader.
+   */
+  syncedBlock: number | null;
 }
 
-/** Only ever the caller's own collection. There is no "collection by wallet" route. */
-export async function getMyCollection(auth: AuthContext): Promise<CollectionView> {
-  const rows = await listOwnedCards(getPool(), auth.profileId);
+/** Fold owned rows into the wire shape. Shared so sync and read cannot drift. */
+function viewOf(rows: readonly OwnedCardRow[]): Pick<CollectionView, 'cards' | 'distinct' | 'total'> {
   const cards: Record<string, number> = {};
   let total = 0;
   for (const row of rows) {
     cards[row.cardId] = row.qty;
     total += row.qty;
   }
-  const at = await lastSyncedAt(getPool(), auth.profileId);
+  return { cards, distinct: rows.length, total };
+}
+
+/** Only ever the caller's own collection. There is no "collection by wallet" route. */
+export async function getMyCollection(auth: AuthContext): Promise<CollectionView> {
+  const rows = await listOwnedCards(getPool(), auth.profileId);
+  const state = await readSyncState(getPool(), auth.profileId);
   return {
-    cards,
-    distinct: rows.length,
-    total,
-    syncedAt: at ? at.toISOString() : null,
+    ...viewOf(rows),
+    synced: state !== null,
+    syncedAt: state ? state.syncedAt.toISOString() : null,
+    syncedBlock: state ? state.blockNumber : null,
   };
 }
 
 export interface SyncResult extends CollectionView {
-  /** Head block the snapshot was taken at. */
+  /**
+   * Head block the snapshot was taken at.
+   *
+   * Always equal to `syncedBlock` on a successful sync. Kept under its original
+   * name because clients already read it, and this response predates
+   * `syncedBlock` existing on the shared view.
+   */
   blockNumber: number;
   /** Tokens the address once received but no longer holds. */
   transferredAway: number;
@@ -84,10 +139,24 @@ export interface SyncResult extends CollectionView {
  *      checked before anything is written, every time,
  *   2. enumerate holdings (complete, or an exception — never partial),
  *   3. resolve indexes to card ids, failing closed on an unknown index,
- *   4. reconcile in ONE transaction.
+ *   4. reconcile, record the sync, and re-read the merged collection, in ONE
+ *      transaction.
  *
- * Step 4 is a full reconcile: sold cards are deleted. The chain is the truth and
- * this is a projection of it, not a ledger that only grows.
+ * Step 4 is a full reconcile of the `source = 'chain'` rows: sold cards are
+ * deleted. The chain is the truth and this is a projection of it, not a ledger
+ * that only grows. Booster-granted rows are a different partition and are left
+ * alone — they were never on chain, so their absence from a chain snapshot means
+ * nothing (0011).
+ *
+ * The sync-state row is written INSIDE that transaction, not after it. Written
+ * after, a crash between commit and update leaves the collection replaced and
+ * the snapshot pointer claiming an older block — or, on a first sync, claiming
+ * the player has never synced while their cards sit in the table.
+ *
+ * The returned collection is RE-READ rather than assembled from `counts`.
+ * `counts` is the chain half only; a player with booster cards owns more than it
+ * describes, and returning it would make a sync response contradict the very
+ * next `GET /wager/collection`.
  */
 export async function syncMyCollection(
   deps: CollectionServiceDeps,
@@ -115,13 +184,29 @@ export async function syncMyCollection(
     counts.set(cardId, (counts.get(cardId) ?? 0) + 1);
   }
 
-  const summary = await withTransaction((client: PoolClient) =>
-    reconcileChainCards(client, { profileId: auth.profileId, counts }),
-  );
+  const outcome = await withTransaction(async (client: PoolClient) => {
+    const summary = await reconcileChainCards(client, { profileId: auth.profileId, counts });
+    const syncedAt = await recordSync(client, {
+      profileId: auth.profileId,
+      // The CONTRACT, not the player's wallet: the wallet is already
+      // `core.profiles.address` and cannot change for a profile, whereas
+      // repointing CARD_PACK_ADDRESS makes every stored snapshot a statement
+      // about a different collection.
+      address: reader.contractAddress,
+      chainId: reader.chainId,
+      blockNumber: snapshot.blockNumber,
+      tokenCount: snapshot.tokens.length,
+    });
+    const rows = await listOwnedCards(client, auth.profileId);
+    return { summary, syncedAt, rows };
+  });
+
+  const { summary } = outcome;
 
   log().info('card_ownership_synced', {
     profile_id: auth.profileId,
     chain_contract: reader.contractAddress,
+    chain_id: reader.chainId,
     block_number: snapshot.blockNumber,
     tokens_held: snapshot.tokens.length,
     tokens_transferred_away: snapshot.transferredAway,
@@ -130,14 +215,11 @@ export async function syncMyCollection(
     cards_removed: summary.removedCards,
   });
 
-  const cards: Record<string, number> = {};
-  for (const [cardId, qty] of counts) cards[cardId] = qty;
-
   return {
-    cards,
-    distinct: summary.distinctCards,
-    total: summary.totalCards,
-    syncedAt: new Date().toISOString(),
+    ...viewOf(outcome.rows),
+    synced: true,
+    syncedAt: outcome.syncedAt.toISOString(),
+    syncedBlock: snapshot.blockNumber,
     blockNumber: snapshot.blockNumber,
     transferredAway: snapshot.transferredAway,
     removed: summary.removedCards,

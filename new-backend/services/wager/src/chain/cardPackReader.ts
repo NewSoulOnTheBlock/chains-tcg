@@ -82,22 +82,28 @@ const CARD_PACK_ABI = [
     inputs: [{ name: '', type: 'uint256' }],
     outputs: [{ name: '', type: 'uint256' }],
   },
-  {
-    type: 'function',
-    name: 'isFoil',
-    stateMutability: 'view',
-    inputs: [{ name: '', type: 'uint256' }],
-    outputs: [{ name: '', type: 'bool' }],
-  },
 ] as const;
+
+/**
+ * Concurrent `eth_call`s in flight.
+ *
+ * Two per candidate token (`ownerOf`, `cardOf`) against an endpoint this project
+ * does not operate, so it is bounded rather than a `Promise.all` fan-out.
+ */
+const CALL_CONCURRENCY = 8;
 
 const TRANSFER_TOPIC = toEventSelector('Transfer(address,address,uint256)');
 
-/** One token the address holds right now. */
+/**
+ * One token the address holds right now.
+ *
+ * Foil-ness is deliberately not read: `core.card_ownership` has no concept of
+ * it, a foil and a non-foil are the same playable card, and asking would add a
+ * third `eth_call` per token for something nothing consumes.
+ */
 export interface HeldToken {
   tokenId: bigint;
   cardIndex: number;
-  foil: boolean;
 }
 
 export interface HoldingsSnapshot {
@@ -115,7 +121,11 @@ export interface CardPackReaderOptions {
   contract: string;
   /** Block CardPack was deployed at. Scanning below it only wastes requests. */
   deployBlock: number;
-  /** Blocks per `eth_getLogs` window. Public nodes cap the span per request. */
+  /**
+   * Blocks per `eth_getLogs` window, used ONLY if the node refuses the whole
+   * range in one request. Robinhood Chain's public endpoint currently serves
+   * the full history in a single ~300ms call, so this is the slow path.
+   */
   logWindow: number;
   /**
    * Upper bound on tokens examined in the `nextId` fallback. Exceeding it throws
@@ -147,6 +157,20 @@ export class CardPackReader {
 
   get contractAddress(): string {
     return this.contract.toLowerCase();
+  }
+
+  /**
+   * The chain this reader is pinned to.
+   *
+   * Exposed because `core.card_ownership_sync` stores it alongside the contract
+   * address: a contract address on its own does not identify a contract, and a
+   * snapshot that cannot say which chain it came from cannot be invalidated when
+   * the deployment is repointed. This is the REQUIRED id from configuration, and
+   * `requireChain()` refuses to read anything if the endpoint disagrees with it,
+   * so the recorded value can never be a guess.
+   */
+  get chainId(): number {
+    return this.opts.chainId;
   }
 
   private async rpc<T>(method: string, params: unknown[]): Promise<T> {
@@ -218,17 +242,9 @@ export class CardPackReader {
     this.chainVerified = true;
   }
 
-  private async callContract<TName extends (typeof CARD_PACK_ABI)[number]['name']>(
-    functionName: TName,
-    args: readonly unknown[],
-  ): Promise<unknown> {
-    const data = encodeFunctionData({
-      abi: CARD_PACK_ABI,
-      functionName,
-      args: args as never,
-    });
-    const raw = await this.rpc<Hex>('eth_call', [{ to: this.contract, data }, 'latest']);
-    return decodeFunctionResult({ abi: CARD_PACK_ABI, functionName, data: raw });
+  /** One `eth_call` against the contract. The caller decodes. */
+  private async ethCall(data: Hex): Promise<Hex> {
+    return this.rpc<Hex>('eth_call', [{ to: this.contract, data }, 'latest']);
   }
 
   async getBlockNumber(): Promise<number> {
@@ -239,19 +255,34 @@ export class CardPackReader {
   /** Immutable in the contract, so this is the mapping's anchor. */
   async cardCount(): Promise<number> {
     await this.requireChain();
-    return Number((await this.callContract('cardCount', [])) as bigint);
+    const raw = await this.ethCall(
+      encodeFunctionData({ abi: CARD_PACK_ABI, functionName: 'cardCount' }),
+    );
+    return Number(
+      decodeFunctionResult({ abi: CARD_PACK_ABI, functionName: 'cardCount', data: raw }),
+    );
   }
 
   /** One past the highest minted token id. */
   async nextId(): Promise<bigint> {
     await this.requireChain();
-    return (await this.callContract('nextId', [])) as bigint;
+    const raw = await this.ethCall(
+      encodeFunctionData({ abi: CARD_PACK_ABI, functionName: 'nextId' }),
+    );
+    return decodeFunctionResult({ abi: CARD_PACK_ABI, functionName: 'nextId', data: raw });
   }
 
   /** Null when the token does not exist — `ownerOf` reverts, which surfaces as an RPC error. */
   private async ownerOf(tokenId: bigint): Promise<string | null> {
     try {
-      const owner = (await this.callContract('ownerOf', [tokenId])) as Address;
+      const raw = await this.ethCall(
+        encodeFunctionData({ abi: CARD_PACK_ABI, functionName: 'ownerOf', args: [tokenId] }),
+      );
+      const owner: Address = decodeFunctionResult({
+        abi: CARD_PACK_ABI,
+        functionName: 'ownerOf',
+        data: raw,
+      });
       return owner.toLowerCase();
     } catch {
       return null;
@@ -259,47 +290,84 @@ export class CardPackReader {
   }
 
   private async cardOf(tokenId: bigint): Promise<number> {
-    return Number((await this.callContract('cardOf', [tokenId])) as bigint);
+    const raw = await this.ethCall(
+      encodeFunctionData({ abi: CARD_PACK_ABI, functionName: 'cardOf', args: [tokenId] }),
+    );
+    return Number(decodeFunctionResult({ abi: CARD_PACK_ABI, functionName: 'cardOf', data: raw }));
   }
 
-  private async isFoil(tokenId: bigint): Promise<boolean> {
-    return (await this.callContract('isFoil', [tokenId])) as boolean;
+  /** One `eth_getLogs` for `Transfer(*, owner, *)` over an explicit block span. */
+  private async transferLogsTo(
+    topicTo: string,
+    fromBlock: number,
+    toBlock: number,
+  ): Promise<bigint[]> {
+    const logs = await this.rpc<Array<{ topics?: string[] }>>('eth_getLogs', [
+      {
+        address: this.contract,
+        fromBlock: `0x${fromBlock.toString(16)}`,
+        toBlock: `0x${toBlock.toString(16)}`,
+        topics: [TRANSFER_TOPIC, null, topicTo],
+      },
+    ]);
+    const out: bigint[] = [];
+    for (const entry of logs ?? []) {
+      // ERC721 indexes all three parameters, so the token id is topics[3].
+      // (An ERC20 Transfer carries the value in `data` and has no topics[3] —
+      // filtering by contract address already excludes those.)
+      const tokenTopic = entry.topics?.[3];
+      if (typeof tokenTopic === 'string') out.push(BigInt(tokenTopic));
+    }
+    return out;
   }
 
   /**
    * Every token id the address has ever been sent, via `Transfer` logs.
    *
-   * The full range is scanned in windows. Every window is logged with its
-   * bounds, so an operator can see exactly what was covered — a range that
-   * silently stopped early would look identical to a player who sold everything.
+   * One request for the whole range first. Robinhood Chain's public endpoint
+   * serves the entire history of this contract in a single call, and windowing
+   * it unconditionally turned a 300ms read into a 100s one — 400-odd sequential
+   * requests, on a route a player is waiting on.
+   *
+   * Windowing is the fallback for a node that refuses the span. If a WINDOW
+   * fails, this throws: the caller reconciles destructively, so a scan that
+   * stopped early is indistinguishable from a player who sold everything.
+   * Nothing here silently caps a range, and every path logs the bounds it
+   * actually covered.
    */
   private async candidateTokenIds(owner: string, head: number): Promise<Set<bigint>> {
     const topicTo = pad(getAddress(owner), { size: 32 }).toLowerCase();
-    const candidates = new Set<bigint>();
     const from = Math.max(0, this.opts.deployBlock);
-    let windows = 0;
 
+    try {
+      const ids = await this.transferLogsTo(topicTo, from, head);
+      log().debug('cardpack_log_scan', {
+        from_block: from,
+        to_block: head,
+        windows: 1,
+        candidates: ids.length,
+      });
+      return new Set(ids);
+    } catch (err) {
+      if (from >= head) throw err;
+      log().warn('cardpack_log_span_rejected', {
+        from_block: from,
+        to_block: head,
+        fallback: 'windowed_scan',
+        window: this.opts.logWindow,
+      });
+    }
+
+    const candidates = new Set<bigint>();
+    let windows = 0;
     for (let start = from; start <= head; start += this.opts.logWindow) {
       const end = Math.min(start + this.opts.logWindow - 1, head);
-      const logs = await this.rpc<Array<{ topics?: string[] }>>('eth_getLogs', [
-        {
-          address: this.contract,
-          fromBlock: `0x${start.toString(16)}`,
-          toBlock: `0x${end.toString(16)}`,
-          topics: [TRANSFER_TOPIC, null, topicTo],
-        },
-      ]);
-      for (const entry of logs ?? []) {
-        // ERC721 indexes all three parameters, so the token id is topics[3].
-        // (An ERC20 Transfer carries the value in `data` and has no topics[3] —
-        // filtering by contract address already excludes those.)
-        const tokenTopic = entry.topics?.[3];
-        if (typeof tokenTopic === 'string') candidates.add(BigInt(tokenTopic));
-      }
+      // Deliberately not caught: a failed window means an incomplete answer.
+      for (const id of await this.transferLogsTo(topicTo, start, end)) candidates.add(id);
       windows += 1;
     }
 
-    log().debug('cardpack_log_scan', {
+    log().info('cardpack_log_scan_windowed', {
       from_block: from,
       to_block: head,
       windows,
@@ -357,24 +425,36 @@ export class CardPackReader {
       candidates = await this.candidatesByScan();
     }
 
+    // Sorted so a snapshot is reproducible for support.
+    const sorted = [...candidates].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     const tokens: HeldToken[] = [];
     let transferredAway = 0;
 
-    // Sorted so a snapshot is reproducible for support, and serialised so a
-    // public endpoint is not hammered with an unbounded fan-out.
-    for (const tokenId of [...candidates].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
-      const holder = await this.ownerOf(tokenId);
-      if (holder !== normalised) {
-        transferredAway += 1;
-        continue;
-      }
-      tokens.push({
-        tokenId,
-        cardIndex: await this.cardOf(tokenId),
-        foil: await this.isFoil(tokenId),
-      });
-    }
+    // Bounded concurrency, not `Promise.all`: a player with a large collection
+    // must not turn one request into hundreds of simultaneous ones against an
+    // endpoint this project does not operate.
+    let cursor = 0;
+    const workers = Array.from(
+      { length: Math.min(CALL_CONCURRENCY, sorted.length) },
+      async () => {
+        for (;;) {
+          const i = cursor++;
+          const tokenId = sorted[i];
+          if (tokenId === undefined) return;
+          // Confirmed against the CURRENT owner: these are tradeable NFTs, and
+          // a token seen in a Transfer log may since have been sold.
+          const holder = await this.ownerOf(tokenId);
+          if (holder !== normalised) {
+            transferredAway += 1;
+            continue;
+          }
+          tokens.push({ tokenId, cardIndex: await this.cardOf(tokenId) });
+        }
+      },
+    );
+    await Promise.all(workers);
 
+    tokens.sort((a, b) => (a.tokenId < b.tokenId ? -1 : a.tokenId > b.tokenId ? 1 : 0));
     return { blockNumber: head, tokens, transferredAway };
   }
 }

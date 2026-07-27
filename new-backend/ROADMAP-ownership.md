@@ -1,113 +1,145 @@
-# Card ownership — the missing foundation for boosters and ranked
+# Card ownership — status and what remains
 
-Status: **not built.** This file records exactly what has to exist before ranked
-play or any prize can be run, so the work can be picked up directly.
+Status: **built and enforced.** Ownership is now server-side, derived from
+on-chain NFT holdings, and ranked/wager seating is gated on it.
 
-## Why this blocks everything above it
+This file previously described a plan built on the wrong foundation. That is
+corrected below, and the correction is kept visible on purpose — the mistake is
+instructive and repeating it would be easy.
 
-Card ownership currently lives in the browser:
+## The correction: where cards actually come from
 
-```
-localStorage["ocva.collection.<name>"]  ->  {"node_sol":20, ...}
-```
+The original plan assumed the backend's own booster flow
+(`POST /wager/boosters/intents` → `confirm` → `redeem/digital`) was how players
+obtain cards, and proposed recording ownership inside `redeemTicket()`.
 
-There is no `card_ownership` table anywhere in this backend (verified: no such
-table in `db/migrations/`, no such query in any service). `redeem/digital`
-generates card ids and writes a redemption row, but never records *who owns
-what*, so ownership cannot be queried, let alone enforced.
+That is not the live path, and it never was. Verified against chain 4663:
 
-Consequences today, all confirmed against the live API:
+- `CardPack`, an ERC-721, is **deployed and in use** at
+  `0x57200fb533b33823f8bd2ac8f3649e3b643830b3`.
+  `cardCount() = 80`, `packPrice() = 0.0035 ETH`, `cardsPerPack() = 5` (+1 foil).
+- The client calls `mintPack()` **directly, through the player's own wallet**,
+  and decodes the `PackMinted(buyer, tokenIds, cardIndexes, foilTokenId)` event
+  from the confirmed receipt. See `src/pack-evm.ts`, which states outright that
+  the backend's booster tickets are "two different products".
+- The backend's booster product reports `mintingEnabled: false` and has never
+  issued anything.
 
-- A ranked match created with a **starter deck** is accepted — the server does
-  no ownership check at all; `mode` is stored as a label and nothing else.
-- Any player can open devtools, grant themselves the entire catalogue, and
-  enter ranked with cards they never obtained.
-- `mintingEnabled: false`, so nobody can legitimately obtain booster cards
-  anyway. Opening ranked today would mean *only* the devtools path qualifies.
+So ownership recorded at `redeemTicket()` would have contained no card any
+player actually holds. The lesson worth keeping: **the acquisition path was
+verified on-chain, not inferred from the backend's own code.** The backend
+described a product that was not the one running.
 
-Enforcing this in the client is not a mitigation — the client runs on the
-player's machine. With a prize attached, the payoff for editing one
-localStorage value exceeds the cost of playing honestly, which makes this the
-highest-value attack surface in the product.
+## How ownership works now
 
-## The work, in dependency order
+Cards a player holds are the ERC-721 tokens their authenticated wallet owns.
+The wager service reads them and reconciles `core.card_ownership`; the game
+service reads that table when seating.
 
-### 1. Ownership table — `db/migrations/0010_card_ownership.sql`
+**Card index → card id.** The on-chain `cardIndex` space is the non-Node
+catalogue in catalogue order: `Object.values(CARDS).filter(c => c.type !== 'node')`,
+array position = index, 80 entries. This is generated into
+`public/nft/index.json` by `scripts/gen-nft-metadata.mts`, and that same
+derivation is what the contract's `baseURI` serves as token metadata.
+`services/wager/src/nft/cardIndex.ts` is a flat 80-entry list taken from it.
 
-```sql
-create table core.card_ownership (
-  profile_id  bigint      not null references core.profiles(id) on delete cascade,
-  card_id     text        not null,
-  qty         int         not null check (qty >= 0),
-  updated_at  timestamptz not null default now(),
-  primary key (profile_id, card_id)
-);
-create index card_ownership_profile_idx on core.card_ownership (profile_id);
-```
+This mapping is the most fragile thing in the whole feature. **Inserting a card
+into `src/cards.ts` shifts every index after it, and every stored ownership row
+silently becomes a different card.** It is guarded in three places: a test that
+re-derives the list from `src/cards.ts` and compares element by element, an
+opt-in live check against `cardCount()`, and `assertMatchesChain()` which runs
+on every sync before any write. `cardCount` is `immutable` in the contract, so a
+mismatch always means the manifest moved, never the chain.
 
-This becomes the single source of truth. The client's localStorage copy stays,
-but only as a display cache — never as an input to a decision.
+**Enumeration.** `eth_getLogs` on `Transfer` filtered to the holder gives
+candidate token ids; each is confirmed with `ownerOf` so tokens the player has
+**sold or transferred away** are dropped; `cardOf(tokenId)` gives the index.
+These are tradeable NFTs, so a stale snapshot is an exploit rather than a
+cosmetic lag.
 
-### 2. Write ownership when a booster is redeemed
+**Reconcile, not increment.** A sync sets the profile's chain-sourced holdings
+to exactly what the chain says and removes what is no longer held. An
+additive-only sync would let a player mint, sync, sell, and keep playing the
+cards forever. A partial enumeration therefore **throws rather than returning a
+short list** — under a full reconcile, a truncated read deletes holdings.
 
-`services/wager/src/services/boosterService.ts` — `redeemTicket()` (line ~375)
-already generates `cardIds` inside a transaction. Add, **in that same
-transaction**, one upsert per card:
+**Reading it back:** `GET /wager/collection` (own collection only, address comes
+from the authenticated context, never from a request field — audit H-2),
+`POST /wager/collection/sync` to refresh, rate-limited because each call is a
+chain scan.
 
-```sql
-insert into core.card_ownership (profile_id, card_id, qty)
-values ($1, $2, 1)
-on conflict (profile_id, card_id)
-  do update set qty = core.card_ownership.qty + 1, updated_at = now();
-```
+## Enforcement
 
-Same transaction is not optional: a split would hand out cards whose ownership
-was never recorded, and the failure would be silent.
+`services/game/src/lib/seating.ts` gates seating on `core.card_ownership`:
 
-### 3. Fill the card pool
+- **By quantity.** A deck running 3 copies requires `qty >= 3`. Checking mere
+  presence would let one pull unlock a full playset.
+- **Basic Nodes are exempt** — granted to everyone, and not part of the 80-card
+  index space.
+- **Denylist, not allowlist.** `casual` is the only exempt mode. `wager` is
+  gated too: its value at risk is higher than ranked's, so exempting it would
+  leave the one mode where cheating pays cash as the one mode unchecked. A mode
+  added later is gated until someone excuses it on purpose.
+- **Both seats, and the host again at join time.** `seat0_deck_id` pins *which*
+  deck, not its contents, and `core.decks.cards` stays editable while a match
+  sits open — so a host could open a ranked match with a legal deck, swap in the
+  full catalogue, and wait. The re-check closes that. Its failures return
+  `409 { reason: 'host_deck_unowned' }` with no card names, because a decklist
+  must never cross the table (H-7).
+- The join path reads its mode from the `FOR UPDATE`-locked `game.matches` row,
+  never from the request body.
+- Failure is `400` with `reason: 'unowned_cards'` and one `issues` entry per
+  card (`cardId`, `need`, `owned`). The client already branches on
+  `err.reason` and renders `err.issues` individually — this needed no client
+  change.
 
-`BOOSTER_CARD_POOL` is empty in `.env.example` and in the deployed `.env`, which
-is why digital redemption answers 503 rather than inventing card ids. Populate it
-with the non-Node card ids from `src/cards.ts`. The code path already exists —
-this is configuration, not development.
+Ownership is `qty > 0`, never `EXISTS(...)`. A zero row records history, not
+possession.
 
-### 4. Enforce ownership on ranked seating
+## Deliberately not done
 
-`services/game/src/lib/seating.ts` — `assertSeatableDeck()` (line 18) currently
-validates format only. Give it the match mode and, for ranked, verify every
-non-Node card in the deck against `core.card_ownership` for that profile:
+**`BOOSTER_CARD_POOL` stays empty.** Populating it switches on a second,
+server-side card source that rolls different cards from the NFTs players
+actually hold, into the same key space, with a prize attached. Two competing
+ownership truths is a worse failure than one dormant product. Digital redemption
+answering 503 is the correct state.
 
-```ts
-if (mode === 'ranked') {
-  // basic Nodes are granted to everyone and are exempt
-  // missing cards -> AppError.badRequest(..., { reason: 'unowned_cards', issues })
-}
-```
+`redeemTicket()` does write ownership (`source = 'booster'`) for the day that
+product ships. It is unreachable while the pool is empty.
 
-The client is already shaped for this: it branches on `err.reason` and renders
-`err.issues` individually, so a new reason surfaces correctly with no client
-change. Enforce it at seating rather than at `activate()` — a player may
-legitimately keep a casual deck active that would not qualify for ranked.
+## What still blocks a prize
 
-### 5. Turn minting on
+1. **Nobody can field a deck yet.** Decks are 60 cards, max 4 copies of any
+   non-basic. With 6 cards per pack and duplicates possible, a legal ranked deck
+   needs roughly 7-10 packs per player. Chain state as of this writing:
+   `nextId = 6` — **one pack has ever been minted.** Ranked is correctly gated
+   but will stay empty until packs actually sell.
 
-`services/wager/src/bootstrap.ts` wires `UnavailableTicketMinter`. Until a real
-minter replaces it, steps 1–4 are inert: nobody can obtain a card through the
-intended path, so ranked would remain empty of legitimate entrants.
+2. **No ladder exists.** Rating store, seasons, queue and pairer, placements, a
+   standings read model — none of it is built server-side.
+   `src/ranked-client.ts` documents the endpoints the client expects.
 
-### 6. Ladder (separate work)
+3. **The money path points at the wrong network.** The production RPC proxy
+   answers `eth_chainId` with `0xaa36a7` (Sepolia, 11155111) while the game,
+   the contracts and the sign-in chain are all 4663. Compose defaults are
+   Sepolia too (`EVM_CHAIN_ID: 11155111`). Escrow deposit verification and
+   settlement therefore watch a network no player transacts on. The ownership
+   sync sidesteps this with its own 4663-pinned reader, which verifies
+   `eth_chainId` once per process and refuses to run otherwise; the wager money
+   path does not.
 
-Ranked also needs a rating store, seasons, a queue and pairer, placements and a
-standings read model before any weekly award can be computed. `src/ranked-client.ts`
-documents the endpoints the client expects. None of it exists server-side.
+4. **Escrow custody.** `escrows.deposit_address` is a hot-wallet EOA whose key
+   is an environment variable — separate from the `WagerEscrow` contract that
+   *is* deployed at `0xdbc49ff2cf44d2ba1a844d80d1f82d472440cc3d` on 4663 and
+   goes unused. No payout has ever executed on a real chain.
 
-## Until then
+5. **A live Alchemy API key is committed** in `contracts/deployment.json`.
+   Rotate it. Nothing in the backend uses it — the ownership reader uses
+   Robinhood's public keyless endpoint — but it is readable by anyone with the
+   repo.
 
-Keep ranked and wager gated in the client, as they are now. The gate is honest
-signposting, not a security control — the security control is step 4, and it
-does not exist yet.
-
-Wager has a second, independent blocker: `escrows.deposit_address` is an
-externally-owned account, not a contract (`eth_getCode` returns `0x`). Stakes
-would sit in a hot wallet whose key is an environment variable, and no payout
-has ever executed against a real chain.
+6. **Pack randomness is grindable.** `CardPack._rand` derives from
+   `block.prevrandao`, `block.timestamp` and `msg.sender`. `mintPack` is
+   callable from a contract, so a caller can simulate the roll and revert on a
+   bad one, paying only gas. Acceptable for a low-stakes game, as the contract's
+   own comment says; worth reconsidering before real value rides on pulls.

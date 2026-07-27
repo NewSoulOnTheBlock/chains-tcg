@@ -17,11 +17,11 @@ import {
   type RevealedCard,
 } from './pack-evm';
 import { connectRobinhoodChain, shortAddr } from './wallet';
-import { grantCards } from './collection';
+import { syncAfterMint, useCollection } from './collection';
 import { formatEther, type Address } from 'viem';
 import {
   ArrowLeft, Check, Copy, SoundOn, SoundOff, Diamond, DiamondOutline,
-  Warning, Star,
+  Warning, Star, Hourglass,
 } from './icons';
 
 // ── Transaction state machine ───────────────────────────────────────────────
@@ -88,7 +88,10 @@ function mapMintError(e: any): ErrBox {
 }
 
 // ── Root page ───────────────────────────────────────────────────────────────
-export function BoostersPage({ myName, onBack }: { myName: string; onBack: () => void }) {
+// `myName` is gone on purpose: ownership is no longer keyed by display name.
+// The mint goes to the connected wallet and the server derives the collection
+// from the session's proven address, so this page needs no identity prop.
+export function BoostersPage({ onBack }: { onBack: () => void }) {
   const mobile = useIsMobile();
 
   // Wallet / network / funds — authoritative live values.
@@ -130,7 +133,7 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
         if (p?.hash) {
           setHash(p.hash); setTx('confirming');
           resumePack(p.hash)
-            .then((pulled) => { setCards(pulled); try { grantCards(myName, pulled.map((c) => c.id)); } catch {} setTx('confirmed'); localStorage.removeItem(PENDING_KEY); })
+            .then((pulled) => { setCards(pulled); void syncAfterMint(pulled.map((c) => c.id)); setTx('confirmed'); localStorage.removeItem(PENDING_KEY); })
             .catch((e) => { setErrBox(mapMintError(e)); setTx('failed'); localStorage.removeItem(PENDING_KEY); });
         }
       }
@@ -195,7 +198,12 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
         setTx('confirming');
       });
       setCards(pulled);
-      try { grantCards(myName, pulled.map((c) => c.id)); } catch { /* non-fatal */ }
+      // The mint is a real on-chain transaction, so the SERVER is what decides
+      // these cards are yours — the client no longer grants itself anything.
+      // `syncAfterMint` shows them immediately and reconciles with the chain in
+      // the background, tolerating indexer lag. Fire and forget: a sync failure
+      // must never turn a successful mint into an error screen.
+      void syncAfterMint(pulled.map((c) => c.id));
       try { localStorage.removeItem(PENDING_KEY); } catch {}
       setTx('confirmed');
     } catch (e) {
@@ -872,6 +880,16 @@ function RevealOverlay({ cards, tx, setTx, onDone, onAnother, priceEth }: {
   const allDone = flipped.every(Boolean);
   const n = cards.length;
 
+  // Ownership is recorded server-side from the chain, and indexing lags the
+  // receipt slightly. Say which state we are in rather than leaving the player
+  // wondering whether the pack "counted".
+  const collection = useCollection();
+  const ownershipNote = collection.pendingCount > 0
+    ? 'Confirming ownership on-chain — your cards are minted and will appear in your collection shortly.'
+    : collection.source === 'signed-out'
+      ? null
+      : 'Ownership confirmed — these cards are in your collection.';
+
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center', gap: 22, padding: 20,
@@ -884,6 +902,15 @@ function RevealOverlay({ cards, tx, setTx, onDone, onAnother, priceEth }: {
         <div style={{ color: C.textMid, fontSize: 13, marginTop: 4 }}>
           {allDone ? `${n} cards minted to your wallet` : 'Reveal your cards — the foil comes last.'}
         </div>
+        {allDone && ownershipNote && (
+          <div role="status" style={{ color: collection.pendingCount > 0 ? C.textLo : C.textMid, fontSize: 11.5, marginTop: 6,
+            display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
+            <span aria-hidden style={{ display: 'inline-flex', color: collection.pendingCount > 0 ? C.gold : C.textLo }}>
+              {collection.pendingCount > 0 ? <Hourglass size={12} /> : <Check size={12} />}
+            </span>
+            {ownershipNote}
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center', maxWidth: 1100, perspective: 1200 }}>
