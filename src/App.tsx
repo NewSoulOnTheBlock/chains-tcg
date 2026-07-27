@@ -7,7 +7,7 @@ import { SocketIO } from 'boardgame.io/multiplayer';
 import { Plaza } from './Plaza';
 import { ChainsTCG } from './Game';
 import { ChainsBoard } from './Board';
-import { CARDS, COLOR_META, COLORS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MAX_COPIES_NONBASIC, isBasicNode, type Color, type CardType, type CardDef, type DeckIssue, type DeckValidation } from './cards';
+import { CARDS, COLOR_META, COLORS, STARTER_DECKS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MAX_COPIES_NONBASIC, isBasicNode, type Color, type CardType, type CardDef, type DeckIssue, type DeckValidation } from './cards';
 import {
   listProfilesApi, getProfileApi, getMyProfileApi, updateMyProfileApi, getMatchHistoryApi,
   formatRecord, type Profile,
@@ -4317,6 +4317,31 @@ function Lobby({
     } finally { setBusy(null); }
   }
 
+  /**
+   * Adopt one of the 5 free starter decks: save it, then activate it.
+   *
+   * The server attaches your ACTIVE deck to a match and takes no deck in the
+   * request, so "playing a starter deck" now means "having a starter deck as
+   * your active deck". Each starter is already a legal 60, so `activate()`
+   * accepts it unchanged.
+   */
+  async function useStarterDeck(color: Color) {
+    clearErrors();
+    setBusy('starter');
+    try {
+      const label = `${COLOR_META[color].name} Starter`;
+      // Re-adopting a starter you already saved must not 409 on the name.
+      const existing = myDecks.find((d) => d.name === label);
+      const deck = existing
+        ? await updateDeckApi(existing.id, { cards: STARTER_DECKS[color] })
+        : await createDeckApi(label, STARTER_DECKS[color]);
+      await activateDeckApi(deck.id);
+      await reloadDecks();
+    } catch (e) {
+      report(e);
+    } finally { setBusy(null); }
+  }
+
   async function joinMatch(matchID: string) {
     clearErrors();
     setBusy(matchID);
@@ -4505,6 +4530,18 @@ function Lobby({
 
             <ActiveDeckStrip deck={activeDeck} deckCount={myDecks.length} onOpenDecks={onDeckScreen} />
 
+            {/* No active deck? The 5 free starter decks are one click away.
+                They are ordinary 60-card decks, so they go through exactly the
+                same save + activate path as a custom deck — verified against
+                production. This is what makes CASUAL playable without owning
+                a single booster card. */}
+            {!activeDeck && (
+              <StarterDeckPicker
+                busy={busy === 'starter'}
+                onPick={(color) => { void useStarterDeck(color); }}
+              />
+            )}
+
             {centerTab === 'quick' && (
               <QuickMatchPanel busy={busy === 'quick'} onQuickMatch={() => { void quickMatch(); }} />
             )}
@@ -4605,6 +4642,48 @@ function ActiveDeckStrip({ deck, deckCount, onOpenDecks }: {
         </div>
       </div>
       <button onClick={onOpenDecks} style={LOBBY_GHOST_BTN}>{deck ? 'Change' : 'Build a deck'}</button>
+    </div>
+  );
+}
+
+/**
+ * The 5 free starter decks, one click each.
+ *
+ * These are the casual-mode on-ramp: a new player has no booster cards and no
+ * custom deck, and without this the server correctly refuses to seat them
+ * (`no_active_deck`). Picking one saves it as a real deck and makes it active.
+ */
+function StarterDeckPicker({ busy, onPick }: { busy: boolean; onPick: (c: Color) => void }) {
+  return (
+    <div style={{ ...LOBBY_GLASS, padding: 16 }}>
+      <div style={{
+        fontFamily: '"Cinzel", serif', fontSize: 15, fontWeight: 800, letterSpacing: 1.1,
+        color: LOBBY_TOKENS.gold, display: 'flex', alignItems: 'center', gap: 9,
+      }}><DeckIcon size={16} /> FREE STARTER DECKS</div>
+      <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.muted, margin: '7px 0 12px', lineHeight: 1.6 }}>
+        Pick a chain to play casual right away — no boosters needed. You can
+        build your own deck later; this just becomes your active one.
+      </div>
+      <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))' }}>
+        {COLORS.map((c) => {
+          const meta = COLOR_META[c];
+          return (
+            <button key={c} onClick={() => onPick(c)} disabled={busy}
+              title={`Play the ${meta.name} starter deck`}
+              style={{
+                padding: '11px 8px', minHeight: 44, borderRadius: 10, cursor: busy ? 'default' : 'pointer',
+                background: 'rgba(10,15,25,0.75)', color: meta.hex,
+                border: `1px solid ${meta.hex}77`, fontFamily: PROFILE_FONT,
+                fontWeight: 800, fontSize: 12.5, letterSpacing: 0.3, opacity: busy ? 0.6 : 1,
+              }}>
+              {meta.name}
+              <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, marginTop: 3, fontWeight: 600 }}>
+                {DECK_SIZE} cards
+              </div>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

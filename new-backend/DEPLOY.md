@@ -274,13 +274,44 @@ those are expected to point at the frontend host (e.g. Vercel).
 
 The API is a **different origin** from the web app, so every browser call is
 cross-origin. That is already handled: the gateway's `ALLOWED_ORIGINS` names
-`https://ocva.online` and `https://www.ocva.online` exactly.
+`https://ocva.online`, `https://www.ocva.online` and
+`https://chains-tcg.vercel.app` exactly. If the Vercel project's default domain
+is **not** `chains-tcg.vercel.app`, add the real one with the procedure in §2.1
+— otherwise preview deployments fail every request with a CORS error while
+production looks fine.
 
 Set in the Vercel project (Production scope):
 
 ```
 VITE_API_BASE=https://api.ocva.online
 ```
+
+### ⚠ The frontend must ship with the `robinhood` chain slug
+
+Sign-in sends a `chain` slug to `/auth/nonce`, and `core.profiles` is
+`UNIQUE (address, chain)` — **the slug is half the identity.** The app now
+sends `robinhood` (Robinhood Chain, EIP-155 `4663`), derived from the chain id
+the wallet reports after the network switch rather than hardcoded. Migration
+`0009_robinhood_chain.sql` moved every pre-existing `ethereum` profile across.
+
+Until the new bundle is live on Vercel, **a cached or not-yet-redeployed
+frontend still sends `ethereum`** and will silently mint a second, empty
+profile for the same wallet — new id, no decks, no history. The backend does
+not reject the old slug (that would hard-fail sign-in for everyone still on the
+old bundle), so deploying the frontend promptly is what closes the window.
+Watch for stragglers:
+
+```bash
+docker compose exec -T postgres psql -U chains -d chains \
+  -c "select id, address, created_at from core.profiles
+       where chain = 'ethereum' order by created_at desc;"
+```
+
+Rows appearing there **after** the frontend deploy mean a client is still on the
+old bundle. If you would rather fail loudly than accumulate ghosts, delete
+`ethereum` from `CHAINS` in `packages/shared/src/chains.ts` and redeploy — the
+zod enum, the message builder and address normalisation all read that one
+table, so removal is a one-line change and old-slug sign-in becomes a 400.
 
 and for local development, in `.env.development`:
 
