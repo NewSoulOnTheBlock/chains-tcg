@@ -53,10 +53,11 @@ export async function initDb() {
   }
   pool = new pg.Pool({
     connectionString: DATABASE_URL,
-    ssl: DATABASE_URL.includes('render.com') || process.env.PGSSL === '1'
+    ssl: DATABASE_URL.includes('render.com') || DATABASE_URL.includes('supabase') || process.env.PGSSL === '1'
       ? { rejectUnauthorized: false }
       : undefined,
   });
+  try {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS profiles (
       name_key   TEXT PRIMARY KEY,
@@ -158,6 +159,11 @@ export async function initDb() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS booster_tickets_buyer_idx ON booster_tickets (LOWER(buyer_wallet));`);
   console.log('[db] Postgres ready.');
+  } catch (e: any) {
+    console.error('[db] Postgres connection/init failed — falling back to in-memory (data will NOT persist):', e?.message ?? e);
+    try { await pool?.end(); } catch { /* noop */ }
+    pool = null;
+  }
 }
 
 // ── Booster ticket helpers ──────────────────────────────────────────────────
