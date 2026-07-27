@@ -45,6 +45,7 @@ import {
   type IntentRow,
   type RedemptionKind,
 } from '../db/boosters.js';
+import { grantCards, type GrantSummary } from '../db/ownership.js';
 import {
   intentCalldata,
   nonceFromCalldata,
@@ -388,7 +389,9 @@ export async function redeemTicket(
     });
   }
 
-  const cards = await withTransaction(async (client: PoolClient) => {
+  const NOTHING_GRANTED: GrantSummary = { distinctCards: 0, totalCards: 0 };
+
+  const outcome = await withTransaction(async (client: PoolClient) => {
     // Ownership is proven against the reservation row, never a body field.
     const intent = await lockTicketByNumber(client, input.ticketNumber);
     if (!intent) throw AppError.notFound('No such ticket', { reason: 'ticket_not_found' });
@@ -437,10 +440,32 @@ export async function redeemTicket(
         payload: input.address,
       });
     }
-    return cardIds;
+
+    // Ownership is recorded HERE, in the same transaction that hands out the
+    // ids, or it is not recorded at all. A split would produce cards that
+    // nobody owns and nothing would report it.
+    //
+    // `cardIds` is null for every non-digital kind, and only a digital
+    // redemption grants in-game cards: a physical redemption ships real
+    // cardboard and must not touch the collection.
+    const granted = cardIds
+      ? await grantCards(client, { profileId: auth.profileId, cardIds })
+      : NOTHING_GRANTED;
+
+    return { cardIds, granted };
   });
 
-  log().info('ticket_redeemed', { ticket_number: input.ticketNumber, kind: input.kind });
+  const { cardIds: cards, granted } = outcome;
+
+  log().info('ticket_redeemed', {
+    ticket_number: input.ticketNumber,
+    kind: input.kind,
+    // Reconciliation: which collection moved, by how much. The card ids
+    // themselves are already durable on the redemption row.
+    profile_id: auth.profileId,
+    cards_granted: granted.totalCards,
+    distinct_cards_granted: granted.distinctCards,
+  });
   const intent = await getTicketByNumber(getPool(), input.ticketNumber);
   return {
     ticket: view(intent!, await listRedemptions(getPool(), input.ticketNumber)),

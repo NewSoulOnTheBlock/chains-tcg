@@ -45,6 +45,9 @@ export async function setupTestDatabase(): Promise<void> {
 }
 
 export async function truncateAll(): Promise<void> {
+  // `core.profiles` is truncated CASCADE, so anything keyed on a profile —
+  // `core.card_ownership` included — is emptied with it. Naming that table here
+  // would couple every test file in this service to a migration it does not use.
   await query(`
     TRUNCATE wager.shipping, wager.redemptions, wager.booster_intents,
              wager.booster_offers, wager.payouts, wager.deposits, wager.escrows,
@@ -108,6 +111,44 @@ export async function makeEscrow(input: {
      VALUES ($1, $2, $3, '0x1111111111111111111111111111111111111111',
              '0x2222222222222222222222222222222222222222', $4)`,
     [input.id, input.matchId, input.amountBase.toString(), input.status ?? 'funded'],
+  );
+}
+
+/**
+ * A committed booster reservation, ready to be redeemed.
+ *
+ * Goes through the tables rather than through `confirmBoosterPayment` on
+ * purpose: a redemption test should not also have to fake a chain payment. The
+ * offer row exists because `booster_intents.nonce` has a foreign key onto it.
+ */
+export async function makeTicket(input: {
+  ticketNumber: number;
+  profileId: string;
+  ownerAddress?: string;
+  status?: 'reserved' | 'minted' | 'failed';
+}): Promise<void> {
+  const nonce = `nonce-${input.ticketNumber}`;
+  const address = input.ownerAddress ?? '0xdddd000000000000000000000000000000000004';
+  await query(
+    `INSERT INTO wager.booster_offers
+       (nonce, profile_id, address, amount_wei, recipient, status, expires_at)
+     VALUES ($1, $2, $3, '3500000000000000',
+             '0xeeee000000000000000000000000000000000005', 'consumed',
+             now() + interval '1 hour')`,
+    [nonce, input.profileId, address],
+  );
+  await query(
+    `INSERT INTO wager.booster_intents
+       (payment_sig, nonce, profile_id, owner_address, amount_wei, ticket_number, status)
+     VALUES ($1, $2, $3, $4, '3500000000000000', $5, $6)`,
+    [
+      `0xpay${input.ticketNumber}`,
+      nonce,
+      input.profileId,
+      address,
+      input.ticketNumber,
+      input.status ?? 'reserved',
+    ],
   );
 }
 

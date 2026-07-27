@@ -37,7 +37,14 @@ import {
   voidOpenMatch,
   type MatchMode,
 } from '../repo/matches.repo.js';
-import { assertSeatableDeck, buildSetupData, mintCredentials } from '../lib/seating.js';
+import {
+  assertDeckOwnership,
+  assertSeatableDeck,
+  buildSetupData,
+  findUnownedCards,
+  mintCredentials,
+  requiresOwnedCards,
+} from '../lib/seating.js';
 
 const log = createLogger({ service: 'game' }).child({ component: 'lobby' });
 
@@ -123,6 +130,11 @@ export function registerLobbyRoutes(router: IRouter): void {
 
       const deck = await getActiveDeck(profileId);
       assertSeatableDeck(deck);
+      // Seat 0's ownership gate. `body.mode` is safe to read HERE and only
+      // here: it is not a claim about an existing match, it is the mode this
+      // request is about to persist on the row below, so the value checked and
+      // the value stored are the same value.
+      await assertDeckOwnership(profileId, deck, body.mode);
 
       let invitedProfile: string | null = null;
       if (body.invitedDisplayName !== undefined) {
@@ -208,6 +220,14 @@ export function registerLobbyRoutes(router: IRouter): void {
           throw AppError.conflict('That match has no host', { reason: 'match_incomplete' });
         }
 
+        // Seat 1's ownership gate. The mode is `match.mode` — read from the
+        // locked `game.matches` row, INSIDE the transaction that claims the
+        // seat. The join body carries no mode and could not be trusted with
+        // one: this is the difference between an enforced gate and a
+        // suggestion. Reading it under the same lock also means the answer
+        // cannot change between the check and the claim.
+        await assertDeckOwnership(profileId, deck, match.mode, c);
+
         const claimed = await claimSeat1(matchId, profileId, deck.id, c);
         if (!claimed) {
           throw AppError.conflict('That match is no longer open', { reason: 'match_not_open' });
@@ -225,6 +245,34 @@ export function registerLobbyRoutes(router: IRouter): void {
           throw AppError.conflict("The host's deck is unavailable", { reason: 'match_incomplete' });
         }
         const hostCards = Array.isArray(host.cards) ? (host.cards as unknown[]).map(String) : [];
+
+        // Re-check seat 0 as well, against the deck as it stands NOW.
+        //
+        // `seat0_deck_id` pins WHICH deck, not its contents: `core.decks.cards`
+        // stays editable while the match sits open (profile service,
+        // repo/decks.repo.ts `UPDATE core.decks SET ...`). Without this, the
+        // host could create a ranked match with a legitimate deck, edit that
+        // same row to the full catalogue, and wait for someone to join —
+        // checking only the creator at creation time is not enforcement.
+        //
+        // The issues are LOGGED, never returned. `issues` on the seat-0 path
+        // would name the host's cards to their opponent, and this route's whole
+        // premise is that a decklist never crosses the table (H-7): the joiner
+        // is told the match is not seatable and nothing about why.
+        if (requiresOwnedCards(match.mode)) {
+          const hostIssues = await findUnownedCards(match.seat0Profile, hostCards, c);
+          if (hostIssues.length > 0) {
+            log.warn('host deck contains unowned cards; refusing to seat', {
+              matchID: matchId,
+              mode: match.mode,
+              hostProfileId: match.seat0Profile,
+              cards: hostIssues.map((i) => `${i.cardId} ${i.owned}/${i.need}`),
+            });
+            throw AppError.conflict('That match can no longer be started', {
+              reason: 'host_deck_unowned',
+            });
+          }
+        }
 
         const joinerName = await getDisplayName(profileId, c);
         if (joinerName === null) throw AppError.notFound('Profile not found');

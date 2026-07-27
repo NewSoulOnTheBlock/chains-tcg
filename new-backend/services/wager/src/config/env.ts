@@ -87,6 +87,11 @@ export const wagerEnvSchema = z.object({
   /**
    * Card ids a digital redemption may roll. Empty means digital redemption is
    * unavailable and the route answers 503 rather than inventing card ids.
+   *
+   * It must STAY empty. Cards players actually hold come from the CardPack
+   * ERC-721 below; a populated pool here would roll different cards from a
+   * second, server-side source, and `core.card_ownership` cannot represent two
+   * competing truths (see `db/ownership.ts`).
    */
   BOOSTER_CARD_POOL: z
     .string()
@@ -97,6 +102,37 @@ export const wagerEnvSchema = z.object({
         .map((s) => s.trim())
         .filter((s) => s.length > 0),
     ),
+
+  /**
+   * CardPack ERC-721 — the real source of card ownership.
+   *
+   * Empty address means ownership sync is unconfigured and the sync route
+   * answers 503, the same shape as an unconfigured card pool. That is the safe
+   * default: a service that cannot see the contract must not conclude that
+   * players own nothing, because the reconcile is destructive.
+   */
+  CARD_PACK_ADDRESS: z
+    .union([z.literal(''), evmAddress])
+    .default(''),
+  /**
+   * Robinhood Chain. The reader refuses to read anything if the endpoint
+   * answers with a different id, so this is a safety anchor, not a label.
+   */
+  CARD_PACK_CHAIN_ID: z.coerce.number().int().positive().default(4663),
+  /**
+   * Robinhood Chain's PUBLIC, KEYLESS JSON-RPC. Not a secret and not redacted:
+   * there is no API key, no account and nothing to rotate, and it must stay
+   * auditable precisely so that nobody swaps in a credentialed URL. The
+   * rpc-proxy cannot serve this — it is pinned to a different network.
+   */
+  CARD_PACK_RPC_URL: z.string().url().default('https://rpc.mainnet.chain.robinhood.com'),
+  /** Block CardPack was deployed at. Scanning below it only wastes requests. */
+  CARD_PACK_DEPLOY_BLOCK: z.coerce.number().int().min(0).default(0),
+  /** Blocks per `eth_getLogs` window. The full range is always covered. */
+  CARD_PACK_LOG_WINDOW: z.coerce.number().int().min(1_000).max(1_000_000).default(50_000),
+  /** Bound on the `nextId` fallback scan. Exceeding it fails the sync, never truncates it. */
+  CARD_PACK_MAX_TOKEN_SCAN: z.coerce.number().int().min(1).max(200_000).default(20_000),
+  CARD_PACK_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(15_000),
 
   /** Settlement worker. */
   SETTLEMENT_ENABLED: z

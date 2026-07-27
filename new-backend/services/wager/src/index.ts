@@ -13,6 +13,7 @@ import { log } from './platform/logger.js';
 import { wire } from './bootstrap.js';
 import { mountEscrowRoutes, type RouteLimits } from './http/escrowRoutes.js';
 import { mountBoosterRoutes } from './http/boosterRoutes.js';
+import { mountCollectionRoutes } from './http/collectionRoutes.js';
 import { startSettlementWorker, type WorkerHandle } from './worker/settlementWorker.js';
 
 // Env + keypairs are validated before `startService` opens a socket.
@@ -44,6 +45,7 @@ const running = await startService(
   ({ app }) => {
     mountEscrowRoutes(app, wiring.escrowDeps, limits);
     mountBoosterRoutes(app, wiring.boosterDeps, limits);
+    mountCollectionRoutes(app, wiring.collectionDeps, limits);
   },
 );
 

@@ -14,8 +14,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { registeredRoutes, resetRouteRegistry } from '../platform/shared.js';
 import { mountEscrowRoutes } from '../http/escrowRoutes.js';
 import { mountBoosterRoutes } from '../http/boosterRoutes.js';
+import { mountCollectionRoutes } from '../http/collectionRoutes.js';
 import type { EscrowServiceDeps } from '../services/escrowService.js';
 import type { BoosterServiceDeps } from '../services/boosterService.js';
+import type { CollectionServiceDeps } from '../services/collectionService.js';
 
 const limits = { limit: 30, windowSec: 60 };
 
@@ -24,6 +26,7 @@ function mountAll(): void {
   // Registration never invokes a handler, so stub dependencies are enough.
   mountEscrowRoutes(app, {} as EscrowServiceDeps, limits);
   mountBoosterRoutes(app, {} as BoosterServiceDeps, limits);
+  mountCollectionRoutes(app, { cardPack: null } as CollectionServiceDeps, limits);
 }
 
 describe('route registration', () => {
@@ -51,6 +54,7 @@ describe('route registration', () => {
       'GET /wager/boosters/tickets [required]',
       'GET /wager/boosters/tickets/:ticketNumber [required]',
       'GET /wager/boosters/tickets/:ticketNumber/shipping [required]',
+      'GET /wager/collection [required]',
       'GET /wager/escrows/:id [required]',
       'GET /wager/stakes [required]',
       'POST /wager/boosters/confirm [required]',
@@ -58,6 +62,7 @@ describe('route registration', () => {
       'POST /wager/boosters/tickets/:ticketNumber/redeem/digital [required]',
       'POST /wager/boosters/tickets/:ticketNumber/redeem/merch [required]',
       'POST /wager/boosters/tickets/:ticketNumber/redeem/physical [required]',
+      'POST /wager/collection/sync [required]',
       'POST /wager/escrows [required]',
       'POST /wager/escrows/:id/deposits [required]',
       'POST /wager/escrows/:id/void [required:operator]',

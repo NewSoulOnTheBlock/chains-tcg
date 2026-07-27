@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto';
-import { AppError } from '@chains/shared';
-import { validateDeck } from '../game/cards.js';
+import { AppError, type PoolClient } from '@chains/shared';
+import { CARDS, isBasicNode, validateDeck } from '../game/cards.js';
 import type { ActiveDeck } from '../repo/decks.repo.js';
+import type { MatchMode } from '../repo/matches.repo.js';
+import { getOwnedQuantities } from '../repo/ownership.repo.js';
 
 /**
  * boardgame.io seat credentials.
@@ -30,6 +32,120 @@ export function assertSeatableDeck(deck: ActiveDeck | null): asserts deck is Act
       issues: result.issues,
     });
   }
+}
+
+/**
+ * Modes that seat WITHOUT an ownership check.
+ *
+ * Deliberately a denylist, not an allowlist: a mode added later is gated until
+ * somebody writes its exemption here on purpose. The failure mode of getting
+ * this backwards is "a new mode silently accepts cards nobody owns", which is
+ * the exact hole this module exists to close.
+ *
+ * `casual` is exempt because nothing is at stake in it, and because a player is
+ * entitled to keep a casual deck active that would not qualify for ranked —
+ * which is why this check lives at seating and not at deck `activate()`.
+ *
+ * `solo` is not listed because it is not a server mode at all: `SoloClient.tsx`
+ * runs boardgame.io's `Local()` transport in the browser, creates no
+ * `game.matches` row and never calls this service.
+ */
+const UNGATED_MODES: ReadonlySet<string> = new Set<MatchMode>(['casual']);
+
+/** Whether seating a deck into `mode` requires server-recorded ownership. */
+export function requiresOwnedCards(mode: MatchMode): boolean {
+  return !UNGATED_MODES.has(mode);
+}
+
+/**
+ * One card the deck runs more copies of than the profile owns.
+ *
+ * Same shape as a `validateDeck` issue (`code` + player-readable `message`), so
+ * the client's existing `errorIssues()` renders it with no change; the
+ * structured fields ride alongside for anything that wants to be precise.
+ */
+export interface UnownedCardIssue {
+  code: 'unowned';
+  cardId: string;
+  /** Copies the decklist runs. */
+  need: number;
+  /** Copies `core.card_ownership` records for this profile. */
+  owned: number;
+  message: string;
+}
+
+/**
+ * Cards in `cards` that `profileId` does not own enough copies of.
+ *
+ * QUANTITY, not presence: a deck running 3 copies needs `qty >= 3`. Checking
+ * only "do they own one" would let a single pull unlock a full playset — the
+ * same hole in a smaller size.
+ *
+ * Basic Nodes are granted to everyone and are never looked up: `isBasicNode()`
+ * is the catalogue's own definition (the one `validateDeck` uses to exempt them
+ * from the 4-copy cap), so this cannot drift from the card data.
+ */
+export async function findUnownedCards(
+  profileId: string,
+  cards: readonly string[],
+  c?: PoolClient,
+): Promise<UnownedCardIssue[]> {
+  const need = new Map<string, number>();
+  for (const id of cards) {
+    if (isBasicNode(id)) continue;
+    need.set(id, (need.get(id) ?? 0) + 1);
+  }
+  if (need.size === 0) return [];
+
+  const owned = await getOwnedQuantities(profileId, [...need.keys()], c);
+
+  const issues: UnownedCardIssue[] = [];
+  for (const [cardId, n] of need) {
+    const have = owned.get(cardId) ?? 0;
+    if (have >= n) continue;
+    issues.push({
+      code: 'unowned',
+      cardId,
+      need: n,
+      owned: have,
+      message: `Your deck runs ${n} × ${CARDS[cardId]?.name ?? cardId} but you own ${have}.`,
+    });
+  }
+  // Stable order so the rendered list does not depend on decklist ordering.
+  issues.sort((a, b) => (a.cardId < b.cardId ? -1 : a.cardId > b.cardId ? 1 : 0));
+  return issues;
+}
+
+/**
+ * Gate a seat on real, server-recorded card ownership.
+ *
+ * Split out of `assertSeatableDeck` rather than folded into it because that one
+ * is an assertion function (`asserts deck is ActiveDeck`) and TypeScript forbids
+ * an assertion signature on an async function. Keeping the synchronous format
+ * assertion intact means both call sites still narrow `ActiveDeck | null` for
+ * free, with no cast and no `!`, and the DB round trip stays visibly separate
+ * from the pure legality check.
+ *
+ * `mode` must come from `game.matches` on the join path — never from a request
+ * body. A client that could name its own mode would simply say `casual` and
+ * seat into a ranked match anyway.
+ */
+export async function assertDeckOwnership(
+  profileId: string,
+  deck: ActiveDeck,
+  mode: MatchMode,
+  c?: PoolClient,
+): Promise<void> {
+  if (!requiresOwnedCards(mode)) return;
+
+  const issues = await findUnownedCards(profileId, deck.cards, c);
+  if (issues.length === 0) return;
+
+  throw AppError.badRequest('Your active deck contains cards you do not own', {
+    reason: 'unowned_cards',
+    deckId: deck.id,
+    issues,
+  });
 }
 
 export interface SeatSetup {
