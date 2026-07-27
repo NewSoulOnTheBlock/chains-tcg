@@ -315,12 +315,17 @@ function Login({ onLogin, onFirstTime }: {
 
       {/* Splash art locked to its 1717:916 aspect ratio; every hotspot is a % of
           this box, so the transparent buttons stay glued to the painted ones. */}
-      <div style={{ position: 'relative', display: 'inline-block', lineHeight: 0 }}>
+      <div style={{
+        position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+        width: 'max(100vw, calc(100dvh * 1717 / 916))',
+        height: 'max(100dvh, calc(100vw * 916 / 1717))',
+        lineHeight: 0,
+      }}>
         <img
           src="/login-splash.png"
           alt="On-Chain Virtual Arena — sign in"
           draggable={false}
-          style={{ display: 'block', maxWidth: '100vw', maxHeight: '100dvh', width: 'auto', height: 'auto', userSelect: 'none' }}
+          style={{ display: 'block', width: '100%', height: '100%', userSelect: 'none' }}
         />
 
         {/* Connect Wallet -> MetaMask on Robinhood Chain */}
@@ -1362,15 +1367,21 @@ function Landing({
     { label: 'Exit',            top: 83.0, onClick: onLogout },
   ];
   return (
-    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#07060f', display: 'grid', placeItems: 'center', fontFamily: F.body, color: C.textHi }}>
-      {/* The image sizes itself to fit the viewport; the wrapper shrink-wraps to
-          the image's rendered box so % hotspots stay exactly on the artwork. */}
-      <div style={{ position: 'relative', display: 'inline-block', lineHeight: 0 }}>
+    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#07060f', fontFamily: F.body, color: C.textHi }}>
+      {/* Full-screen cover "stage" sized to the image's cover box and anchored to
+          the LEFT edge so the left menu is never cropped; overflow spills off the
+          right/edges. Hotspots are % of this stage, so they stay locked to the art. */}
+      <div style={{
+        position: 'absolute', top: '50%', left: 0, transform: 'translateY(-50%)',
+        width: 'max(100vw, calc(100dvh * 1683 / 935))',
+        height: 'max(100dvh, calc(100vw * 935 / 1683))',
+        lineHeight: 0,
+      }}>
         <img
           src="/hub-splash.png"
           alt="On-Chain Virtual Arena — main menu"
           draggable={false}
-          style={{ display: 'block', maxWidth: '100vw', maxHeight: '100dvh', width: 'auto', height: 'auto', userSelect: 'none' }}
+          style={{ display: 'block', width: '100%', height: '100%', userSelect: 'none' }}
         />
         {items.map(it => (
           <button
