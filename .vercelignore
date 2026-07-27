@@ -1,3 +1,9 @@
 # Exceeds Vercel's static file-size limit (~172 MB). Served from the Render
 # deployment instead; on Vercel the rules-intro video simply won't load.
 public/rules-intro.mp4
+
+# Build artifacts / deps — Vercel installs + builds remotely.
+node_modules
+dist
+.env
+.env.*.local
