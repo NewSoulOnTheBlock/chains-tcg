@@ -102,14 +102,14 @@ const IMAGES: Record<string, string> = {
   sol_goat:     cmc(33440),
 
   // Robinhood memes (meme-stocks — emoji glyph art)
-  robinhood_hood:    emo('1f3f9'), // bow and arrow (Robinhood)
-  robinhood_ozzy:    emo('1f989'), // owl (Ozzy, the Robinhood owl)
-  robinhood_cashcat: emo('1f911'), // money-mouth face (Cashcat)
-  robinhood_kitty:   emo('1f981'), // lion (Roaring Kitty)
-  robinhood_tendies: emo('1f357'), // poultry leg (tendies)
-  robinhood_moon:    emo('1f680'), // rocket (to the moon)
-  robinhood_yolo:    emo('1f3b0'), // slot machine (YOLO)
-  robinhood_ape:     emo('1f98d'), // gorilla (apes)
+  robinhood_hood:    '/cards/robinhood_hood.png?v=1',
+  robinhood_ozzy:    '/cards/robinhood_ozzy.png?v=1',
+  robinhood_cashcat: '/cards/robinhood_cashcat.png?v=1',
+  robinhood_kitty:   '/cards/robinhood_kitty.png?v=1',
+  robinhood_tendies: '/cards/robinhood_tendies.png?v=1',
+  robinhood_moon:    '/cards/robinhood_moon.png?v=1',
+  robinhood_yolo:    '/cards/robinhood_yolo.png?v=1',
+  robinhood_ape:     '/cards/robinhood_ape.png?v=1',
 
   // Ethereum memes
   eth_andy:     '/cards/andy.png?v=1',
@@ -122,13 +122,13 @@ const IMAGES: Record<string, string> = {
 
   // Base memes (BRETT keeps its painted art, rest emoji glyph)
   base_brett:   '/cards/brett.png?v=1',
-  base_degen:   emo('1f3a9'), // top hat (DEGEN)
-  base_toshi:   emo('1f431'), // cat face (TOSHI)
-  base_miggles: emo('1f408'), // cat (MIGGLES)
-  base_keycat:  emo('1f511'), // key (KEYCAT)
-  base_normie:  emo('1f9d1'), // person (NORMIE)
-  base_doginme: emo('1f415'), // dog (DOGINME)
-  base_based:   emo('1f535'), // blue circle (BASED)
+  base_degen:   '/cards/base_degen.png?v=1',
+  base_toshi:   '/cards/base_toshi.png?v=1',
+  base_miggles: '/cards/base_miggles.png?v=1',
+  base_keycat:  '/cards/base_keycat.png?v=1',
+  base_normie:  '/cards/base_normie.png?v=1',
+  base_doginme: '/cards/base_doginme.png?v=1',
+  base_based:   '/cards/base_based.png?v=1',
 
   // ── BnB machines/moves ──
   bnb_farm:     '/cards/volume_bot.png?v=1',
@@ -145,41 +145,41 @@ const IMAGES: Record<string, string> = {
   sol_amm:      '/cards/amm-router.png?v=1',
   sol_tgbot:    '/cards/telegram-bot-suite.png?v=1',
   sol_zap:      '/cards/snipe.png?v=1',
-  sol_bounce:   emo('1f3c3'), // 🏃 runner (Frontrun)
-  sol_tgpump:   emo('1f4e2'), // 📢 loudspeaker (Telegram Pump)
+  sol_bounce:   '/cards/sol_bounce.png?v=1',
+  sol_tgpump:   '/cards/sol_tgpump.png?v=1',
 
   // ── Robinhood machines/moves/aura ──
-  robinhood_dividend:   emo('1f4b5'), // dollar banknote
-  robinhood_options:    emo('1f4c8'), // chart up
-  robinhood_fractional: emo('1f967'), // pie (fractional slice)
-  robinhood_margin:     emo('1f4b3'), // credit card
-  robinhood_buydip:     emo('1f4c9'), // chart down (buy the dip)
-  robinhood_gamma:      emo('26a1'),  // high voltage (gamma squeeze)
-  robinhood_pfof:       emo('1f9fe'), // receipt (order flow)
-  robinhood_diamond:    emo('1f48e'), // gem (diamond hands)
+  robinhood_dividend:   '/cards/robinhood_dividend.png?v=1',
+  robinhood_options:    '/cards/robinhood_options.png?v=1',
+  robinhood_fractional: '/cards/robinhood_fractional.png?v=1',
+  robinhood_margin:     '/cards/robinhood_margin.png?v=1',
+  robinhood_buydip:     '/cards/robinhood_buydip.png?v=1',
+  robinhood_gamma:      '/cards/robinhood_gamma.png?v=1',
+  robinhood_pfof:       '/cards/robinhood_pfof.png?v=1',
+  robinhood_diamond:    '/cards/robinhood_diamond.png?v=1',
 
   // ── Ethereum machines/moves ──
   eth_eip1559:  '/cards/smart_contract_suite.png?v=1',
-  eth_temple:   emo('1f310'), // 🌐 globe with meridians (Dapp Ecosystem)
+  eth_temple:   '/cards/eth_temple.png?v=1',
   eth_l2:       '/cards/layer2_rollup.png?v=1',
-  eth_yield:    emo('1fa99'), // 🪙 coin (Yield Aggregator)
-  eth_smite:    emo('1f426'), // 🐦 bird (FUD Tweet)
+  eth_yield:    '/cards/eth_yield.png?v=1',
+  eth_smite:    '/cards/eth_smite.png?v=1',
   eth_heal:     '/cards/dca_in.png?v=1',
   eth_exploit:  '/cards/exploit_disclosure.png?v=1',
 
   // ── Base machines/moves/aura ──
-  base_summer:    emo('2600'),  // sun (Onchain Summer)
-  base_frames:    emo('1f5bc'), // framed picture (Farcaster Frames)
-  base_wallet:    emo('1f45b'), // purse (Smart Wallet)
-  base_onramp:    emo('1f6e3'), // motorway (Coinbase Onramp)
-  base_tip:       emo('1fa99'), // coin (Tip DEGEN)
-  base_bridge:    emo('1f309'), // bridge at night (Base Bridge)
-  base_airdrop:   emo('1fa82'), // parachute (Airdrop Szn)
-  base_staybased: emo('1f4aa'), // flexed biceps (Stay Based)
+  base_summer:    '/cards/base_summer.png?v=1',
+  base_frames:    '/cards/base_frames.png?v=1',
+  base_wallet:    '/cards/base_wallet.png?v=1',
+  base_onramp:    '/cards/base_onramp.png?v=1',
+  base_tip:       '/cards/base_tip.png?v=1',
+  base_bridge:    '/cards/base_bridge.png?v=1',
+  base_airdrop:   '/cards/base_airdrop.png?v=1',
+  base_staybased: '/cards/base_staybased.png?v=1',
   // ── Auras (Genesis set) — emoji-art for now ──
-  bnb_liquidity:  emo('1f4a7'),   // droplet (Liquidity Injection)
-  sol_validator:  emo('26a1'),    // high voltage (Validator Boost)
-  eth_shield:     emo('1f6e1'),   // shield (Smart Contract Shield)
+  bnb_liquidity:  '/cards/bnb_liquidity.png?v=1',
+  sol_validator:  '/cards/sol_validator.png?v=1',
+  eth_shield:     '/cards/eth_shield.png?v=1',
   // ── NFT-linked meme art ──
   eth_sproto_gremlin: '/sproto-gremlin.png',
 };
