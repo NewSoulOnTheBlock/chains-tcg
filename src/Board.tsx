@@ -2251,7 +2251,7 @@ function Playmat(props: {
         life={opp.life} name={oppName ?? 'Opponent'} color={opp.color}
         position="topRight" targetable={playerTargetable}
         onClick={playerTargetable ? onOppPlayerClick : undefined}
-        side="opp" deckCount={oppDeckCount} handCount={opp.hand.length} seat={oppId}
+        side="opp" deckCount={oppDeckCount} handCount={opp.hand.length}
       />
 
       {/* ─── ME ─── */}
@@ -2259,7 +2259,7 @@ function Playmat(props: {
         life={me.life} name={myName ?? 'You'} color={me.color}
         position="bottomLeft" targetable={playerTargetable}
         onClick={playerTargetable ? onMyPlayerClick : undefined}
-        side="me" deckCount={myDeckCount} handCount={me.hand.length} seat={myId}
+        side="me" deckCount={myDeckCount} handCount={me.hand.length}
       />
       <ZoneSlot rect={Z.myBattle} icon={<Swords size={11} />} label={`Your Battlefield — ${COLOR_META[me.color].name}`} compactLabel={COLOR_META[me.color].name}>
         {me.memes.map(inst => {
@@ -2399,12 +2399,12 @@ function ZoneSlot({
 /** Large MTG-Arena style circular life badge anchored to a playmat corner. */
 function LifeBadge({
   life, name, color, position, onClick, targetable,
-  side, deckCount, handCount, seat,
+  side, deckCount, handCount,
 }: {
   life: number; name: string; color: Color;
   position: 'topRight' | 'bottomLeft';
   onClick?: () => void; targetable?: boolean;
-  side: 'me' | 'opp'; deckCount: number; handCount: number; seat: string;
+  side: 'me' | 'opp'; deckCount: number; handCount: number;
 }) {
   void color;
   const mobile = useIsMobile();
@@ -2423,7 +2423,7 @@ function LifeBadge({
   // Name + chips are dropped on phones (names live in the turn banner).
   const pos: React.CSSProperties = mobile
     ? (isRight ? { top: '40%', right: '1%' } : { top: '48%', left: '1%' })
-    : (isRight ? { top: '37%', right: '1%' } : { top: '43%', left: '1%' });
+    : (isRight ? { top: '37%', right: '1%' } : { top: '37%', left: '1%' });
   // Seating shadow: the orb sits *in* the mat, so the drop shadow is tight and
   // the identity glow is a halo around the bezel — not a rim-light on a ball.
   const orbGlow = targetable
@@ -2448,10 +2448,15 @@ function LifeBadge({
       className={targetable ? 'brd-targetable' : undefined}
       style={{
         position: 'absolute', ...pos, zIndex: LAYER.HUD,
-        display: 'flex', alignItems: 'center', gap: 'clamp(6px, 1.2cqw, 10px)',
+        // A COLUMN, not a row. The old desktop layout put the orb in a mat
+        // corner with the name + chips reaching sideways across the Deck and
+        // Nodes zones, covering the deck card and its count. Stacked, the whole
+        // HUD stays inside the 13%-wide outer column that the mat leaves free
+        // between 37% and 62% — the mat's own life slot.
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', gap: 'clamp(3px, 0.8cqw, 6px)',
         cursor: onClick ? 'pointer' : 'default', pointerEvents: 'auto',
-        flexDirection: isRight ? 'row-reverse' : 'row',
-        maxWidth: '46cqw',
+        width: '12cqw', minWidth: 0,
       }}>
       {/* Life gem, seated in a forged bezel (see `.brd-orb` in Board.css).
           Not a sphere: facet fan + light welling up from below + rivets. */}
@@ -2460,8 +2465,8 @@ function LifeBadge({
         className={`brd-orb${flash ? (flash.dir === 'hit' ? ' brd-orb-hit' : ' brd-orb-heal') : ''}`}
         style={{
           ...({ '--orb-a': A, '--orb-a2': A2 } as Vars),
-          width: 'clamp(46px, 10cqw, 72px)',
-          fontSize: 'clamp(19px, 4.2cqw, 31px)',
+          width: 'min(100%, clamp(44px, 10cqw, 72px))',
+          fontSize: 'clamp(18px, 4.2cqw, 31px)',
           boxShadow: orbGlow,
           // Targetable swaps the hammered bezel for a bright forged-gold one.
           ...(targetable ? { borderColor: GOLD_HI, borderStyle: 'solid' } : null),
@@ -2469,34 +2474,18 @@ function LifeBadge({
         <span className="brd-orb__num">{life}</span>
         <span aria-hidden className="brd-orb__glint" />
       </div>
-      {/* name + seat + counts — desktop only; see `pos` above for the phone case */}
+      {/* Count tallies — icon + numeral first, small-caps label only when the
+          mat is wide enough for it (a container query in Board.css). Phones drop
+          them entirely: the same counts are already in the Deck / Hand zone
+          labels, and the outer column is only ~46px wide there.
+          The player NAME is deliberately not repeated here — the turn banner
+          already carries both names, and the name chip was the widest element,
+          which is what pushed the old HUD across the neighbouring zones. */}
       {!mobile && (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: isRight ? 'flex-end' : 'flex-start', minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexDirection: isRight ? 'row-reverse' : 'row', minWidth: 0 }}>
-          <span style={{
-            background: 'linear-gradient(180deg, rgba(16,14,26,0.86), rgba(5,6,13,0.9))',
-            backdropFilter: 'blur(4px)', padding: '3px 11px', borderRadius: 6,
-            border: `1px solid ${A}66`, color: '#F4F2EA',
-            fontFamily: '"Cinzel", "Times New Roman", serif',
-            fontSize: 'clamp(10px, 1.6cqw, 12px)', fontWeight: 800, letterSpacing: 0.6,
-            boxShadow: `inset 0 1px 0 rgba(255,255,255,0.12), 0 0 12px ${A}33, 0 2px 6px rgba(0,0,0,0.6)`,
-            maxWidth: 'clamp(76px, 22cqw, 150px)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>{name}</span>
-          {side === 'me' && (
-            <span style={{
-              fontSize: 9, fontWeight: 800, letterSpacing: 1, color: '#241703',
-              background: 'linear-gradient(180deg, #f7dc93, #c08f2c)', borderRadius: 5, padding: '2px 6px',
-              boxShadow: 'inset 0 1px 0 rgba(255,250,220,0.7), 0 1px 3px rgba(0,0,0,0.6)',
-            }}>YOU · P{seat}</span>
-          )}
-        </div>
-        {/* Count tallies — icon + numeral first, small-caps label second, so a
-            glance reads the number and only a second look reads what it counts. */}
-        <div style={{ display: 'flex', gap: 6, flexDirection: isRight ? 'row-reverse' : 'row' }}>
-          <CountChip icon={<Cards size={12} />} n={deckCount} label="Deck" title={`${deckCount} cards left in deck`} />
-          <CountChip icon={<HandIcon size={12} />} n={handCount} label="Hand" title={`${handCount} cards in hand`} />
-        </div>
-      </div>
+        <>
+          <CountChip icon={<Cards size={11} />} n={deckCount} label="Deck" title={`${name} — ${deckCount} cards left in deck`} />
+          <CountChip icon={<HandIcon size={11} />} n={handCount} label="Hand" title={`${name} — ${handCount} cards in hand`} />
+        </>
       )}
     </div>
   );

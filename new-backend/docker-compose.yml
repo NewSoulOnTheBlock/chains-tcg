@@ -307,8 +307,12 @@ services:
     environment:
       # Comma-separated. Never '*' — the entrypoint refuses a wildcard.
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:?ALLOWED_ORIGINS is required, e.g. http://localhost:5173}"
+    # Loopback by default: TLS is terminated in front of this container and
+    # nothing but that terminator may reach :8080 — a client that could hit it
+    # directly could assert X-Forwarded-Proto: https (see INTEGRATION.md §2).
+    # Override GATEWAY_BIND_ADDR only for a host where that is not true.
     ports:
-      - "${GATEWAY_PORT:-8080}:8080"
+      - "${GATEWAY_BIND_ADDR:-127.0.0.1}:${GATEWAY_PORT:-8080}:8080"
     # nginx resolves upstream hostnames at startup, so every service must exist.
     depends_on:
       auth:
