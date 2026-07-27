@@ -280,7 +280,7 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
                   display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
                 }}>
                   <span style={{ fontSize: 24, fontWeight: 900 }}>
-                    {supply ? fmt(supply.priceSol, 3) : '—'} <span style={{ fontSize: 13, opacity: 0.85 }}>SOL</span>
+                    {supply ? fmt(supply.priceSol, 4) : '—'} <span style={{ fontSize: 13, opacity: 0.85 }}>ETH</span>
                   </span>
                   <span style={{ fontSize: 11, opacity: 0.65 }}>per ticket</span>
                 </div>
@@ -303,7 +303,7 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
                     soldOut      ? 'SOLD OUT' :
                     !walletAddress ? 'LINK SOLANA WALLET IN PROFILE' :
                     busy === 'buy' ? 'WAITING FOR WALLET…' :
-                    `🎟  MINT TICKET — ${supply ? fmt(supply.priceSol, 3) : '0.4'} SOL`
+                    `🎟  MINT TICKET — ${supply ? fmt(supply.priceSol, 4) : '0.0035'} ETH`
                   } />
                 </button>
 
@@ -386,7 +386,7 @@ function TicketRowView({
           mint: {ticket.mintAddress}
         </div>
         <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
-          minted {relTime(ticket.mintedAt)} · paid {ticket.priceSol.toFixed(3)} SOL
+          minted {relTime(ticket.mintedAt)} · paid {ticket.priceSol.toFixed(4)} ETH
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8, marginTop: 12 }}>

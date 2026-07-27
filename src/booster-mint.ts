@@ -21,7 +21,10 @@
 //   VITE_SOLANA_RPC / SOLANA_RPC / HELIUS_API_KEY          RPC endpoint.
 //
 // Optional env:
-//   BOOSTER_PRICE_SOL        Price in SOL (default 0.4).
+//   BOOSTER_PRICE_SOL        Pack price, denominated in ETH for Robinhood Chain
+//                            (default 0.0035). Env name kept for back-compat with
+//                            the legacy Solana payment path (still charged on-chain
+//                            as this many SOL until the EVM payment migration lands).
 //   BOOSTER_SUPPLY_CAP       Max tickets mintable (default 2000).
 //   BOOSTER_METADATA_URI     Override the NFT metadata URI (default
 //                            https://www.masterstcg.com/booster-ticket.json).
@@ -37,7 +40,7 @@ import { create, mplCore } from '@metaplex-foundation/mpl-core';
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
-export const BOOSTER_PRICE_SOL = Number(process.env.BOOSTER_PRICE_SOL ?? 0.2);
+export const BOOSTER_PRICE_SOL = Number(process.env.BOOSTER_PRICE_SOL ?? 0.0035);
 export const BOOSTER_PRICE_LAMPORTS = Math.round(BOOSTER_PRICE_SOL * 1e9);
 export const BOOSTER_SUPPLY_CAP = Number(process.env.BOOSTER_SUPPLY_CAP ?? 100);
 // Display-only offset added to the on-chain mint count for marketing/scarcity.
