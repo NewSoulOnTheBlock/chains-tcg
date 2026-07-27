@@ -205,6 +205,26 @@ export function CardHover({
 
   const def = defId ? CARDS[defId] : null;
 
+  // Touch devices synthesize mouseenter/mousemove on tap but often never fire
+  // mouseleave — which used to strand a full-size preview on top of the very
+  // control the player needed next (Keep Hand, the action bar, a target).
+  // Hover previews are therefore desktop-only; touch keeps long-press + pin.
+  const hoverCapable = useRef(true);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const sync = () => { hoverCapable.current = mq.matches; };
+    sync();
+    if (mq.addEventListener) mq.addEventListener('change', sync);
+    else mq.addListener(sync);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', sync);
+      else mq.removeListener(sync);
+    };
+  }, []);
+  /** Set on any touch so a trailing synthetic mouse event can't reopen the preview. */
+  const touchedAt = useRef(0);
+
   const clear = useCallback(() => {
     if (openT.current) { window.clearTimeout(openT.current); openT.current = null; }
     if (longT.current) { window.clearTimeout(longT.current); longT.current = null; }
@@ -212,19 +232,22 @@ export function CardHover({
 
   const onMouseEnter = (e: React.MouseEvent) => {
     if (!def) return;
+    if (!hoverCapable.current || Date.now() - touchedAt.current < 900) return;
     const { clientX, clientY } = e;
     clear();
     openT.current = window.setTimeout(() => setPos({ x: clientX, y: clientY }), openDelay);
   };
   const onMouseMove = (e: React.MouseEvent) => {
+    if (!hoverCapable.current) return;
     if (pos) setPos({ x: e.clientX, y: e.clientY });
   };
   const onMouseLeave = () => { clear(); setPos(null); };
 
-  // Touch: tap-to-pin (short tap → lightbox), long-press → floating preview.
+  // Touch: tap-to-pin (short tap gives the lightbox), long-press gives the floating preview.
   const startPt = useRef<{ x: number; y: number; t: number } | null>(null);
   const longFired = useRef(false);
   const onTouchStart = (e: React.TouchEvent) => {
+    touchedAt.current = Date.now();
     if (!def) return;
     const t = e.touches[0];
     startPt.current = { x: t.clientX, y: t.clientY, t: Date.now() };
@@ -243,11 +266,12 @@ export function CardHover({
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) clear();
   };
   const onTouchEnd = (e: React.TouchEvent) => {
+    touchedAt.current = Date.now();
     const start = startPt.current;
     clear();
     if (!start || !def) return;
     const elapsed = Date.now() - start.t;
-    // Short, deliberate tap that didn't trigger long-press → pin lightbox and
+    // Short, deliberate tap that didn't trigger long-press: pin the lightbox and
     // suppress the synthetic click that would have played the card.
     if (!longFired.current && elapsed < 350 && pinOnTap) {
       e.preventDefault();

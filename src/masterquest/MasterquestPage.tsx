@@ -6,10 +6,10 @@
 // concentric rings (one per Act), with travel paths between consecutive
 // sites. Visited sites glow; the current site pulses; locked sites are dim.
 //
-// Click the current site → interlude modal (pre-fight lore + "BEGIN DUEL").
-// Click a cleared site → re-read modal (post-fight lore).
-// On duel victory → post-fight interlude + "TRAVEL ONWARD" → unlock next.
-// After Site 15 → EPILOGUE.
+// Click the current site -> interlude modal (pre-fight lore + "BEGIN DUEL").
+// Click a cleared site -> re-read modal (post-fight lore).
+// On duel victory -> post-fight interlude + "TRAVEL ONWARD" -> unlock next.
+// After Site 15 -> EPILOGUE.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
@@ -22,12 +22,16 @@ import {
   mapPosOf, MAP_VIEWBOX, type SacredSite, type SiteId, type Interlude,
 } from './lore';
 import {
+  ArrowLeft, ArrowRight, Check, Refresh, Warning, Wizard, Map as MapIcon,
+  Diamond, DiamondOutline, Swords, Cards,
+} from '../icons';
+import {
   loadProgress, recordClear, markEpilogueSeen,
   isCleared, isUnlocked, currentSiteId, isQuestComplete,
   clearProgress, type Progress,
 } from './progress';
 
-// ── Chain → colour palette (matches the rest of the game) ──────────────────
+// ── Chain -> colour palette (matches the rest of the game) ──────────────────
 const CHAIN_HEX: Record<Color, string> = {
   bnb:       '#f3ba2f', // yellow
   sol:       '#9945ff', // violet
@@ -171,12 +175,12 @@ export function MasterquestPage({
         background: 'linear-gradient(180deg, rgba(8,5,26,0.94) 0%, rgba(8,5,26,0.6) 100%)',
         borderBottom: '1px solid #2a1f55',
       }}>
-        <button onClick={onBack} style={btnSecondary}>← Back</button>
-        <div style={{ fontWeight: 900, fontSize: 18, letterSpacing: 2 }}>
-          🗺  MEMETIC MASTERQUEST
+        <button onClick={onBack} style={btnSecondary}><ArrowLeft size={14} /> Back</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontWeight: 900, fontSize: 18, letterSpacing: 2 }}>
+          <MapIcon size={20} /> MEMETIC MASTERQUEST
         </div>
         <button onClick={handleResetCampaign} style={{ ...btnSecondary, fontSize: 11, opacity: 0.6 }}>
-          ↻ reset
+          <Refresh size={12} /> reset
         </button>
       </div>
 
@@ -187,12 +191,12 @@ export function MasterquestPage({
       }}>
         <div style={{ fontSize: 13, letterSpacing: 1, opacity: 0.85 }}>
           {complete
-            ? '✦ THE FIVE-CHAIN CROWN IS YOURS ✦'
+            ? <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}><Diamond size={9} /> THE FIVE-CHAIN CROWN IS YOURS <Diamond size={9} /></span>
             : `Sites cleared: ${progress.cleared.length} / 15${cur ? ` · Next: ${SITES.find(s => s.id === cur)?.name}` : ''}`}
         </div>
         {complete && !showEpilogue && (
           <button onClick={() => setShowEpilogue(true)} style={{ ...btnPrimary, marginTop: 10 }}>
-            ✦ Read the Epilogue
+            <Diamond size={10} /> Read the Epilogue
           </button>
         )}
       </div>
@@ -322,8 +326,10 @@ function MapSvg({
             </text>
             {/* Cleared checkmark */}
             {cleared && (
-              <text x={p.x + baseR + 4} y={p.y - baseR + 4}
-                fontSize={36} fill="#a5ffb0" fontWeight={900} pointerEvents="none">✓</text>
+              <path
+                d={`M ${p.x + baseR - 6} ${p.y - baseR + 4} l 6 6 l 11 -13`}
+                fill="none" stroke="#a5ffb0" strokeWidth={5}
+                strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
             )}
           </g>
         );
@@ -335,9 +341,14 @@ function MapSvg({
         if (!here) return null;
         return (
           <g pointerEvents="none">
-            <text x={here.p.x} y={here.p.y - 50} textAnchor="middle"
-              fontSize={56} fill="#fff"
-              style={{ filter: 'drop-shadow(0 0 6px rgba(255,255,255,0.8))' }}>🧙</text>
+            <g transform={`translate(${here.p.x - 22} ${here.p.y - 94}) scale(1.85)`}
+              fill="none" stroke="#fff" strokeWidth={1.8}
+              strokeLinecap="round" strokeLinejoin="round"
+              style={{ filter: 'drop-shadow(0 0 6px rgba(255,255,255,0.8))' }}>
+              <path d="M12 2.5 7 12h10z" />
+              <path d="M5.5 12h13l1.5 3.5a2 2 0 0 1-1.9 2.8H5.9A2 2 0 0 1 4 15.5z" />
+              <path d="M12 6.5v2" />
+            </g>
           </g>
         );
       })()}
@@ -396,7 +407,7 @@ function PrologueModal({ onClose }: { onClose: () => void }) {
     <h2 style={{ marginTop: 4, marginBottom: 14, fontSize: 22 }}>Sorendo the Unhoused</h2>
     <PreservedText text={PROLOGUE} />
     <div style={{ marginTop: 18, textAlign: 'right' }}>
-      <button onClick={onClose} style={btnPrimary}>Begin the Quest →</button>
+      <button onClick={onClose} style={btnPrimary}>Begin the Quest <ArrowRight size={15} /></button>
     </div>
   </>, onClose);
 }
@@ -428,7 +439,7 @@ function SiteModal({
         <h2 style={{ margin: '4px 0 6px', fontSize: 22 }}>{site.name}</h2>
         <ChainPill chain={site.chain} />
       </div>
-      <div style={{ fontSize: 28, lineHeight: 1 }}>{cleared ? '✓' : '◇'}</div>
+      <div style={{ display: 'flex', alignItems: 'center', lineHeight: 1, color: cleared ? '#a5ffb0' : '#cfc4ff' }}>{cleared ? <Check size={26} /> : <DiamondOutline size={22} />}</div>
     </div>
 
     <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75, fontStyle: 'italic' }}>
@@ -482,7 +493,7 @@ function SiteModal({
         </>
       ) : (
         <>
-          <b style={{ color: '#ff9a9a' }}>⚠ No custom deck selected.</b>{' '}
+          <b style={{ color: '#ff9a9a', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Warning size={13} /> No custom deck selected.</b>{' '}
           Masterquest requires a deck you built yourself — open the Library on the
           Profile page, build &amp; save a legal 60-card deck, then return here and
           pick it from the chooser above the map.
@@ -497,7 +508,7 @@ function SiteModal({
           disabled={!canDuel}
           style={canDuel ? btnPrimary : btnDisabled}
           title={canDuel ? '' : 'Pick a custom deck first'}>
-          ⚔  Begin Duel
+          <Swords size={16} /> Begin Duel
         </button>
       )}
       {cleared && (
@@ -505,7 +516,7 @@ function SiteModal({
           disabled={!canDuel}
           style={canDuel ? btnPrimary : btnDisabled}
           title={canDuel ? '' : 'Pick a custom deck first'}>
-          ↻  Re-Duel
+          <Refresh size={16} /> Re-Duel
         </button>
       )}
     </div>
@@ -533,7 +544,9 @@ function PostFightModal({
 
     <div style={{ marginTop: 22, textAlign: 'right' }}>
       <button onClick={onTravelOnward} style={btnPrimary}>
-        {site.id === 'cipher_peak' ? '✦  Reforge the Aetherweb' : 'Travel Onward →'}
+        {site.id === 'cipher_peak'
+          ? <><Diamond size={11} /> Reforge the Aetherweb</>
+          : <>Travel Onward <ArrowRight size={15} /></>}
       </button>
     </div>
   </>);
@@ -574,26 +587,44 @@ function difficultyColor(d: 'easy' | 'normal' | 'hard'): string {
   return d === 'easy' ? '#a5ffb0' : d === 'normal' ? '#cfc4ff' : '#ff8a8a';
 }
 
+// Forged amethyst plate — bevelled top highlight, dark bottom shadow, warm
+// outer glow. Matches the shared button language in src/ui.tsx.
 const btnPrimary: React.CSSProperties = {
-  background: '#6c4bd8', color: '#fff',
-  border: '1px solid #8a6bf0', borderRadius: 8,
-  padding: '10px 18px', fontWeight: 800, fontSize: 13,
-  cursor: 'pointer', letterSpacing: 0.5,
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 9,
+  background: 'linear-gradient(180deg, #b9a4ff 0%, #8a6bff 34%, #6a46e8 62%, #4b30ab 100%)',
+  color: '#fff',
+  border: '1px solid #4b30ab', borderRadius: 10,
+  padding: '12px 20px', fontWeight: 700, fontSize: 13,
+  fontFamily: '"Cinzel", "EB Garamond", Georgia, serif',
+  letterSpacing: '0.12em', textTransform: 'uppercase',
+  textShadow: '0 1px 0 rgba(0,0,0,0.35)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.5), inset 0 -1px 0 rgba(0,0,0,0.42), 0 0 0 1px rgba(124,92,255,0.30), 0 10px 28px -10px rgba(124,92,255,0.6)',
+  cursor: 'pointer',
+  transition: 'transform 160ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 180ms ease, background 180ms ease',
 };
 
+// Obsidian plate with an engraved gold hairline.
 const btnSecondary: React.CSSProperties = {
-  background: '#1a1230', color: '#cfc4ff',
-  border: '1px solid #3a2f6a', borderRadius: 8,
-  padding: '8px 14px', fontWeight: 700, fontSize: 12,
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+  background: 'linear-gradient(180deg, #201c38 0%, #16142a 70%, #121026 100%)',
+  color: '#f0d489',
+  border: '1px solid rgba(217,180,90,0.32)', borderRadius: 10,
+  padding: '10px 15px', fontWeight: 700, fontSize: 12, letterSpacing: '0.08em',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 6px 18px -10px rgba(3,2,10,0.9)',
   cursor: 'pointer',
+  transition: 'transform 160ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 180ms ease, border-color 180ms ease, color 180ms ease',
 };
 
 const btnDisabled: React.CSSProperties = {
-  background: '#1a1230', color: '#6b5e94',
-  border: '1px solid #2a2150', borderRadius: 8,
-  padding: '10px 18px', fontWeight: 800, fontSize: 13,
-  cursor: 'not-allowed', letterSpacing: 0.5,
-  opacity: 0.55,
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 9,
+  background: 'linear-gradient(180deg, #2a2440 0%, #1c1830 60%, #16132a 100%)',
+  color: 'rgba(207,196,255,0.38)',
+  border: '1px solid #2a2150', borderRadius: 10,
+  padding: '12px 20px', fontWeight: 700, fontSize: 13,
+  fontFamily: '"Cinzel", "EB Garamond", Georgia, serif',
+  letterSpacing: '0.12em', textTransform: 'uppercase',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
+  cursor: 'not-allowed', filter: 'saturate(0.45)',
 };
 
 // ─── Deck chooser strip ────────────────────────────────────────────────────
@@ -616,8 +647,8 @@ function DeckChooser({
         display: 'flex', alignItems: 'center', gap: 12,
         flexWrap: 'wrap', maxWidth: 1280, margin: '0 auto',
       }}>
-        <div style={{ fontSize: 11, letterSpacing: 1.5, opacity: 0.8, fontWeight: 700 }}>
-          🃏 YOUR DECK
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, letterSpacing: 1.5, opacity: 0.8, fontWeight: 700 }}>
+          <Cards size={13} /> YOUR DECK
         </div>
 
         {loading && (
@@ -627,7 +658,7 @@ function DeckChooser({
         {!loading && decks.length === 0 && (
           <div style={{ fontSize: 12, color: '#ff9a9a' }}>
             No legal custom decks found. Build a 60-card deck in the Library
-            (Profile → Library) first — Masterquest does <b>not</b> allow starter
+            (Profile &rarr; Library) first — Masterquest does <b>not</b> allow starter
             decks.
           </div>
         )}
@@ -657,8 +688,8 @@ function DeckChooser({
               })}
             </div>
             {selectedDeckId == null && (
-              <div style={{ fontSize: 11, color: '#ff9a9a' }}>
-                ⚠ Select a deck above to unlock the duels.
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#ff9a9a' }}>
+                <Warning size={12} /> Select a deck above to unlock the duels.
               </div>
             )}
           </>

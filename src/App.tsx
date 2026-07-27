@@ -16,8 +16,19 @@ import {
   createChallengeApi, listIncomingChallengesApi, listOutgoingChallengesApi, respondChallengeApi, type Challenge,
 } from './profiles';
 import { connectSolanaWith, connectSolana, getSolanaWallet, detectSolanaWallets, connectRobinhoodChain, detectEvmWallet, shortAddr, type ConnectedWallet, type SolanaWalletKind } from './wallet';
-import { color as C, font as F } from './theme';
-import { Button as UIButton } from './ui';
+import { color as C, font as F, surface as SURF, edge as EDGE, depth as DEPTH } from './theme';
+import { Button as UIButton, goldPlate, obsidianPlate, engravedPanel } from './ui';
+import {
+  ArrowRight, ArrowLeft, ArrowUp, ArrowUpRight, ArrowDown, ChevronRight, ChevronDown,
+  Close, Check, Plus, Refresh, Play, Search, Copy, Edit as EditIcon,
+  Trash, Save, Folder, Swords, Shield, ShieldCheck, Skull, Heart, Bolt, Fire, Robot,
+  Wizard, Ghost, Cards, Deck as DeckIcon, Target, Gamepad, Trophy, Star,
+  StarOutline, Crown, Gem, Coins, Chart, Castle, Temple, Book, Books, Globe, Moon, Orb,
+  Link as LinkIcon, Chain, Warning, Info, Lock, User, Settings, Tools,
+  Mobile, Fox, Backpack, Diamond, DiamondOutline, Dot, SoundOn, SoundOff, Music,
+  Hourglass, EnterKey, Lizard, GridView, ListView, MedalFirst,
+  Hand, Dice, Icon, type IconKey,
+} from './icons';
 import { CardHover, CardPreview } from './CardPreview';
 import { RankedAPI, tierColors, rankLabel, type PublicRankedProfile, type LeaderboardEntry } from './ranked-client';
 import { Connection } from '@solana/web3.js';
@@ -80,7 +91,7 @@ function solConn(): Connection {
           }
           if (i > 0) {
             idx = (idx + i) % conns.length;
-            try { console.warn('[rpc] failover →', candidates[idx]); } catch {}
+            try { console.warn('[rpc] failover ->', candidates[idx]); } catch {}
           }
           return res;
         } catch (e: any) {
@@ -239,7 +250,7 @@ function Login({ onLogin, onFirstTime }: {
   //   1. Mount the <audio>, attempt to play() immediately.
   //   2. If the promise rejects (autoplay policy), wait for the first
   //      pointerdown anywhere on the screen and retry.
-  //   3. Always render a 🔊 / 🔇 toggle in the corner so the user can mute.
+  //   3. Always render a sound-on / sound-off toggle in the corner so the user can mute.
   // Mute preference persists across sessions via localStorage.
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [muted, setMuted] = useState<boolean>(() => local.get<boolean>('loginMuted', false));
@@ -298,9 +309,10 @@ function Login({ onLogin, onFirstTime }: {
           ? 'linear-gradient(180deg, rgba(7,6,15,0.10) 0%, rgba(7,6,15,0.55) 55%, rgba(7,6,15,0.96) 100%)'
           : 'radial-gradient(55% 55% at 50% 66%, rgba(7,6,15,0.72), transparent 72%), linear-gradient(180deg, rgba(7,6,15,0.28), rgba(7,6,15,0.5))' }} />
         <button onClick={() => setMuted(m => !m)} aria-label={muted ? 'Unmute' : 'Mute'} style={{
-          position: 'fixed', top: 'calc(12px + env(safe-area-inset-top))', right: 14, zIndex: 5, width: 40, height: 40, borderRadius: 20,
+          position: 'fixed', top: 'calc(12px + env(safe-area-inset-top))', right: 14, zIndex: 5, width: 44, height: 44, borderRadius: 22,
           background: 'rgba(10,5,30,0.6)', border: '1px solid rgba(212,175,55,0.45)', color: '#D4AF37', fontSize: 17, cursor: 'pointer',
-        }}>{muted ? '🔇' : (playing ? '🔊' : '🎵')}</button>
+          backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        }}>{muted ? <SoundOff size={18} /> : (playing ? <SoundOn size={18} /> : <Music size={18} />)}</button>
 
         <div style={mobile ? {
           position: 'absolute', zIndex: 2, left: 0, right: 0, bottom: 0,
@@ -320,7 +332,7 @@ function Login({ onLogin, onFirstTime }: {
           <button className="ocva-btn" disabled={!!busy}
             onClick={() => evm.installed ? doConnectRobinhood() : window.open('https://metamask.io/download/', '_blank', 'noopener')}
             style={{ width: '100%', padding: '15px', fontSize: 15, background: 'linear-gradient(135deg,#F6851B,#E2761B)', color: '#1a1408' }}>
-            🦊 {connecting ? 'Connecting…' : (evm.installed ? `Sign in with ${evm.label}` : 'Install MetaMask')}
+            <Fox size={18} /> {connecting ? 'Connecting…' : (evm.installed ? `Sign in with ${evm.label}` : 'Install MetaMask')}
           </button>
 
           <div style={{ display: 'flex', gap: 8 }}>
@@ -332,10 +344,11 @@ function Login({ onLogin, onFirstTime }: {
               style={{ padding: '0 18px', fontSize: 15 }}>Play</button>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 18, marginTop: 2 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 2, flexWrap: 'wrap' }}>
             {(['Discord', 'Google', 'Apple', 'X'] as const).map(s => (
               <button key={s} onClick={() => setNotice(`${s} login is coming soon.`)}
-                style={{ background: 'none', border: 'none', color: '#8f89a3', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>{s}</button>
+                style={{ background: 'none', border: 'none', color: '#8f89a3', fontSize: 12, cursor: 'pointer', textDecoration: 'underline',
+                  padding: '12px 8px', minHeight: 44 }}>{s}</button>
             ))}
           </div>
           {(err || notice) && (
@@ -360,7 +373,7 @@ const OVP = {
   border: 'rgba(229,184,75,0.35)',
 };
 
-/** One node in the Connect Wallet → Create Profile → Enter Arena stepper. */
+/** One node in the Connect Wallet -> Create Profile -> Enter Arena stepper. */
 function ProfileStep({ n, label, state }: { n: React.ReactNode; label: string; state: 'done' | 'active' | 'todo' }) {
   const ring = state === 'done' ? OVP.gold : state === 'active' ? OVP.purple : '#3a3f55';
   return (
@@ -471,7 +484,7 @@ function FirstTimeProfile({ wallet, onCreated, onCancel }: {
 
         {/* stepper */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'clamp(8px,2vw,20px)', margin: '10px 0 22px', flexWrap: 'wrap' }}>
-          <ProfileStep n="✓" label="CONNECT WALLET" state="done" />
+          <ProfileStep n={<Check size={15} />} label="CONNECT WALLET" state="done" />
           <span aria-hidden style={{ width: 'clamp(20px,6vw,80px)', height: 1, background: 'rgba(229,184,75,0.4)' }} />
           <ProfileStep n="2" label="CREATE PROFILE" state="active" />
           <span aria-hidden style={{ width: 'clamp(20px,6vw,80px)', height: 1, background: 'rgba(255,255,255,0.14)' }} />
@@ -513,11 +526,11 @@ function FirstTimeProfile({ wallet, onCreated, onCancel }: {
                 background: 'radial-gradient(circle at 50% 38%, #3a2a6a, #14102a)', display: 'grid', placeItems: 'center' }}>
                 {avatarUrl
                   ? <img src={avatarUrl} alt="Profile preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  : <span aria-hidden style={{ fontSize: 66, color: OVP.violet }}>👤</span>}
+                  : <span aria-hidden style={{ color: OVP.violet, display: 'flex' }}><User size={72} /></span>}
               </div>
               <label className="ovp-upload" style={{ display: 'block', marginTop: 16, padding: '12px', borderRadius: 9,
                 background: 'rgba(9,13,25,0.85)', border: `1px solid ${OVP.gold}66`, color: OVP.text, fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>
-                ⬆ UPLOAD IMAGE
+                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><ArrowUp size={15} /> UPLOAD IMAGE</span>
                 <input type="file" accept="image/png,image/jpeg,image/webp" onChange={onPickFile} style={{ display: 'none' }} aria-label="Upload profile image" />
               </label>
               {avatarUrl && (
@@ -540,7 +553,12 @@ function FirstTimeProfile({ wallet, onCreated, onCancel }: {
                 <span style={{ fontSize: 12, color: OVP.muted }}>3–20 characters</span>
                 <button className="ovp-link" onClick={checkName} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontFamily: F.body,
                   color: nameStatus === 'ok' ? OVP.green : nameStatus === 'taken' ? '#ff6b6b' : OVP.muted }}>
-                  {nameStatus === 'checking' ? '… Checking' : nameStatus === 'ok' ? '✓ Available' : nameStatus === 'taken' ? '✗ Taken' : '◇ Check availability'}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {nameStatus === 'checking' ? <>… Checking</>
+                      : nameStatus === 'ok' ? <><Check size={13} /> Available</>
+                      : nameStatus === 'taken' ? <><Close size={13} /> Taken</>
+                      : <><DiamondOutline size={11} /> Check availability</>}
+                  </span>
                 </button>
               </div>
 
@@ -562,14 +580,15 @@ function FirstTimeProfile({ wallet, onCreated, onCancel }: {
           {/* footer */}
           <div style={{ marginTop: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: OVP.muted, fontSize: 13 }}>
-              <span aria-hidden style={{ color: OVP.purple }}>🛡</span> You can update your profile later in Settings.
+              <span aria-hidden style={{ color: OVP.purple, display: 'inline-flex' }}><Shield size={15} /></span> You can update your profile later in Settings.
             </div>
-            <button className="ovp-primary" onClick={create} disabled={!canSubmit} style={{
-              padding: '16px 30px', borderRadius: 10, border: '1px solid #8a6d24', cursor: canSubmit ? 'pointer' : 'not-allowed',
-              background: canSubmit ? `linear-gradient(180deg, ${OVP.goldHi}, #c69533)` : 'rgba(120,100,40,0.4)',
-              color: '#1a1408', fontWeight: 900, fontSize: 15, letterSpacing: 1, fontFamily: '"Cinzel", serif',
-              boxShadow: canSubmit ? '0 8px 24px -6px rgba(229,184,75,0.6)' : 'none',
-            }}>⚔ {saving ? 'CREATING PROFILE…' : 'CREATE PROFILE & ENTER ARENA'}</button>
+            <button className="ova-plate ova-plate--gold" onClick={create} disabled={!canSubmit} style={{
+              padding: '16px 30px', fontSize: 14.5, letterSpacing: '0.16em',
+            }}>
+              <Diamond size={9} className="ova-orn" />
+              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}><Swords size={17} /> {saving ? 'CREATING PROFILE…' : 'CREATE PROFILE & ENTER ARENA'}</span>
+              <Diamond size={9} className="ova-orn" />
+            </button>
           </div>
         </div>
       </div>
@@ -612,14 +631,14 @@ function BgMusic({ src, storageKey }: { src: string; storageKey: string }) {
         onClick={toggle}
         title={muted ? 'Unmute music' : 'Mute music'}
         style={{
-          position: 'fixed', right: 14, bottom: 14, zIndex: 1000,
+          position: 'fixed', right: 14, bottom: 'calc(14px + env(safe-area-inset-bottom))', zIndex: 1000,
           width: 44, height: 44, borderRadius: '50%',
           background: 'rgba(20,20,20,0.75)', color: '#fff',
           border: '1px solid rgba(255,255,255,0.3)', cursor: 'pointer',
           fontSize: 18, backdropFilter: 'blur(6px)',
           boxShadow: '0 4px 14px rgba(0,0,0,0.6)',
         }}
-      >{muted ? '🔇' : '🔊'}</button>
+      >{muted ? <SoundOff size={19} /> : <SoundOn size={19} />}</button>
     </>
   );
 }
@@ -649,15 +668,29 @@ const RULES_HEAD = '"Cinzel", "Times New Roman", serif';
 
 type RulesSectionId = 'goal' | 'setup' | 'cards' | 'gas' | 'turn' | 'advanced' | 'example' | 'cheatsheet';
 
-const RULES_NAV: { id: RulesSectionId; label: string; icon: string }[] = [
-  { id: 'goal',       label: 'Goal',           icon: '🏆' },
-  { id: 'setup',      label: 'Setup',          icon: '⚔️' },
-  { id: 'cards',      label: 'Card Types',     icon: '🃏' },
-  { id: 'gas',        label: 'Gas System',     icon: '⛽' },
-  { id: 'turn',       label: 'Turn Order',     icon: '🔄' },
-  { id: 'advanced',   label: 'Advanced',       icon: '📖' },
-  { id: 'example',    label: 'Example Turn',   icon: '🎮' },
-  { id: 'cheatsheet', label: 'UI Cheat-sheet', icon: '⌨️' },
+/**
+ * Rules/rulebook copy stores directional arrows as the ASCII markers `->` and
+ * `<-` so no pictograph ever lives in a string literal. This renders them as
+ * the shared SVG arrows, keeping the on-screen wording identical.
+ */
+function arrowize(text: string, keyPrefix = 'a'): React.ReactNode {
+  const parts = String(text).split(/(->|<-)/);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) =>
+    part === '->' ? <ArrowRight key={`${keyPrefix}${i}`} size={13} style={{ margin: '0 4px' }} />
+      : part === '<-' ? <ArrowLeft key={`${keyPrefix}${i}`} size={13} style={{ margin: '0 4px' }} />
+      : <React.Fragment key={`${keyPrefix}${i}`}>{part}</React.Fragment>);
+}
+
+const RULES_NAV: { id: RulesSectionId; label: string; icon: IconKey }[] = [
+  { id: 'goal',       label: 'Goal',           icon: 'trophy' },
+  { id: 'setup',      label: 'Setup',          icon: 'swords' },
+  { id: 'cards',      label: 'Card Types',     icon: 'cards' },
+  { id: 'gas',        label: 'Gas System',     icon: 'fuel' },
+  { id: 'turn',       label: 'Turn Order',     icon: 'refresh' },
+  { id: 'advanced',   label: 'Advanced',       icon: 'book' },
+  { id: 'example',    label: 'Example Turn',   icon: 'gamepad' },
+  { id: 'cheatsheet', label: 'UI Cheat-sheet', icon: 'keyboard' },
 ];
 
 const RULES_SEARCH_INDEX: { id: RulesSectionId; text: string }[] = [
@@ -709,12 +742,12 @@ function RulesPage({ onBack }: { onBack: () => void }) {
 
   const highlight = (text: string) => {
     const q = search.trim();
-    if (!q) return text;
+    if (!q) return arrowize(text);
     const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
     return text.split(re).map((part, i) =>
       part.toLowerCase() === q.toLowerCase()
         ? <mark key={i} style={{ background: 'rgba(212,175,55,0.45)', color: '#fff', padding: '0 2px', borderRadius: 2 }}>{part}</mark>
-        : <React.Fragment key={i}>{part}</React.Fragment>
+        : <React.Fragment key={i}>{arrowize(part, `h${i}`)}</React.Fragment>
     );
   };
 
@@ -795,7 +828,7 @@ function RulesPage({ onBack }: { onBack: () => void }) {
         backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
         zIndex: 10,
       }}>
-        <button onClick={onBack} style={ghostBtn}>← Back</button>
+        <button onClick={onBack} style={ghostBtn}><ArrowLeft size={14} /> Back</button>
         <div style={{
           fontFamily: RULES_HEAD, fontWeight: 800, letterSpacing: 4, fontSize: 18,
           color: RULES_TOKENS.gold,
@@ -810,7 +843,7 @@ function RulesPage({ onBack }: { onBack: () => void }) {
             color: RULES_TOKENS.gold, cursor: 'pointer', fontSize: 13, fontWeight: 600,
           }}
           title="Search rules (Ctrl+K)"
-        >🔍 <span style={{ opacity: 0.85 }}>Search</span><kbd style={{
+        ><Search size={15} /> <span style={{ opacity: 0.85 }}>Search</span><kbd style={{
           marginLeft: 4, padding: '2px 6px', fontSize: 10,
           background: 'rgba(0,0,0,0.4)', borderRadius: 4, color: RULES_TOKENS.mute,
         }}>Ctrl K</kbd></button>
@@ -899,7 +932,7 @@ function RulesPage({ onBack }: { onBack: () => void }) {
           <div style={{
             fontFamily: RULES_HEAD, fontSize: 18, letterSpacing: 4, fontWeight: 700,
             color: RULES_TOKENS.gold, textAlign: 'center', marginBottom: 14,
-          }}>⚡ LEARN IN 30 SECONDS</div>
+          }}><span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}><Bolt size={18} /> LEARN IN 30 SECONDS</span></div>
           <div style={{
             display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12,
           }}>
@@ -908,7 +941,7 @@ function RulesPage({ onBack }: { onBack: () => void }) {
               { n: 2, t: 'Nodes make Gas',       c: RULES_TOKENS.purple },
               { n: 3, t: 'Cast Memes',           c: RULES_TOKENS.blue },
               { n: 4, t: 'Attack Opponent',      c: RULES_TOKENS.red },
-              { n: 5, t: 'Reduce Life 20 → 0',   c: RULES_TOKENS.green },
+              { n: 5, t: 'Reduce Life 20 -> 0',  c: RULES_TOKENS.green },
             ].map(s => (
               <div key={s.n} style={{
                 background: 'rgba(0,0,0,0.35)', borderRadius: 10,
@@ -922,7 +955,7 @@ function RulesPage({ onBack }: { onBack: () => void }) {
                   fontWeight: 900, color: '#0a0a14', fontSize: 16,
                   boxShadow: `0 0 18px ${s.c}77`,
                 }}>{s.n}</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{s.t}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{arrowize(s.t, `qs${s.n}`)}</div>
               </div>
             ))}
           </div>
@@ -965,7 +998,7 @@ function RulesPage({ onBack }: { onBack: () => void }) {
                 borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: active ? 700 : 500,
                 fontFamily: RULES_FONT, textAlign: 'left', transition: 'all 200ms ease',
               }}>
-                <span style={{ fontSize: 15 }}>{n.icon}</span>
+                <Icon name={n.icon} size={16} />
                 <span>{n.label}</span>
               </button>
             );
@@ -1006,11 +1039,11 @@ function RulesPage({ onBack }: { onBack: () => void }) {
 }
 
 const SECTION_SUMMARY: Record<RulesSectionId, string> = {
-  goal:       'Reduce your opponent\'s life from 20 → 0. Last player standing wins.',
+  goal:       'Reduce your opponent\'s life from 20 -> 0. Last player standing wins.',
   setup:      '5 chains. 60-card deck. Start at 20 life with 7 cards.',
   cards:      'Nodes, Memes, Machines, Moves — your full toolkit.',
   gas:        'Tap Nodes to fuel your spells. Gas drains every turn.',
-  turn:       'Untap → Draw → Main → Combat → End.',
+  turn:       'Untap -> Draw -> Main -> Combat -> End.',
   advanced:   'Summoning sickness, blockers, simultaneous damage, hand size.',
   example:    'Walk through Turn 1 step-by-step.',
   cheatsheet: 'Quick clicks for the in-match UI.',
@@ -1019,7 +1052,7 @@ const SECTION_SUMMARY: Record<RulesSectionId, string> = {
 function RuleSection({
   id, icon, title, summary, open, onClickHeader, children, _ref,
 }: {
-  id: RulesSectionId; icon: string; title: string; summary: string;
+  id: RulesSectionId; icon: IconKey; title: string; summary: string;
   open: boolean; onClickHeader: () => void; children: React.ReactNode;
   _ref?: (el: HTMLDivElement | null) => void;
   // unused props kept for API stability
@@ -1029,14 +1062,15 @@ function RuleSection({
     <div
       ref={_ref}
       id={`rule-${id}`}
+      className="ova-panel-orn"
       style={{
         background: open ? RULES_TOKENS.panelHi : RULES_TOKENS.panel,
         border: `1px solid ${open ? RULES_TOKENS.border : RULES_TOKENS.borderSoft}`,
-        borderRadius: 12, overflow: 'hidden',
+        borderRadius: 14, overflow: 'hidden',
         boxShadow: open
-          ? `0 14px 36px rgba(0,0,0,0.55), 0 0 0 1px ${RULES_TOKENS.goldGlow}44`
-          : '0 8px 22px rgba(0,0,0,0.4)',
-        transition: 'all 250ms ease',
+          ? `${EDGE.topHighlight}, ${DEPTH.panelHi}, 0 0 0 1px ${RULES_TOKENS.goldGlow}44`
+          : `${EDGE.topHighlight}, ${DEPTH.panel}`,
+        transition: 'background 250ms ease, border-color 250ms ease, box-shadow 250ms ease',
       }}>
       <button onClick={onClickHeader} style={{
         width: '100%', display: 'flex', alignItems: 'center', gap: 14,
@@ -1044,23 +1078,24 @@ function RuleSection({
         cursor: 'pointer', textAlign: 'left', fontFamily: RULES_FONT,
       }}>
         <span style={{
-          width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+          width: 42, height: 42, borderRadius: 11, flexShrink: 0,
           background: `linear-gradient(135deg, rgba(212,175,55,0.20), rgba(138,43,226,0.20))`,
           border: `1px solid ${RULES_TOKENS.border}`,
+          boxShadow: EDGE.topHighlight,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 20,
-        }}>{icon}</span>
+          color: RULES_TOKENS.gold,
+        }}><Icon name={icon} size={21} /></span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
             fontFamily: RULES_HEAD, fontWeight: 700, fontSize: 18,
             letterSpacing: 2, color: RULES_TOKENS.gold,
           }}>{title.toUpperCase()}</div>
-          <div style={{ fontSize: 12, color: RULES_TOKENS.mute, marginTop: 2 }}>{summary}</div>
+          <div style={{ fontSize: 12, color: RULES_TOKENS.mute, marginTop: 2 }}>{arrowize(summary, `s-${id}`)}</div>
         </div>
         <span style={{
-          color: RULES_TOKENS.gold, fontSize: 16, transition: 'transform 250ms ease',
+          color: RULES_TOKENS.gold, display: 'inline-flex', transition: 'transform 250ms ease',
           transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
-        }}>▾</span>
+        }}><ChevronDown size={16} /></span>
       </button>
       {open && (
         <div style={{
@@ -1083,9 +1118,9 @@ function renderSectionBody(id: RulesSectionId, highlight: (s: string) => React.R
           }}>
             <LifeOrb label="Start" value={20} color={RULES_TOKENS.green} />
             <div style={{
-              alignSelf: 'center', fontSize: 22, color: RULES_TOKENS.gold, fontWeight: 900,
+              alignSelf: 'center', color: RULES_TOKENS.gold, display: 'flex',
               animation: 'rulesArrow 1.6s ease-in-out infinite',
-            }}>➜</div>
+            }}><ArrowRight size={24} /></div>
             <LifeOrb label="Win" value={0} color={RULES_TOKENS.red} />
           </div>
         </div>
@@ -1125,7 +1160,7 @@ function renderSectionBody(id: RulesSectionId, highlight: (s: string) => React.R
           <p>{highlight('Nodes generate Gas. Cards cost Gas. Gas drains at end of your turn — spend it or lose it.')}</p>
           <GasFlowViz />
           <ul style={{ marginLeft: 18, marginTop: 10 }}>
-            <li>{highlight('Tap a Node → +1 Gas of its color.')}</li>
+            <li>{highlight('Tap a Node -> +1 Gas of its color.')}</li>
             <li>{highlight('A cost can be one color or mixed.')}</li>
             <li>{highlight('Unspent Gas evaporates when your turn ends.')}</li>
           </ul>
@@ -1151,10 +1186,10 @@ function renderSectionBody(id: RulesSectionId, highlight: (s: string) => React.R
       return (
         <div>
           <ul style={{ marginLeft: 18 }}>
-            <li>{highlight('Click an untapped Node → tap for Gas.')}</li>
-            <li>{highlight('Click a card in hand → play it (Moves then ask for a target).')}</li>
-            <li>{highlight('Click your own untapped Meme → mark attacker. Press "Attack with N".')}</li>
-            <li>{highlight('During declare blockers → click your Meme, then click the attacker to block.')}</li>
+            <li>{highlight('Click an untapped Node -> tap for Gas.')}</li>
+            <li>{highlight('Click a card in hand -> play it (Moves then ask for a target).')}</li>
+            <li>{highlight('Click your own untapped Meme -> mark attacker. Press "Attack with N".')}</li>
+            <li>{highlight('During declare blockers -> click your Meme, then click the attacker to block.')}</li>
             <li>{highlight('Press End Turn to pass.')}</li>
           </ul>
         </div>
@@ -1181,11 +1216,11 @@ function LifeOrb({ label, value, color }: { label: string; value: number; color:
 
 function CardTypesGrid({ highlight }: { highlight: (s: string) => React.ReactNode }) {
   const types = [
-    { name: 'NODE',    icon: '⛓️', color: RULES_TOKENS.gold,   short: 'Produces Gas',        details: 'Your "land". Free to play, but only 1 per turn. Tap on a later turn to add 1 Gas of its color to your pool.' },
-    { name: 'MEME',    icon: '🐸', color: RULES_TOKENS.purple, short: 'Creature Card',       details: 'Your fighters. Each has Power / Toughness. Attack to deal damage to the opponent. Summoning sick the turn they enter.' },
-    { name: 'MACHINE', icon: '⚙️', color: RULES_TOKENS.blue,   short: 'Permanent Effect',    details: 'Artifact / enchantment. Stays in play with an ongoing effect until destroyed.' },
-    { name: 'AURA',    icon: '🔮', color: RULES_TOKENS.purple, short: 'Enchant a Meme',      details: 'A spell that attaches to a single Meme. Buffs its stats or grants a keyword (haste, lifelink, etc). If the enchanted Meme dies or is bounced, the Aura is destroyed too.' },
-    { name: 'MOVE',    icon: '⚡', color: RULES_TOKENS.red,    short: 'Instant Action',      details: 'A one-shot spell. Resolves immediately, then goes to the graveyard.' },
+    { name: 'NODE',    icon: 'chain' as IconKey, color: RULES_TOKENS.gold,   short: 'Produces Gas',        details: 'Your "land". Free to play, but only 1 per turn. Tap on a later turn to add 1 Gas of its color to your pool.' },
+    { name: 'MEME',    icon: 'frog' as IconKey, color: RULES_TOKENS.purple, short: 'Creature Card',       details: 'Your fighters. Each has Power / Toughness. Attack to deal damage to the opponent. Summoning sick the turn they enter.' },
+    { name: 'MACHINE', icon: 'settings' as IconKey, color: RULES_TOKENS.blue,   short: 'Permanent Effect',    details: 'Artifact / enchantment. Stays in play with an ongoing effect until destroyed.' },
+    { name: 'AURA',    icon: 'orb' as IconKey, color: RULES_TOKENS.purple, short: 'Enchant a Meme',      details: 'A spell that attaches to a single Meme. Buffs its stats or grants a keyword (haste, lifelink, etc). If the enchanted Meme dies or is bounced, the Aura is destroyed too.' },
+    { name: 'MOVE',    icon: 'bolt' as IconKey, color: RULES_TOKENS.red,    short: 'Instant Action',      details: 'A one-shot spell. Resolves immediately, then goes to the graveyard.' },
   ];
   const [expanded, setExpanded] = useState<string | null>(null);
   return (
@@ -1208,9 +1243,9 @@ function CardTypesGrid({ highlight }: { highlight: (s: string) => React.ReactNod
           onMouseLeave={(e) => { if (!isOpen) (e.currentTarget as HTMLButtonElement).style.transform = 'none'; }}
           >
             <div style={{
-              fontSize: 38, lineHeight: 1, marginBottom: 8,
+              lineHeight: 1, marginBottom: 8, color: t.color, display: 'flex',
               filter: `drop-shadow(0 0 10px ${t.color})`,
-            }}>{t.icon}</div>
+            }}><Icon name={t.icon} size={38} /></div>
             <div style={{
               fontFamily: RULES_HEAD, fontWeight: 800, letterSpacing: 4,
               color: t.color, fontSize: 16, marginBottom: 4,
@@ -1238,7 +1273,7 @@ function GasFlowViz() {
       borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
       gap: 18, flexWrap: 'wrap',
     }}>
-      <FlowNode icon="⛓️" label="NODE" color={RULES_TOKENS.gold} />
+      <FlowNode icon="chain" label="NODE" color={RULES_TOKENS.gold} />
       <FlowArrow />
       <div style={{
         position: 'relative', padding: '10px 16px',
@@ -1257,21 +1292,21 @@ function GasFlowViz() {
         }} />
       </div>
       <FlowArrow />
-      <FlowNode icon="🐸" label="CAST MEME" color={RULES_TOKENS.purple} />
+      <FlowNode icon="frog" label="CAST MEME" color={RULES_TOKENS.purple} />
     </div>
   );
 }
 
-function FlowNode({ icon, label, color }: { icon: string; label: string; color: string }) {
+function FlowNode({ icon, label, color }: { icon: IconKey; label: string; color: string }) {
   return (
     <div style={{ textAlign: 'center', minWidth: 80 }}>
       <div style={{
         width: 60, height: 60, borderRadius: 12, margin: '0 auto 6px',
         background: `radial-gradient(circle, ${color}33, transparent 75%)`,
         border: `1px solid ${color}77`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', color,
         boxShadow: `0 0 20px ${color}55`,
-      }}>{icon}</div>
+      }}><Icon name={icon} size={28} /></div>
       <div style={{
         fontFamily: RULES_HEAD, fontSize: 11, letterSpacing: 2, fontWeight: 700, color,
       }}>{label}</div>
@@ -1282,19 +1317,19 @@ function FlowNode({ icon, label, color }: { icon: string; label: string; color: 
 function FlowArrow() {
   return (
     <span style={{
-      fontSize: 24, color: RULES_TOKENS.gold,
+      color: RULES_TOKENS.gold, display: 'inline-flex',
       animation: 'rulesArrow 1.6s ease-in-out infinite',
-    }}>➜</span>
+    }}><ArrowRight size={24} /></span>
   );
 }
 
 function TurnTimeline({ highlight }: { highlight: (s: string) => React.ReactNode }) {
   const phases = [
-    { id: 'untap',  name: 'UNTAP',  icon: '🔄', color: RULES_TOKENS.blue,   desc: 'Untap your Nodes, Memes, and Machines. Summoning sickness wears off.' },
-    { id: 'draw',   name: 'DRAW',   icon: '🃏', color: RULES_TOKENS.green,  desc: 'Draw 1 card (skipped on the very first turn of the game).' },
-    { id: 'main',   name: 'MAIN',   icon: '⚙️', color: RULES_TOKENS.gold,   desc: 'Play 1 Node, tap for Gas, cast Memes, Machines, and Moves in any order.' },
-    { id: 'combat', name: 'COMBAT', icon: '⚔️', color: RULES_TOKENS.red,    desc: 'Click Memes to attack. Opponent blocks. Damage resolves simultaneously.' },
-    { id: 'end',    name: 'END',    icon: '🌙', color: RULES_TOKENS.purple, desc: 'Unspent Gas evaporates. Discard down to 7 cards.' },
+    { id: 'untap',  name: 'UNTAP',  icon: 'refresh' as IconKey, color: RULES_TOKENS.blue,   desc: 'Untap your Nodes, Memes, and Machines. Summoning sickness wears off.' },
+    { id: 'draw',   name: 'DRAW',   icon: 'cards' as IconKey,   color: RULES_TOKENS.green,  desc: 'Draw 1 card (skipped on the very first turn of the game).' },
+    { id: 'main',   name: 'MAIN',   icon: 'settings' as IconKey, color: RULES_TOKENS.gold,  desc: 'Play 1 Node, tap for Gas, cast Memes, Machines, and Moves in any order.' },
+    { id: 'combat', name: 'COMBAT', icon: 'swords' as IconKey,  color: RULES_TOKENS.red,    desc: 'Click Memes to attack. Opponent blocks. Damage resolves simultaneously.' },
+    { id: 'end',    name: 'END',    icon: 'moon' as IconKey,    color: RULES_TOKENS.purple, desc: 'Unspent Gas evaporates. Discard down to 7 cards.' },
   ];
   const [active, setActive] = useState<string>('untap');
   const cur = phases.find(p => p.id === active)!;
@@ -1317,11 +1352,12 @@ function TurnTimeline({ highlight }: { highlight: (s: string) => React.ReactNode
                   ? `radial-gradient(circle, ${p.color}, ${p.color}55 65%, transparent 80%)`
                   : `radial-gradient(circle, ${p.color}55, ${p.color}11 65%, transparent 80%)`,
                 border: `2px solid ${active === p.id ? p.color : `${p.color}66`}`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: active === p.id ? '#fff' : p.color,
                 boxShadow: active === p.id ? `0 0 20px ${p.color}aa` : 'none',
                 animation: active === p.id ? 'rulesPulse 2s ease-out infinite' : 'none',
                 transition: 'all 250ms ease',
-              }}>{p.icon}</span>
+              }}><Icon name={p.icon} size={21} /></span>
               <span style={{
                 fontFamily: RULES_HEAD, fontSize: 10, letterSpacing: 2, fontWeight: 800,
                 color: active === p.id ? p.color : RULES_TOKENS.mute,
@@ -1329,8 +1365,8 @@ function TurnTimeline({ highlight }: { highlight: (s: string) => React.ReactNode
             </button>
             {i < phases.length - 1 && (
               <span style={{
-                fontSize: 18, color: RULES_TOKENS.gold, opacity: 0.55,
-              }}>→</span>
+                color: RULES_TOKENS.gold, opacity: 0.55, display: 'inline-flex',
+              }}><ArrowRight size={18} /></span>
             )}
           </React.Fragment>
         ))}
@@ -1391,7 +1427,7 @@ function ExampleTurn({ highlight }: { highlight: (s: string) => React.ReactNode 
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 12 }}>
         <button onClick={() => setI(v => Math.max(0, v - 1))} disabled={i === 0} style={{
           ...ghostBtn, opacity: i === 0 ? 0.4 : 1, cursor: i === 0 ? 'not-allowed' : 'pointer',
-        }}>← Previous</button>
+        }}><ArrowLeft size={14} /> Previous</button>
         <button onClick={() => setI(v => Math.min(steps.length - 1, v + 1))} disabled={i === steps.length - 1} style={{
           padding: '8px 18px', background: `linear-gradient(180deg, ${RULES_TOKENS.gold}, #8a6a16)`,
           color: '#1a1408', border: 'none', borderRadius: 6,
@@ -1399,7 +1435,7 @@ function ExampleTurn({ highlight }: { highlight: (s: string) => React.ReactNode 
           cursor: i === steps.length - 1 ? 'not-allowed' : 'pointer',
           opacity: i === steps.length - 1 ? 0.4 : 1,
           boxShadow: `0 0 14px ${RULES_TOKENS.goldGlow}`,
-        }}>Next →</button>
+        }}>Next <ArrowRight size={14} /></button>
       </div>
     </div>
   );
@@ -1419,20 +1455,20 @@ type HL = (s: string) => React.ReactNode;
 function rbHighlight(q: string): HL {
   return (text) => {
     const query = q.trim();
-    if (!query) return text;
+    if (!query) return arrowize(text);
     const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
     return String(text).split(re).map((part, i) =>
       part.toLowerCase() === query.toLowerCase()
         ? <mark key={i} style={{ background: 'rgba(230,196,92,0.4)', color: '#fff', borderRadius: 2, padding: '0 2px' }}>{part}</mark>
-        : <React.Fragment key={i}>{part}</React.Fragment>);
+        : <React.Fragment key={i}>{arrowize(part, `r${i}`)}</React.Fragment>);
   };
 }
 
-interface RBChapter { id: RBId; num: string; title: string; icon: string; accent: string; summary: string; keywords: string[]; search: string; content: (h: HL) => React.ReactNode; }
+interface RBChapter { id: RBId; num: string; title: string; icon: IconKey; accent: string; summary: string; keywords: string[]; search: string; content: (h: HL) => React.ReactNode; }
 
 const RB_CHAPTERS: RBChapter[] = [
-  { id: 'goal', num: '01', title: 'Goal', icon: '🏆', accent: RB.gold,
-    summary: 'Reduce your opponent’s life from 20 → 0. Last player standing wins.',
+  { id: 'goal', num: '01', title: 'Goal', icon: 'trophy', accent: RB.gold,
+    summary: 'Reduce your opponent’s life from 20 -> 0. Last player standing wins.',
     keywords: ['life', 'win', 'victory', '20'], search: 'goal life 20 reduce opponent zero win last player standing victory check',
     content: (h) => (
       <div>
@@ -1441,13 +1477,13 @@ const RB_CHAPTERS: RBChapter[] = [
         </p>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26, flexWrap: 'wrap', margin: '18px 0 6px' }}>
           <LifeOrb label="Start" value={20} color={RB.success} />
-          <div aria-hidden style={{ fontSize: 30, color: RB.goldBright, fontWeight: 900 }}>➜</div>
+          <div aria-hidden style={{ color: RB.goldBright, display: 'flex' }}><ArrowRight size={30} /></div>
           <LifeOrb label="Win" value={0} color={RB.danger} />
         </div>
         <RuleCallout title="Victory Check" text="If every opponent is at 0 life, the match ends immediately." />
       </div>
     ) },
-  { id: 'setup', num: '02', title: 'Setup', icon: '⚔️', accent: RB.violet,
+  { id: 'setup', num: '02', title: 'Setup', icon: 'swords', accent: RB.violet,
     summary: 'Choose a 60-card deck, draw 7 cards, and begin at 20 life.',
     keywords: ['deck', '60', 'draw', 'hand', 'mulligan', 'chain'], search: 'setup chain bnb solana ethereum robinhood base 60 card deck draw 7 hand 20 life first player no draw',
     content: (h) => (
@@ -1466,11 +1502,11 @@ const RB_CHAPTERS: RBChapter[] = [
         </ul>
       </div>
     ) },
-  { id: 'card-types', num: '03', title: 'Card Types', icon: '🃏', accent: RB.blue,
+  { id: 'card-types', num: '03', title: 'Card Types', icon: 'cards', accent: RB.blue,
     summary: 'Nodes, Memes, Machines, and Moves make up your toolkit.',
     keywords: ['node', 'meme', 'machine', 'aura', 'move'], search: 'card types node meme machine aura move creature power toughness permanent one-shot instant enchant',
     content: (h) => <CardTypesGrid highlight={h} /> },
-  { id: 'gas-system', num: '04', title: 'Gas System', icon: '⛽', accent: RB.violet,
+  { id: 'gas-system', num: '04', title: 'Gas System', icon: 'fuel', accent: RB.violet,
     summary: 'Tap Nodes to fuel your cards. Unspent Gas drains every turn.',
     keywords: ['gas', 'mana', 'cost', 'tap', 'node'], search: 'gas mana cost tap node color pool drain end of turn empty mixed fuel',
     content: (h) => (
@@ -1478,14 +1514,14 @@ const RB_CHAPTERS: RBChapter[] = [
         <p>{h('Nodes generate Gas. Cards cost Gas. Gas drains at end of your turn — spend it or lose it.')}</p>
         <GasFlowViz />
         <ul style={{ marginLeft: 18, marginTop: 10, lineHeight: 1.8 }}>
-          <li>{h('Tap a Node → +1 Gas of its color.')}</li>
+          <li>{h('Tap a Node -> +1 Gas of its color.')}</li>
           <li>{h('A cost can be one color or mixed.')}</li>
           <li>{h('Unspent Gas evaporates when your turn ends.')}</li>
         </ul>
       </div>
     ) },
-  { id: 'turn-order', num: '05', title: 'Turn Order', icon: '🔄', accent: RB.gold,
-    summary: 'Untap → Draw → Main → Combat → End.',
+  { id: 'turn-order', num: '05', title: 'Turn Order', icon: 'refresh', accent: RB.gold,
+    summary: 'Untap -> Draw -> Main -> Combat -> End.',
     keywords: ['turn', 'phase', 'untap', 'draw', 'main', 'combat', 'end'], search: 'turn phase untap draw main combat attack block damage end discard summoning sick haste',
     content: (h) => (
       <div>
@@ -1493,7 +1529,7 @@ const RB_CHAPTERS: RBChapter[] = [
         <TurnTimeline highlight={h} />
       </div>
     ) },
-  { id: 'combat', num: '06', title: 'Combat', icon: '⚔️', accent: RB.danger,
+  { id: 'combat', num: '06', title: 'Combat', icon: 'swords', accent: RB.danger,
     summary: 'Declare attackers, let the defender block, then resolve damage.',
     keywords: ['combat', 'attack', 'block', 'damage', 'blocker'], search: 'combat attack declare attackers blockers unblocked hits life simultaneous damage power toughness destroy',
     content: (h) => (
@@ -1506,7 +1542,7 @@ const RB_CHAPTERS: RBChapter[] = [
         </ul>
       </div>
     ) },
-  { id: 'advanced-rules', num: '07', title: 'Advanced Rules', icon: '📖', accent: RB.violet,
+  { id: 'advanced-rules', num: '07', title: 'Advanced Rules', icon: 'book', accent: RB.violet,
     summary: 'Summoning sickness, blockers, simultaneous damage, hand size.',
     keywords: ['summoning', 'sickness', 'haste', 'graveyard', 'hand'], search: 'advanced summoning sickness haste blockers simultaneous damage graveyard discard max hand 7 discard down',
     content: (h) => (
@@ -1520,20 +1556,20 @@ const RB_CHAPTERS: RBChapter[] = [
         </ul>
       </div>
     ) },
-  { id: 'example-turn', num: '08', title: 'Example Turn', icon: '🎮', accent: RB.blue,
+  { id: 'example-turn', num: '08', title: 'Example Turn', icon: 'gamepad', accent: RB.blue,
     summary: 'Walk through Turn 1 step-by-step.',
     keywords: ['example', 'walkthrough', 'turn 1'], search: 'example turn 1 play purple node tap gain gas cast pepe warrior end walkthrough',
     content: (h) => <ExampleTurn highlight={h} /> },
-  { id: 'ui-cheat-sheet', num: '09', title: 'UI Cheat Sheet', icon: '🖥️', accent: RB.gold,
+  { id: 'ui-cheat-sheet', num: '09', title: 'UI Cheat Sheet', icon: 'keyboard', accent: RB.gold,
     summary: 'Quick clicks for the in-match UI.',
     keywords: ['ui', 'click', 'controls', 'buttons'], search: 'ui click node tap card hand play meme attack blocker end turn button cheat sheet controls',
     content: (h) => (
       <div>
         <ul style={{ marginLeft: 18, lineHeight: 1.85 }}>
-          <li>{h('Click an untapped Node → tap for Gas.')}</li>
-          <li>{h('Click a card in hand → play it (Moves then ask for a target).')}</li>
-          <li>{h('Click your own untapped Meme → mark attacker. Press "Attack with N".')}</li>
-          <li>{h('During declare blockers → click your Meme, then click the attacker to block.')}</li>
+          <li>{h('Click an untapped Node -> tap for Gas.')}</li>
+          <li>{h('Click a card in hand -> play it (Moves then ask for a target).')}</li>
+          <li>{h('Click your own untapped Meme -> mark attacker. Press "Attack with N".')}</li>
+          <li>{h('During declare blockers -> click your Meme, then click the attacker to block.')}</li>
           <li>{h('Press End Turn to pass.')}</li>
         </ul>
       </div>
@@ -1553,7 +1589,7 @@ const RB_QUICKSTART: { n: number; title: string; sub: string; color: string; to:
   { n: 2, title: 'Generate Gas', sub: 'Fuel your cards', color: RB.violet, to: 'gas-system' },
   { n: 3, title: 'Cast Memes', sub: 'Deploy your units', color: RB.blue, to: 'card-types' },
   { n: 4, title: 'Attack', sub: 'Pressure your rival', color: RB.danger, to: 'combat' },
-  { n: 5, title: 'Reduce 20 → 0', sub: 'Last player standing', color: RB.success, to: 'goal' },
+  { n: 5, title: 'Reduce 20 -> 0', sub: 'Last player standing', color: RB.success, to: 'goal' },
 ];
 
 function readRbHash(): RBId {
@@ -1624,7 +1660,7 @@ function RulebookPage({ onBack }: { onBack: () => void }) {
             </h1>
             <p style={{ fontSize: 17, color: RB.text2, margin: '0 0 14px' }}>Everything you need to play, build, and win.</p>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '7px 14px', borderRadius: 999, background: RB.panel, border: `1px solid ${RB.border}`, fontSize: 13, fontWeight: 600 }}>
-              <span aria-hidden>📖</span> {RB_CHAPTERS.length} chapters · 8 min read
+              <Book size={15} /> {RB_CHAPTERS.length} chapters · 8 min read
             </span>
           </div>
           <TutorialPreview muted={muted} />
@@ -1662,7 +1698,7 @@ function RulebookPage({ onBack }: { onBack: () => void }) {
       <button onClick={() => setMuted((m) => !m)} aria-label={muted ? 'Unmute' : 'Mute'} className="rb-anim"
         style={{ position: 'fixed', right: 18, bottom: 18, zIndex: 20, width: 48, height: 48, borderRadius: '50%', display: 'grid', placeItems: 'center',
           background: RB.panel, border: `1px solid ${RB.borderStrong}`, color: RB.goldBright, cursor: 'pointer', fontSize: 18, boxShadow: '0 6px 20px rgba(0,0,0,0.5)' }}>
-        {muted ? '🔇' : '🔊'}
+        {muted ? <SoundOff size={19} /> : <SoundOn size={19} />}
       </button>
 
       {searchOpen && <RuleSearch onClose={() => setSearchOpen(false)} onSelect={(id, q) => { go(id, { hl: q }); setSearchOpen(false); }} />}
@@ -1689,15 +1725,15 @@ function RulebookHeader({ onBack, onOpenSearch, isMac, narrow }: { onBack: () =>
     <div style={{ position: 'sticky', top: 0, zIndex: 12, height: 62, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
       padding: '0 20px', background: 'rgba(9,8,26,0.82)', backdropFilter: 'blur(10px)', borderBottom: `1px solid ${RB.border}` }}>
       <button onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 14px', borderRadius: 9,
-        background: RB.panel, border: `1px solid ${RB.border}`, color: RB.text, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>← Back</button>
+        background: RB.panel, border: `1px solid ${RB.border}`, color: RB.text, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}><ArrowLeft size={14} /> Back</button>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span aria-hidden style={{ color: RB.gold, opacity: 0.6 }}>◇</span>
+        <span aria-hidden style={{ color: RB.gold, opacity: 0.6, display: 'inline-flex' }}><DiamondOutline size={10} /></span>
         <span style={{ fontFamily: RULES_HEAD, fontWeight: 800, letterSpacing: '0.28em', fontSize: 15, color: RB.gold }}>RULEBOOK</span>
-        <span aria-hidden style={{ color: RB.gold, opacity: 0.6 }}>◇</span>
+        <span aria-hidden style={{ color: RB.gold, opacity: 0.6, display: 'inline-flex' }}><DiamondOutline size={10} /></span>
       </div>
       <button onClick={onOpenSearch} aria-label="Search rules" style={{ display: 'flex', alignItems: 'center', gap: 8, width: narrow ? 'auto' : 300,
         padding: '9px 12px', borderRadius: 9, background: RB.panel, border: `1px solid ${RB.border}`, color: RB.text2, cursor: 'pointer', fontSize: 13 }}>
-        <span aria-hidden>🔍</span>
+        <Search size={15} />
         {!narrow && <span style={{ flex: 1, textAlign: 'left' }}>Search rules…</span>}
         <kbd style={{ padding: '2px 7px', fontSize: 11, background: 'rgba(0,0,0,0.4)', borderRadius: 5, color: RB.text2, border: `1px solid ${RB.border}` }}>{isMac ? '⌘ K' : 'Ctrl K'}</kbd>
       </button>
@@ -1721,7 +1757,7 @@ function TutorialPreview({ muted }: { muted: boolean }) {
         <button onClick={play} aria-label="Play tutorial" className="rb-anim" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center',
           background: 'linear-gradient(180deg, rgba(9,8,26,0.15), rgba(9,8,26,0.55))', border: 'none', cursor: 'pointer' }}>
           <span style={{ width: 74, height: 74, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(9,8,26,0.5)',
-            border: `2px solid ${RB.goldBright}`, boxShadow: `0 0 26px ${RB.gold}88`, color: RB.goldBright, fontSize: 26, paddingLeft: 6 }}>▶</span>
+            border: `2px solid ${RB.goldBright}`, boxShadow: `0 0 26px ${RB.gold}88`, color: RB.goldBright, paddingLeft: 6 }}><Play size={26} /></span>
           <div style={{ position: 'absolute', left: 14, bottom: 12 }}>
             <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.14em', color: RB.gold }}>60-SECOND OVERVIEW</div>
             <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>Watch tutorial</div>
@@ -1736,7 +1772,7 @@ function TutorialPreview({ muted }: { muted: boolean }) {
 function QuickStartPath({ onGo, phone }: { onGo: (id: RBId) => void; phone: boolean }) {
   return (
     <div style={{ marginTop: 20, padding: phone ? '16px 12px' : '18px 22px', borderRadius: 16, background: RB.panel, border: `1px solid ${RB.border}` }}>
-      <div style={{ textAlign: 'center', fontFamily: RULES_HEAD, fontWeight: 700, letterSpacing: '0.26em', fontSize: 14, color: RB.gold, marginBottom: 14 }}>◇ LEARN IN 30 SECONDS ◇</div>
+      <div style={{ textAlign: 'center', fontFamily: RULES_HEAD, fontWeight: 700, letterSpacing: '0.26em', fontSize: 14, color: RB.gold, marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}><DiamondOutline size={10} /> LEARN IN 30 SECONDS <DiamondOutline size={10} /></div>
       <div className={phone ? 'rb-snap rb-scroll' : ''} style={{ display: 'flex', alignItems: 'stretch', gap: phone ? 10 : 8, overflowX: phone ? 'auto' : 'visible' }}>
         {RB_QUICKSTART.map((s, i) => (
           <React.Fragment key={s.n}>
@@ -1748,11 +1784,11 @@ function QuickStartPath({ onGo, phone }: { onGo: (id: RBId) => void; phone: bool
               <span style={{ width: 42, height: 42, flex: 'none', borderRadius: '50%', display: 'grid', placeItems: 'center', fontWeight: 900, fontSize: 17,
                 color: '#0a0a14', background: `radial-gradient(circle at 35% 30%, ${s.color}, ${s.color}99)`, boxShadow: `0 0 16px ${s.color}66` }}>{s.n}</span>
               <span>
-                <div style={{ fontSize: 14, fontWeight: 800, color: s.color }}>{s.title}</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: s.color }}>{arrowize(s.title, `rq${s.n}`)}</div>
                 <div style={{ fontSize: 12, color: RB.text2 }}>{s.sub}</div>
               </span>
             </button>
-            {i < RB_QUICKSTART.length - 1 && !phone && <span aria-hidden style={{ alignSelf: 'center', color: RB.gold, opacity: 0.5, fontSize: 16, flex: 'none' }}>→</span>}
+            {i < RB_QUICKSTART.length - 1 && !phone && <span aria-hidden style={{ alignSelf: 'center', color: RB.gold, opacity: 0.5, flex: 'none', display: 'inline-flex' }}><ArrowRight size={16} /></span>}
           </React.Fragment>
         ))}
       </div>
@@ -1780,7 +1816,7 @@ function ChapterNavigation({ chapters, activeId, activeIdx, onGo }: { chapters: 
               <span aria-hidden style={{ width: 10, height: 10, borderRadius: '50%', flex: 'none', zIndex: 1,
                 background: active ? RB.gold : (i < activeIdx ? RB.gold : RB.bgEl), border: `2px solid ${active || i < activeIdx ? RB.gold : RB.border}`,
                 boxShadow: active ? `0 0 10px ${RB.gold}` : 'none' }} />
-              <span aria-hidden style={{ fontSize: 15 }}>{c.icon}</span>
+              <Icon name={c.icon} size={16} />
               <span>{c.title}</span>
             </button>
           );
@@ -1804,17 +1840,18 @@ function ChapterDropdown({ chapters, activeId, onGo }: { chapters: RBChapter[]; 
 
 function RuleChapter({ chapter, idx, total, h, onPrev, onNext }: { chapter: RBChapter; idx: number; total: number; h: HL; onPrev: () => void; onNext: () => void }) {
   return (
-    <section aria-labelledby={`rb-${chapter.id}-title`} style={{ padding: 22, borderRadius: 14, background: RB.panelActive, border: `1px solid ${RB.borderStrong}`, boxShadow: '0 14px 40px rgba(0,0,0,0.5)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
-        <span aria-hidden style={{ width: 46, height: 46, flex: 'none', borderRadius: 11, display: 'grid', placeItems: 'center', fontSize: 22,
-          background: 'linear-gradient(135deg, rgba(230,196,92,0.2), rgba(139,92,246,0.2))', border: `1px solid ${RB.border}` }}>{chapter.icon}</span>
+    <section aria-labelledby={`rb-${chapter.id}-title`} className="ova-panel-orn ova-panel-orn--hi"
+      style={{ padding: 'clamp(18px, 3vw, 26px)', background: RB.panelActive, borderColor: RB.borderStrong }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14, flexWrap: 'wrap' }}>
+        <span aria-hidden style={{ width: 46, height: 46, flex: 'none', borderRadius: 11, display: 'grid', placeItems: 'center', color: RB.goldBright,
+          background: 'linear-gradient(135deg, rgba(230,196,92,0.2), rgba(139,92,246,0.2))', border: `1px solid ${RB.border}` }}><Icon name={chapter.icon} size={23} /></span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.16em', color: RB.gold }}>CHAPTER {chapter.num}</div>
-          <h2 id={`rb-${chapter.id}-title`} style={{ margin: 0, fontFamily: RULES_HEAD, fontWeight: 700, fontSize: 28, color: RB.text }}>{chapter.title}</h2>
+          <h2 id={`rb-${chapter.id}-title`} style={{ margin: 0, fontFamily: RULES_HEAD, fontWeight: 700, fontSize: 'clamp(22px, 5vw, 28px)', color: RB.text }}>{chapter.title}</h2>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={onPrev} disabled={idx === 0} className="rb-anim" style={navBtn(idx === 0)}>← Previous</button>
-          <button onClick={onNext} disabled={idx === total - 1} className="rb-anim" style={navBtn(idx === total - 1, true)}>Next →</button>
+          <button onClick={onPrev} disabled={idx === 0} className="rb-anim" style={navBtn(idx === 0)}><ArrowLeft size={13} /> Previous</button>
+          <button onClick={onNext} disabled={idx === total - 1} className="rb-anim" style={navBtn(idx === total - 1, true)}>Next <ArrowRight size={13} /></button>
         </div>
       </div>
       <div style={{ fontSize: 15, lineHeight: 1.7, color: RB.text }}>{chapter.content(h)}</div>
@@ -1822,24 +1859,26 @@ function RuleChapter({ chapter, idx, total, h, onPrev, onNext }: { chapter: RBCh
   );
 }
 function navBtn(disabled: boolean, primary?: boolean): React.CSSProperties {
-  return { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 9, whiteSpace: 'nowrap',
-    background: primary ? RB.bgEl : 'transparent', border: `1px solid ${RB.border}`, color: disabled ? RB.text2 : RB.text,
-    cursor: disabled ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: 12.5, opacity: disabled ? 0.5 : 1 };
+  if (primary && !disabled) return { ...goldPlate(false), padding: '10px 16px', fontSize: 12, letterSpacing: '0.1em' };
+  return { ...obsidianPlate(disabled), padding: '10px 15px', fontSize: 12.5, whiteSpace: 'nowrap',
+    cursor: disabled ? 'not-allowed' : 'pointer' };
 }
 
 function RuleAccordion({ chapter, onOpen }: { chapter: RBChapter; onOpen: () => void }) {
   return (
     <button onClick={onOpen} aria-expanded={false} aria-controls={`rb-${chapter.id}-title`} className="rb-anim"
-      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 14, padding: '16px 18px', marginTop: 12, borderRadius: 12, cursor: 'pointer',
-        background: RB.panel, border: `1px solid ${RB.border}`, color: RB.text, textAlign: 'left', minHeight: 44, transition: 'background .18s ease, border-color .18s ease' }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = RB.panelHover; e.currentTarget.style.borderColor = RB.borderStrong; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = RB.panel; e.currentTarget.style.borderColor = RB.border; }}>
+      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 16, padding: '18px 20px', marginTop: 12, borderRadius: 12, cursor: 'pointer',
+        background: RB.panel, border: `1px solid ${RB.border}`, color: RB.text, textAlign: 'left', minHeight: 44,
+        boxShadow: `${EDGE.topHighlight}, 0 8px 22px -16px rgba(3,2,10,0.9)`,
+        transition: 'background 170ms cubic-bezier(0.2,0.8,0.2,1), border-color 170ms ease, transform 170ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 190ms ease' }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = RB.panelHover; e.currentTarget.style.borderColor = RB.borderStrong; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = RB.panel; e.currentTarget.style.borderColor = RB.border; e.currentTarget.style.transform = 'none'; }}>
       <span style={{ fontFamily: RULES_HEAD, fontWeight: 800, fontSize: 22, color: RB.gold, flex: 'none' }}>{chapter.num}</span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: 'block', fontFamily: RULES_HEAD, fontWeight: 700, fontSize: 18, color: RB.text }}>{chapter.title}</span>
-        <span style={{ display: 'block', fontSize: 13, color: RB.text2, marginTop: 2 }}>{chapter.summary}</span>
+        <span style={{ display: 'block', fontSize: 13, color: RB.text2, marginTop: 2 }}>{arrowize(chapter.summary, `cs-${chapter.id}`)}</span>
       </span>
-      <span aria-hidden style={{ color: RB.gold, fontSize: 16, flex: 'none' }}>▾</span>
+      <span aria-hidden style={{ color: RB.gold, flex: 'none', display: 'inline-flex' }}><ChevronDown size={17} /></span>
     </button>
   );
 }
@@ -1847,7 +1886,7 @@ function RuleAccordion({ chapter, onOpen }: { chapter: RBChapter; onOpen: () => 
 function RuleCallout({ title, text }: { title: string; text: string }) {
   return (
     <div style={{ marginTop: 16, display: 'flex', gap: 12, padding: '14px 16px', borderRadius: 12, background: 'rgba(230,196,92,0.06)', border: `1px solid ${RB.borderStrong}` }}>
-      <span aria-hidden style={{ fontSize: 20, color: RB.gold }}>🛡️</span>
+      <span aria-hidden style={{ color: RB.gold, display: 'inline-flex', flex: 'none' }}><ShieldCheck size={20} /></span>
       <div>
         <div style={{ fontWeight: 800, color: RB.goldBright, fontSize: 14 }}>{title}</div>
         <div style={{ fontSize: 13.5, color: RB.text2, marginTop: 3 }}>{text}</div>
@@ -1858,9 +1897,9 @@ function RuleCallout({ title, text }: { title: string; text: string }) {
 
 function AtAGlance() {
   const rows = [
-    { icon: '❤️', label: 'Starting Life', value: '20', color: RB.success },
-    { icon: '🃏', label: 'Opening Hand', value: '7', color: RB.violet },
-    { icon: '📚', label: 'Deck Size', value: '60', color: RB.blue },
+    { icon: 'heart' as IconKey, label: 'Starting Life', value: '20', color: RB.success },
+    { icon: 'cards' as IconKey, label: 'Opening Hand', value: '7', color: RB.violet },
+    { icon: 'books' as IconKey, label: 'Deck Size', value: '60', color: RB.blue },
   ];
   return (
     <div style={{ padding: 16, borderRadius: 14, background: RB.panel, border: `1px solid ${RB.border}` }}>
@@ -1868,7 +1907,7 @@ function AtAGlance() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {rows.map((r) => (
           <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 8, borderBottom: `1px solid ${RB.border}` }}>
-            <span aria-hidden style={{ fontSize: 16 }}>{r.icon}</span>
+            <span aria-hidden style={{ color: r.color, display: 'inline-flex' }}><Icon name={r.icon} size={17} /></span>
             <span style={{ flex: 1, fontSize: 13.5, color: RB.text2 }}>{r.label}</span>
             <span style={{ fontSize: 20, fontWeight: 800, color: r.color }}>{r.value}</span>
           </div>
@@ -1899,7 +1938,7 @@ function StillStuck({ onGo }: { onGo: () => void }) {
       <div style={{ fontSize: 13.5, color: RB.text2, margin: '6px 0 14px' }}>See a full turn walkthrough.</div>
       <button onClick={onGo} className="rb-anim" style={{ width: '100%', padding: '12px', borderRadius: 10, cursor: 'pointer', minHeight: 44,
         background: 'transparent', border: `1px solid ${RB.borderStrong}`, color: RB.goldBright, fontWeight: 800, letterSpacing: '0.04em', fontSize: 13,
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>View Example Turn →</button>
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>View Example Turn <ArrowRight size={14} /></button>
     </div>
   );
 }
@@ -1939,7 +1978,7 @@ function RuleSearch({ onClose, onSelect }: { onClose: () => void; onSelect: (id:
       <div onClick={(e) => e.stopPropagation()} onKeyDown={onKey} style={{ width: 'min(640px, 100%)', maxHeight: '76vh', display: 'flex', flexDirection: 'column',
         borderRadius: 14, background: RB.bgEl, border: `1px solid ${RB.borderStrong}`, boxShadow: '0 30px 80px rgba(0,0,0,0.6)', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: `1px solid ${RB.border}` }}>
-          <span aria-hidden style={{ color: RB.gold }}>🔍</span>
+          <span aria-hidden style={{ color: RB.gold, display: 'inline-flex' }}><Search size={17} /></span>
           <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search rules… (combat, gas, summoning sickness)" aria-label="Search rules"
             style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: RB.text, fontSize: 16, fontFamily: RULES_FONT }} />
           <kbd style={{ padding: '2px 7px', fontSize: 11, background: 'rgba(0,0,0,0.4)', borderRadius: 5, color: RB.text2 }}>Esc</kbd>
@@ -1947,14 +1986,14 @@ function RuleSearch({ onClose, onSelect }: { onClose: () => void; onSelect: (id:
         <div className="rb-scroll" role="listbox" style={{ overflowY: 'auto', padding: 8 }}>
           {results.length === 0 ? (
             <div style={{ padding: 26, textAlign: 'center', color: RB.text2 }}>
-              <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden>🔎</div>
+              <div style={{ marginBottom: 6, color: RB.text2 }} aria-hidden><Search size={26} /></div>
               No rules found for “{q}”. Try “combat”, “gas”, or “setup”.
             </div>
           ) : results.map((r, i) => (
             <button key={r.c.id} role="option" aria-selected={i === sel} onMouseEnter={() => setSel(i)} onClick={() => onSelect(r.c.id, q)}
               style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
                 background: i === sel ? RB.panelActive : 'transparent', border: `1px solid ${i === sel ? RB.borderStrong : 'transparent'}`, color: RB.text, marginBottom: 2 }}>
-              <span aria-hidden style={{ fontSize: 18, flex: 'none' }}>{r.c.icon}</span>
+              <span aria-hidden style={{ flex: 'none', color: RB.gold, display: 'inline-flex' }}><Icon name={r.c.icon} size={18} /></span>
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontWeight: 700, fontSize: 14 }}>{hl(r.c.title)}</span>
@@ -1962,7 +2001,7 @@ function RuleSearch({ onClose, onSelect }: { onClose: () => void; onSelect: (id:
                 </span>
                 <span style={{ display: 'block', fontSize: 12.5, color: RB.text2, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hl(r.snippet)}</span>
               </span>
-              <span aria-hidden style={{ color: RB.text2, fontSize: 12, flex: 'none' }}>↵</span>
+              <span aria-hidden style={{ color: RB.text2, flex: 'none', display: 'inline-flex' }}><EnterKey size={13} /></span>
             </button>
           ))}
         </div>
@@ -2001,6 +2040,15 @@ function Landing({
         draggable={false}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', userSelect: 'none', zIndex: 0 }}
       />
+      {/* Atmospheric scrim: a vignette plus a left-edge falloff so the menu
+          plates separate cleanly from the artwork without dimming the art. */}
+      <div aria-hidden style={{
+        position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none',
+        background: mobile
+          ? 'linear-gradient(180deg, rgba(6,5,15,0.12) 0%, rgba(6,5,15,0.42) 52%, rgba(6,5,15,0.92) 100%)'
+          : 'linear-gradient(90deg, rgba(6,5,15,0.74) 0%, rgba(6,5,15,0.34) 26%, rgba(6,5,15,0) 46%),'
+            + 'radial-gradient(140% 120% at 50% 50%, transparent 44%, rgba(4,3,12,0.6) 100%)',
+      }} />
       {/* "Built on Robinhood" mark, centered just below the main title. */}
       <img
         src="/built-on-robinhood.png?v=2"
@@ -2081,7 +2129,7 @@ function ContractAddressFooter() {
         }}
       >{MASTER_TOKEN_ADDRESS}</button>
       <span style={{ fontSize: 11, color: copied ? '#7fffa0' : '#888', minWidth: 50 }}>
-        {copied ? '✓ copied' : '(click to copy)'}
+        {copied ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Check size={12} /> copied</span> : '(click to copy)'}
       </span>
     </div>
   );
@@ -2140,10 +2188,10 @@ function MenuRow({ icon, label, desc, onClick, primary }: {
 // Achievements) that replaces the old long vertical scroll. Wired entirely to
 // live data: profile, ranked stats, and the multi-deck backend.
 const HUB = {
-  bg: '#050711', surface: '#080D18', raised: '#0C1220',
+  bg: '#070614', surface: '#0C0A1C', raised: '#141127',
   gold: '#E5B84B', goldHi: '#FFD86A', purple: '#8E4DFF', violet: '#C45CFF',
-  cyan: '#19D3D2', green: '#39E879', red: '#E0525E', text: '#F4F2EA', muted: '#989BB0',
-  border: '#1b2540', borderHi: '#2b3a5c',
+  cyan: '#19D3D2', green: '#39E879', red: '#E0525E', text: '#F4F2EA', muted: '#9C97B4',
+  border: 'rgba(217,180,90,0.16)', borderHi: 'rgba(217,180,90,0.42)',
 };
 const HUB_SERIF = "'Cinzel', 'EB Garamond', Georgia, serif";
 const HUB_SANS = "'Inter', system-ui, -apple-system, sans-serif";
@@ -2299,55 +2347,87 @@ function HubTopNav({ tab, setTab, onBack, onEdit, walletAddress, copied, onCopy,
   tab: HubTab; setTab: (t: HubTab) => void; onBack: () => void; onEdit: () => void;
   walletAddress: string | null; copied: boolean; onCopy: () => void; muted: boolean; onToggleMute: () => void;
 }) {
+  const mobile = useIsMobile(920);
   const connected = !!walletAddress;
   const isEvm = !!walletAddress?.startsWith('0x');
   const dot = connected ? HUB.cyan : HUB.red;
   const net = connected ? (isEvm ? 'Robinhood Chain' : 'Solana') : 'Disconnected';
-  return (
-    <div style={{ position: 'relative', zIndex: 5, height: 60, flex: '0 0 60px', display: 'flex', alignItems: 'center',
-      gap: 14, padding: '0 18px', background: 'rgba(6,8,18,0.75)', backdropFilter: 'blur(10px)', borderBottom: `1px solid ${HUB.border}` }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
-        <HubEmblem size={28} />
-        <div style={{ lineHeight: 1 }}>
-          <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 10, letterSpacing: '0.2em', color: HUB.muted }}>ON-CHAIN</div>
-          <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 13, letterSpacing: '0.1em', color: HUB.goldHi }}>VIRTUAL ARENA</div>
-        </div>
-        <button onClick={onBack} style={{ marginLeft: 8, background: 'none', border: 'none', color: HUB.muted, cursor: 'pointer', fontWeight: 700, letterSpacing: '0.08em', fontSize: 12 }}>← LOBBY</button>
+
+  const tabsNav = (
+    <nav className="hub-scroll" aria-label="Profile sections"
+      style={{ display: 'flex', alignItems: 'center', gap: 4,
+        ...(mobile ? { width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' as const, padding: '0 8px' } : {}) }}>
+      {HUB_TABS.map((t) => {
+        const active = tab === t;
+        return (
+          <button key={t} onClick={() => setTab(t)} aria-current={active ? 'page' : undefined}
+            className="hub-anim"
+            style={{ position: 'relative', background: 'none', border: 'none', cursor: 'pointer', flex: 'none',
+              padding: mobile ? '12px 12px' : '18px 14px', fontFamily: HUB_SANS, fontWeight: 800, fontSize: 12.5, letterSpacing: '0.1em',
+              color: active ? HUB.text : HUB.muted, transition: 'color .18s ease', textTransform: 'uppercase' }}>
+            {t}
+            {active && <span aria-hidden style={{ position: 'absolute', left: 10, right: 10, bottom: mobile ? 6 : 10, height: 2, borderRadius: 2,
+              background: `linear-gradient(90deg, ${HUB.gold}, ${HUB.violet})`, boxShadow: `0 0 12px ${HUB.violet}aa` }} />}
+          </button>
+        );
+      })}
+    </nav>
+  );
+
+  const brand = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+      <HubEmblem size={28} />
+      <div style={{ lineHeight: 1 }}>
+        <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 10, letterSpacing: '0.2em', color: HUB.muted }}>ON-CHAIN</div>
+        <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 13, letterSpacing: '0.1em', color: HUB.goldHi }}>VIRTUAL ARENA</div>
       </div>
+      <button onClick={onBack} style={{ marginLeft: 8, background: 'none', border: 'none', color: HUB.muted, cursor: 'pointer',
+        fontWeight: 700, letterSpacing: '0.08em', fontSize: 12, padding: mobile ? '12px 6px' : 0, minHeight: mobile ? 44 : undefined,
+        display: 'inline-flex', alignItems: 'center', gap: 7 }}><ArrowLeft size={13} /> LOBBY</button>
+    </div>
+  );
 
-      <nav style={{ display: 'flex', alignItems: 'center', gap: 4 }} aria-label="Profile sections">
-        {HUB_TABS.map((t) => {
-          const active = tab === t;
-          return (
-            <button key={t} onClick={() => setTab(t)} aria-current={active ? 'page' : undefined}
-              className="hub-anim"
-              style={{ position: 'relative', background: 'none', border: 'none', cursor: 'pointer',
-                padding: '18px 14px', fontFamily: HUB_SANS, fontWeight: 800, fontSize: 12.5, letterSpacing: '0.1em',
-                color: active ? HUB.text : HUB.muted, transition: 'color .18s ease', textTransform: 'uppercase' }}>
-              {t}
-              {active && <span aria-hidden style={{ position: 'absolute', left: 10, right: 10, bottom: 10, height: 2, borderRadius: 2,
-                background: `linear-gradient(90deg, ${HUB.gold}, ${HUB.violet})`, boxShadow: `0 0 12px ${HUB.violet}aa` }} />}
-            </button>
-          );
-        })}
-      </nav>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, justifyContent: 'flex-end', minWidth: 0 }}>
+  const actions = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: mobile ? 'none' : 1, justifyContent: 'flex-end', minWidth: 0 }}>
+      {!mobile && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 11px', borderRadius: 999, background: HUB.raised, border: `1px solid ${HUB.border}` }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: dot, boxShadow: `0 0 8px ${dot}` }} />
           <span style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>{net}</span>
         </div>
-        {walletAddress && (
-          <button onClick={onCopy} title="Copy wallet address" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 11px',
-            borderRadius: 999, background: HUB.raised, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: 'pointer', fontFamily: F.mono, fontSize: 12 }}>
-            {shortAddr(walletAddress)} <span style={{ color: copied ? HUB.green : HUB.muted }}>{copied ? '✓' : '⧉'}</span>
-          </button>
-        )}
-        <button onClick={onToggleMute} aria-label={muted ? 'Unmute' : 'Mute'} style={{ width: 34, height: 34, display: 'grid', placeItems: 'center',
-          borderRadius: 9, background: HUB.raised, border: `1px solid ${HUB.gold}44`, color: HUB.goldHi, cursor: 'pointer', fontSize: 14 }}>{muted ? '🔇' : '🔊'}</button>
-        <button onClick={onEdit} style={{ padding: '8px 14px', borderRadius: 9, background: 'transparent', border: `1px solid ${HUB.gold}`,
-          color: HUB.goldHi, cursor: 'pointer', fontWeight: 800, letterSpacing: '0.06em', fontSize: 11.5 }}>EDIT PROFILE</button>
+      )}
+      {walletAddress && !mobile && (
+        <button onClick={onCopy} title="Copy wallet address" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 11px',
+          borderRadius: 999, background: HUB.raised, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: 'pointer', fontFamily: F.mono, fontSize: 12 }}>
+          {shortAddr(walletAddress)} <span style={{ color: copied ? HUB.green : HUB.muted, display: 'inline-flex' }}>{copied ? <Check size={13} /> : <Copy size={13} />}</span>
+        </button>
+      )}
+      <button onClick={onToggleMute} aria-label={muted ? 'Unmute' : 'Mute'} style={{ width: mobile ? 40 : 34, height: mobile ? 40 : 34, display: 'grid', placeItems: 'center',
+        borderRadius: 9, background: HUB.raised, border: `1px solid ${HUB.gold}44`, color: HUB.goldHi, cursor: 'pointer', flex: 'none' }}>{muted ? <SoundOff size={16} /> : <SoundOn size={16} />}</button>
+      <button onClick={onEdit} style={{ padding: mobile ? '10px 12px' : '8px 14px', borderRadius: 9, background: 'transparent', border: `1px solid ${HUB.gold}`,
+        color: HUB.goldHi, cursor: 'pointer', fontWeight: 800, letterSpacing: '0.06em', fontSize: 11.5, whiteSpace: 'nowrap', flex: 'none' }}>{mobile ? 'EDIT' : 'EDIT PROFILE'}</button>
+    </div>
+  );
+
+  if (mobile) {
+    // Two rows: brand + actions, then a horizontally scrollable tab strip.
+    return (
+      <div style={{ position: 'relative', zIndex: 5, display: 'flex', flexDirection: 'column',
+        background: 'rgba(6,8,18,0.75)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', borderBottom: `1px solid ${HUB.border}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px' }}>
+          {brand}
+          {actions}
+        </div>
+        {tabsNav}
       </div>
+    );
+  }
+
+  return (
+    <div style={{ position: 'relative', zIndex: 5, height: 60, flex: '0 0 60px', display: 'flex', alignItems: 'center',
+      gap: 14, padding: '0 18px', background: 'rgba(6,8,18,0.75)', backdropFilter: 'blur(10px)', borderBottom: `1px solid ${HUB.border}` }}>
+      {brand}
+      {tabsNav}
+      {actions}
     </div>
   );
 }
@@ -2391,7 +2471,8 @@ function IdentityBar(props: {
 
       <div style={{ minWidth: 220, flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <span style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 26, color: HUB.text }}>{name}</span>
+          <span style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 'clamp(20px, 4vw, 26px)', color: HUB.text,
+            maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
           <span style={{ padding: '4px 10px', borderRadius: 999, background: `${HUB.gold}1c`, border: `1px solid ${HUB.gold}66`,
             color: HUB.goldHi, fontSize: 11, fontWeight: 700, letterSpacing: '0.05em' }}>
             {placement > 0 ? `PLACEMENT · ${placement} LEFT` : props.rankLabel.toUpperCase()}
@@ -2417,11 +2498,11 @@ function IdentityBar(props: {
         <button onClick={onOpenDecks} title="Open deck builder" style={{ minWidth: 150, textAlign: 'left', padding: '10px 14px', borderRadius: 12,
           background: HUB.raised, border: `1px solid ${favoriteDeckName ? HUB.gold + '55' : HUB.border}`, cursor: 'pointer', color: HUB.text,
           display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 20 }} aria-hidden>{favoriteDeckName ? '⭐' : '🂠'}</span>
+          <span style={{ color: favoriteDeckName ? HUB.goldHi : HUB.muted, display: 'inline-flex' }} aria-hidden>{favoriteDeckName ? <Star size={20} /> : <DeckIcon size={20} />}</span>
           <span>
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: HUB.muted }}>{favoriteDeckName ? 'FAVORITE DECK' : 'NO FAVORITE DECK'}</div>
             <div style={{ fontSize: 13, fontWeight: 700, color: favoriteDeckName ? HUB.text : HUB.muted, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {favoriteDeckName ?? 'Build one →'}{favoriteFaction && favoriteDeckName ? ` · ${favoriteFaction.name}` : ''}
+              {favoriteDeckName ?? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>Build one <ArrowRight size={12} /></span>}{favoriteFaction && favoriteDeckName ? ` · ${favoriteFaction.name}` : ''}
             </div>
           </span>
         </button>
@@ -2480,7 +2561,7 @@ function OverviewTab({ prof, ranked, winPct, games, favoriteDeck, favoriteFactio
         {favoriteDeck ? (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 18 }} aria-hidden>⭐</span>
+              <span style={{ color: HUB.goldHi, display: 'inline-flex' }} aria-hidden><Star size={18} /></span>
               <span style={{ fontFamily: HUB_SERIF, fontSize: 18, fontWeight: 700 }}>{favoriteDeck.name}</span>
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
@@ -2506,9 +2587,9 @@ function OverviewTab({ prof, ranked, winPct, games, favoriteDeck, favoriteFactio
 
 function HubCard({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
   return (
-    <div style={{ padding: 16, borderRadius: 14, background: HUB.raised, border: `1px solid ${HUB.border}` }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <div style={{ fontFamily: HUB_SANS, fontWeight: 800, fontSize: 12, letterSpacing: '0.12em', color: HUB.muted }}>{title}</div>
+    <div className="ova-lift" style={{ ...engravedPanel(), padding: 20, background: HUB.raised, borderColor: HUB.border }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 12 }}>
+        <div style={{ fontFamily: HUB_SANS, fontWeight: 800, fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase', color: HUB.gold }}>{title}</div>
         {right}
       </div>
       {children}
@@ -2520,10 +2601,7 @@ function Pill({ children, color }: { children: React.ReactNode; color?: string }
     background: `${color ?? HUB.violet}1c`, border: `1px solid ${color ?? HUB.violet}66`, color: color ?? HUB.violet }}>{children}</span>;
 }
 function hubGoldBtn(disabled: boolean): React.CSSProperties {
-  return { marginTop: 12, padding: '10px 16px', borderRadius: 10, cursor: disabled ? 'not-allowed' : 'pointer',
-    fontFamily: HUB_SANS, fontWeight: 800, letterSpacing: '0.06em', fontSize: 12, color: disabled ? '#efe6c9aa' : '#20170a',
-    background: disabled ? 'linear-gradient(180deg,#5a4c28,#3a3018)' : `linear-gradient(180deg,${HUB.goldHi},${HUB.gold} 55%,#b98f34)`,
-    border: `1px solid ${disabled ? '#6a5a30' : '#8a6d24'}`, opacity: disabled ? 0.85 : 1 };
+  return { ...goldPlate(disabled), marginTop: 12, padding: '11px 18px', fontSize: 12.5 };
 }
 
 // ── Collection tab ──────────────────────────────────────────────────────────
@@ -2579,7 +2657,7 @@ function AchievementsTab({ prof, ranked, deck, mobile }: { prof: Profile | null;
           <div key={a.id} style={{ padding: 14, borderRadius: 12, display: 'flex', gap: 12, alignItems: 'center',
             background: a.earned ? `radial-gradient(circle at 0% 0%, ${HUB.gold}22, ${HUB.raised} 70%)` : HUB.raised,
             border: `1px solid ${a.earned ? HUB.gold + '66' : HUB.border}`, opacity: a.earned ? 1 : 0.7 }}>
-            <div aria-hidden style={{ fontSize: 26, filter: a.earned ? `drop-shadow(0 0 8px ${HUB.gold}aa)` : 'grayscale(1)' }}>{a.earned ? a.icon : '🔒'}</div>
+            <div aria-hidden style={{ display: 'flex', color: a.earned ? HUB.goldHi : HUB.muted, filter: a.earned ? `drop-shadow(0 0 8px ${HUB.gold}aa)` : 'none' }}>{a.earned ? <Icon name={a.icon} size={26} /> : <Lock size={26} />}</div>
             <div style={{ minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontWeight: 800, fontSize: 13, color: a.earned ? HUB.text : HUB.muted }}>{a.title}</span>
@@ -2848,7 +2926,9 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
   );
 
   return (
-    <div style={{ height: '100%', display: 'flex', gap: 14, minHeight: 0, flexDirection: mobile ? 'column' : 'row' }}>
+    <div style={{ height: '100%', display: 'flex', gap: 14, minHeight: 0, flexDirection: mobile ? 'column' : 'row',
+      // Leave room for the fixed "CURRENT DECK" bar on mobile so it never covers the library.
+      paddingBottom: mobile ? 'calc(64px + env(safe-area-inset-bottom))' : 0 }}>
       <div aria-live="polite" ref={liveRef} style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }} />
 
       {/* Card library */}
@@ -2856,12 +2936,12 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
         borderRadius: 14, background: HUB.raised, border: `1px solid ${HUB.border}`, minHeight: 0 }}>
         <div style={{ padding: 14, borderBottom: `1px solid ${HUB.border}` }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
-            <span style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 17, color: HUB.goldHi }}>◈ CARD LIBRARY</span>
+            <span style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 17, color: HUB.goldHi, display: 'inline-flex', alignItems: 'center', gap: 9 }}><Diamond size={10} /> CARD LIBRARY</span>
             <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: HUB.muted }}>BUILD A 60-CARD DECK</span>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
-              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: HUB.muted }} aria-hidden>🔍</span>
+              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: HUB.muted, display: 'inline-flex' }} aria-hidden><Search size={14} /></span>
               <input value={rawSearch} onChange={(e) => setRawSearch(e.target.value)} placeholder="Search cards…" aria-label="Search cards"
                 style={{ width: '100%', padding: '9px 10px 9px 32px', borderRadius: 9, background: HUB.surface, border: `1px solid ${HUB.border}`, color: HUB.text, fontSize: 13, outline: 'none' }} />
             </div>
@@ -2871,17 +2951,17 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
               <option value="chain">SORT: CHAIN</option><option value="type">SORT: TYPE</option>
             </select>
             <div style={{ display: 'flex', borderRadius: 9, overflow: 'hidden', border: `1px solid ${HUB.border}` }}>
-              <button onClick={() => setView('grid')} aria-label="Grid view" aria-pressed={view === 'grid'} style={{ padding: '8px 11px', background: view === 'grid' ? HUB.purple : HUB.surface, color: '#fff', border: 'none', cursor: 'pointer' }}>▦</button>
-              <button onClick={() => setView('list')} aria-label="List view" aria-pressed={view === 'list'} style={{ padding: '8px 11px', background: view === 'list' ? HUB.purple : HUB.surface, color: '#fff', border: 'none', cursor: 'pointer' }}>☰</button>
+              <button onClick={() => setView('grid')} aria-label="Grid view" aria-pressed={view === 'grid'} style={{ padding: '8px 11px', background: view === 'grid' ? HUB.purple : HUB.surface, color: '#fff', border: 'none', cursor: 'pointer', display: 'grid', placeItems: 'center' }}><GridView size={15} /></button>
+              <button onClick={() => setView('list')} aria-label="List view" aria-pressed={view === 'list'} style={{ padding: '8px 11px', background: view === 'list' ? HUB.purple : HUB.surface, color: '#fff', border: 'none', cursor: 'pointer', display: 'grid', placeItems: 'center' }}><ListView size={15} /></button>
             </div>
             <button onClick={() => setShowAdvanced((v) => !v)} aria-label="Advanced filters" aria-pressed={showAdvanced}
-              style={{ padding: '8px 11px', borderRadius: 9, background: showAdvanced ? HUB.purple : HUB.surface, color: showAdvanced ? '#fff' : HUB.muted, border: `1px solid ${HUB.border}`, cursor: 'pointer' }}>⛭</button>
+              style={{ padding: '8px 11px', borderRadius: 9, background: showAdvanced ? HUB.purple : HUB.surface, color: showAdvanced ? '#fff' : HUB.muted, border: `1px solid ${HUB.border}`, cursor: 'pointer', display: 'grid', placeItems: 'center' }}><Settings size={15} /></button>
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}><ChainChips value={chain} onChange={setChain} /></div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
             <TypeChips value={type} onChange={setType} />
             <button onClick={() => { setChain('all'); setType('all'); setRawSearch(''); setOwnFilter('all'); setSort('name'); }}
-              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: HUB.muted, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, letterSpacing: '0.06em' }}>RESET ↺</button>
+              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: HUB.muted, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, letterSpacing: '0.06em', display: 'inline-flex', alignItems: 'center', gap: 6 }}>RESET <Refresh size={12} /></button>
           </div>
           {showAdvanced && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
@@ -2922,12 +3002,15 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
       {/* Current-deck panel (desktop persistent; mobile drawer) */}
       {!mobile ? <div style={{ flex: '1 1 0', minWidth: 320, maxWidth: 440, display: 'flex', minHeight: 0 }}>{panel}</div> : (
         <>
-          <button onClick={() => setMobilePanel(true)} style={{ position: 'fixed', left: 12, right: 12, bottom: 12, zIndex: 50, padding: '14px', borderRadius: 12,
+          <button onClick={() => setMobilePanel(true)} style={{ position: 'fixed', left: 12, right: 12, bottom: 'calc(12px + env(safe-area-inset-bottom))', zIndex: 50,
+            padding: '14px', minHeight: 48, borderRadius: 12,
             background: `linear-gradient(180deg, ${HUB.purple}, ${HUB.violet})`, color: '#fff', border: 'none', fontWeight: 800, letterSpacing: '0.06em',
             boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>CURRENT DECK · {total}/{DECK_SIZE} · {legality}</button>
           {mobilePanel && (
-            <div onClick={() => setMobilePanel(false)} style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(3,4,10,0.7)', display: 'flex', alignItems: 'flex-end' }}>
-              <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxHeight: '85dvh', display: 'flex' }}>{panel}</div>
+            <div onClick={() => setMobilePanel(false)} style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(3,4,10,0.7)',
+              backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', display: 'flex', alignItems: 'flex-end' }}>
+              <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxHeight: '85dvh', display: 'flex',
+                paddingBottom: 'env(safe-area-inset-bottom)', background: HUB.raised, borderRadius: '14px 14px 0 0' }}>{panel}</div>
             </div>
           )}
         </>
@@ -2988,11 +3071,11 @@ function CurrentDeckPanel(props: {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, borderRadius: 14, background: HUB.raised, border: `1px solid ${HUB.gold}44` }}>
       <div style={{ padding: 14, borderBottom: `1px solid ${HUB.border}` }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <span style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 16, color: HUB.goldHi }}>◈ CURRENT DECK</span>
+          <span style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 16, color: HUB.goldHi, display: 'inline-flex', alignItems: 'center', gap: 9 }}><Diamond size={10} /> CURRENT DECK</span>
           <div style={{ display: 'flex', gap: 6 }}>
             <button onClick={onNew} style={{ padding: '6px 12px', borderRadius: 8, background: 'transparent', border: `1px solid ${HUB.violet}`, color: HUB.violet, cursor: 'pointer', fontWeight: 800, fontSize: 11 }}>NEW</button>
-            <button onClick={onOpenLibrary} title="Saved decks" aria-label="Open saved decks" style={{ width: 32, height: 30, borderRadius: 8, background: HUB.surface, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: 'pointer' }}>
-              🗂{savedCount > 0 && <span style={{ fontSize: 9, color: HUB.gold }}> {savedCount}</span>}
+            <button onClick={onOpenLibrary} title="Saved decks" aria-label="Open saved decks" style={{ minWidth: 32, height: 30, padding: '0 8px', borderRadius: 8, background: HUB.surface, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+              <Folder size={15} />{savedCount > 0 && <span style={{ fontSize: 9, color: HUB.gold }}>{savedCount}</span>}
             </button>
           </div>
         </div>
@@ -3004,7 +3087,7 @@ function CurrentDeckPanel(props: {
           ) : (
             <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: deckName ? HUB.text : HUB.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{deckName || 'Untitled Deck'}</span>
           )}
-          <button onClick={() => setEditingName((v) => !v)} aria-label="Rename deck" style={{ background: 'none', border: 'none', color: HUB.muted, cursor: 'pointer' }}>✎</button>
+          <button onClick={() => setEditingName((v) => !v)} aria-label="Rename deck" style={{ background: 'none', border: 'none', color: HUB.muted, cursor: 'pointer', display: 'inline-flex' }}><EditIcon size={15} /></button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
           <div style={{ fontSize: 26, fontWeight: 800, color: total === DECK_SIZE ? HUB.green : HUB.text, lineHeight: 1 }}>
@@ -3014,7 +3097,7 @@ function CurrentDeckPanel(props: {
             <div className="hub-anim" style={{ width: `${pct}%`, height: '100%', transition: 'width .2s ease', background: legality === 'READY' ? `linear-gradient(90deg, ${HUB.gold}, ${HUB.green})` : `linear-gradient(90deg, ${HUB.gold}, ${HUB.violet})` }} />
           </div>
           <span style={{ padding: '4px 10px', borderRadius: 999, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.06em', color: legColor, background: `${legColor}1c`, border: `1px solid ${legColor}66` }}>
-            {legality === 'EMPTY' ? 'INCOMPLETE' : legality}{dirty ? ' •' : ''}
+            {legality === 'EMPTY' ? 'INCOMPLETE' : legality}{dirty ? <Dot size={5} style={{ marginLeft: 5, verticalAlign: 'middle' }} /> : null}
           </span>
         </div>
       </div>
@@ -3023,7 +3106,7 @@ function CurrentDeckPanel(props: {
         {total === 0 ? (
           <div style={{ height: '100%', minHeight: 180, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, textAlign: 'center',
             border: `1px dashed ${HUB.border}`, borderRadius: 12, color: HUB.muted }}>
-            <div style={{ fontSize: 30, opacity: 0.5 }} aria-hidden>🂠</div>
+            <div style={{ opacity: 0.5, display: 'flex' }} aria-hidden><DeckIcon size={30} /></div>
             <div style={{ fontSize: 13 }}>Add cards from the library to begin.</div>
           </div>
         ) : (
@@ -3062,12 +3145,12 @@ function CurrentDeckPanel(props: {
       <div style={{ padding: 14, borderTop: `1px solid ${HUB.border}` }}>
         {(copyIssues.length > 0 || (total > 0 && total !== DECK_SIZE)) && (
           <div style={{ marginBottom: 10, fontSize: 11.5, color: HUB.gold, display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {total !== DECK_SIZE && <div>○ {total < DECK_SIZE ? `${DECK_SIZE - total} more card${DECK_SIZE - total === 1 ? '' : 's'} needed` : `Remove ${total - DECK_SIZE} card${total - DECK_SIZE === 1 ? '' : 's'}`}</div>}
-            {copyIssues.slice(0, 3).map((it, i) => <div key={i} style={{ color: HUB.red }}>○ {it.message}</div>)}
-            {total === DECK_SIZE && v60.ok && <div style={{ color: HUB.green }}>✓ Deck is legal and ready.</div>}
+            {total !== DECK_SIZE && <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Dot size={7} /> {total < DECK_SIZE ? `${DECK_SIZE - total} more card${DECK_SIZE - total === 1 ? '' : 's'} needed` : `Remove ${total - DECK_SIZE} card${total - DECK_SIZE === 1 ? '' : 's'}`}</div>}
+            {copyIssues.slice(0, 3).map((it, i) => <div key={i} style={{ color: HUB.red, display: 'flex', alignItems: 'center', gap: 6 }}><Dot size={7} /> {it.message}</div>)}
+            {total === DECK_SIZE && v60.ok && <div style={{ color: HUB.green, display: 'flex', alignItems: 'center', gap: 6 }}><Check size={12} /> Deck is legal and ready.</div>}
           </div>
         )}
-        {total === 0 && <div style={{ marginBottom: 10, fontSize: 11.5, color: HUB.muted }}>○ 60 cards required · No cards selected</div>}
+        {total === 0 && <div style={{ marginBottom: 10, fontSize: 11.5, color: HUB.muted, display: 'flex', alignItems: 'center', gap: 6 }}><Dot size={7} /> 60 cards required · No cards selected</div>}
         {status && <div style={{ marginBottom: 10, fontSize: 12, color: status.ok ? HUB.green : HUB.red }}>{status.msg}</div>}
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={onClear} style={{ padding: '12px 18px', borderRadius: 10, background: HUB.surface, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: 'pointer', fontWeight: 700, letterSpacing: '0.06em', fontSize: 12 }}>CLEAR</button>
@@ -3103,7 +3186,7 @@ function SavedDeckLibrary({ decks, editingId, onClose, onSelect, onFavorite, onD
                   background: d.id === editingId ? `${HUB.violet}18` : HUB.raised, border: `1px solid ${d.id === editingId ? HUB.violet : HUB.border}` }}>
                   <button onClick={() => onSelect(d)} style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 'none', color: HUB.text, cursor: 'pointer' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      {d.isActive && <span title="Favorite deck" aria-label="Favorite">⭐</span>}
+                      {d.isActive && <span title="Favorite deck" aria-label="Favorite" style={{ color: HUB.goldHi, display: 'inline-flex' }}><Star size={14} /></span>}
                       <span style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name}</span>
                     </div>
                     <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
@@ -3112,9 +3195,9 @@ function SavedDeckLibrary({ decks, editingId, onClose, onSelect, onFavorite, onD
                       <span style={{ fontSize: 10.5, fontWeight: 700, color: ok ? HUB.green : HUB.red }}>{ok ? 'READY' : d.cards.length === DECK_SIZE ? 'INVALID' : 'INCOMPLETE'}</span>
                     </div>
                   </button>
-                  {!d.isActive && <button onClick={() => onFavorite(d)} title="Set as favorite" aria-label="Set favorite" style={libAct(HUB.gold)}>☆</button>}
-                  <button onClick={() => onDuplicate(d)} title="Duplicate" aria-label="Duplicate" style={libAct(HUB.muted)}>⧉</button>
-                  <button onClick={() => onDelete(d)} title="Delete" aria-label="Delete" style={libAct(HUB.red)}>🗑</button>
+                  {!d.isActive && <button onClick={() => onFavorite(d)} title="Set as favorite" aria-label="Set favorite" style={libAct(HUB.gold)}><StarOutline size={15} /></button>}
+                  <button onClick={() => onDuplicate(d)} title="Duplicate" aria-label="Duplicate" style={libAct(HUB.muted)}><Copy size={15} /></button>
+                  <button onClick={() => onDelete(d)} title="Delete" aria-label="Delete" style={libAct(HUB.red)}><Trash size={15} /></button>
                 </div>
               );
             })}
@@ -3125,17 +3208,18 @@ function SavedDeckLibrary({ decks, editingId, onClose, onSelect, onFavorite, onD
   );
 }
 function libAct(color: string): React.CSSProperties {
-  return { width: 30, height: 30, borderRadius: 8, background: HUB.raised, border: `1px solid ${HUB.border}`, color, cursor: 'pointer', flex: 'none', fontSize: 13 };
+  return { width: 30, height: 30, borderRadius: 8, background: HUB.raised, border: `1px solid ${HUB.border}`, color, cursor: 'pointer', flex: 'none',
+    display: 'grid', placeItems: 'center' };
 }
 
 // ── Design tokens for the redesigned profile screen ────────────────────────
 const PROFILE_FONT = "'Inter', 'Geist', 'Satoshi', system-ui, -apple-system, sans-serif";
 const PROFILE_TOKENS = {
-  bg:        '#07090f',
-  card:      '#111827',
-  cardSoft:  '#0e1422',
-  border:    '#232f45',
-  borderHi:  '#2f3e5c',
+  bg:        '#070614',
+  card:      '#181433',
+  cardSoft:  '#110E24',
+  border:    'rgba(217,180,90,0.16)',
+  borderHi:  'rgba(217,180,90,0.42)',
   accent:    '#00d18f',
   secondary: '#7c5cff',
   warning:   '#ffb84d',
@@ -3179,19 +3263,25 @@ function ProfileTopBar({ onBack, onEdit }: { onBack: () => void; onEdit: () => v
       backdropFilter: 'blur(10px)',
       borderBottom: `1px solid ${PROFILE_TOKENS.border}`,
     }}>
-      <button onClick={onBack} style={profileChip(false)}>← Back</button>
+      <button onClick={onBack} style={profileChip(false)}><ArrowLeft size={13} /> Back</button>
       <div style={{ fontWeight: 800, letterSpacing: 4, fontSize: 12, color: PROFILE_TOKENS.muted }}>PROFILE</div>
-      <button onClick={onEdit} style={profileChip(true)}>✎ Edit Profile</button>
+      <button onClick={onEdit} style={profileChip(true)}><EditIcon size={13} /> Edit Profile</button>
     </div>
   );
 }
 function profileChip(accent: boolean): React.CSSProperties {
   return {
-    padding: '8px 14px', fontSize: 12, fontWeight: 700, letterSpacing: 0.5,
-    background: accent ? 'linear-gradient(180deg, rgba(0,209,143,0.18), rgba(0,209,143,0.06))' : 'rgba(17,24,39,0.7)',
-    color: accent ? PROFILE_TOKENS.accent : PROFILE_TOKENS.text,
-    border: `1px solid ${accent ? '#00d18f55' : PROFILE_TOKENS.border}`,
-    borderRadius: 8, cursor: 'pointer', transition: '200ms ease',
+    ...obsidianPlate(false),
+    padding: '9px 15px', fontSize: 12, letterSpacing: '0.08em',
+    color: accent ? '#20170a' : PROFILE_TOKENS.text,
+    ...(accent
+      ? {
+        background: SURF.goldPlate,
+        border: `1px solid ${EDGE.bronze}`,
+        textShadow: '0 1px 0 rgba(255,255,255,0.28)',
+        boxShadow: `${EDGE.bevel}, ${DEPTH.goldGlow}`,
+      }
+      : {}),
     fontFamily: PROFILE_FONT,
   };
 }
@@ -3316,7 +3406,7 @@ function AvatarFramed({ src, name, glow, size }: { src: string | null; name: str
       }}>
         {src
           ? <img src={src} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : <div style={{ fontSize: size * 0.5, color: PROFILE_TOKENS.muted }}>👤</div>}
+          : <div style={{ color: PROFILE_TOKENS.muted, display: 'flex' }}><User size={Math.round(size * 0.5)} /></div>}
       </div>
       <style>{`@keyframes avatarGlow{to{transform:rotate(360deg)}}`}</style>
     </div>
@@ -3360,34 +3450,35 @@ function PlayerStats(props: {
         display: 'grid', gap: 12,
         gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
       }}>
-        <StatCard label="Win Rate" value={`${winPct}%`} color={winPct >= 50 ? PROFILE_TOKENS.accent : PROFILE_TOKENS.danger} icon="📈" />
-        <StatCard label="Wins" value={wins} color={PROFILE_TOKENS.accent} icon="🏆" />
-        <StatCard label="Losses" value={losses} color={PROFILE_TOKENS.danger} icon="💀" />
-        <StatCard label="Games Played" value={games} color={PROFILE_TOKENS.secondary} icon="🎴" />
-        <StatCard label="Best Streak" value={bestStreak} color={PROFILE_TOKENS.warning} icon="🔥" />
-        <StatCard label="Draws" value={draws} color={PROFILE_TOKENS.muted} icon="🤝" />
+        <StatCard label="Win Rate" value={`${winPct}%`} color={winPct >= 50 ? PROFILE_TOKENS.accent : PROFILE_TOKENS.danger} icon="chart" />
+        <StatCard label="Wins" value={wins} color={PROFILE_TOKENS.accent} icon="trophy" />
+        <StatCard label="Losses" value={losses} color={PROFILE_TOKENS.danger} icon="skull" />
+        <StatCard label="Games Played" value={games} color={PROFILE_TOKENS.secondary} icon="cards" />
+        <StatCard label="Best Streak" value={bestStreak} color={PROFILE_TOKENS.warning} icon="fire" />
+        <StatCard label="Draws" value={draws} color={PROFILE_TOKENS.muted} icon="handshake" />
         {favoriteFaction
-          ? <StatCard label="Top Faction" value={favoriteFaction.name} color={favoriteFaction.color} icon="⛓️" small />
-          : <StatCard label="Top Faction" value="—" color={PROFILE_TOKENS.muted} icon="⛓️" small />}
+          ? <StatCard label="Top Faction" value={favoriteFaction.name} color={favoriteFaction.color} icon="chain" small />
+          : <StatCard label="Top Faction" value="—" color={PROFILE_TOKENS.muted} icon="chain" small />}
       </div>
     </SectionShell>
   );
 }
 
-function StatCard({ label, value, color, icon, small }: { label: string; value: number | string; color: string; icon: string; small?: boolean }) {
+function StatCard({ label, value, color, icon, small }: { label: string; value: number | string; color: string; icon: IconKey; small?: boolean }) {
   return (
     <div
       onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = `0 12px 28px -12px ${color}66`; }}
-      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = `${EDGE.topHighlight}, ${DEPTH.panel}`; }}
       style={{
-        padding: '14px 16px', borderRadius: 12,
+        padding: '16px 18px', borderRadius: 12,
         background: `linear-gradient(180deg, ${PROFILE_TOKENS.card}, ${PROFILE_TOKENS.cardSoft})`,
         border: `1px solid ${PROFILE_TOKENS.border}`,
-        transition: 'transform 200ms ease, box-shadow 200ms ease',
+        boxShadow: `${EDGE.topHighlight}, ${DEPTH.panel}`,
+        transition: 'transform 180ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 190ms ease, border-color 190ms ease',
       }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-        <span style={{ fontSize: 10, color: PROFILE_TOKENS.muted, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase' }}>{label}</span>
-        <span style={{ fontSize: 16 }}>{icon}</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span style={{ fontSize: 10, color: PROFILE_TOKENS.muted, fontWeight: 800, letterSpacing: '0.16em', textTransform: 'uppercase' }}>{label}</span>
+        <span style={{ color, display: 'inline-flex' }}><Icon name={icon} size={16} /></span>
       </div>
       <div style={{
         fontSize: small ? 18 : 28, fontWeight: 800, color, lineHeight: 1.1,
@@ -3401,24 +3492,25 @@ function StatCard({ label, value, color, icon, small }: { label: string; value: 
 // ── SECTION SHELL ──────────────────────────────────────────────────────────
 function SectionShell({ title, eyebrow, accent, children }: { title: string; eyebrow?: string; accent: string; children: React.ReactNode }) {
   return (
-    <section style={{
-      borderRadius: 16,
+    <section className="ova-panel-orn" style={{
       background: PROFILE_TOKENS.card,
-      border: `1px solid ${PROFILE_TOKENS.border}`,
-      padding: '18px 20px 22px',
+      borderColor: PROFILE_TOKENS.border,
+      padding: '22px 24px 26px',
     }}>
-      <div style={{ marginBottom: 14 }}>
+      <div style={{ marginBottom: 18 }}>
         {eyebrow && (
-          <div style={{ fontSize: 10, color: accent, letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase', marginBottom: 4 }}>
+          <div style={{ fontSize: 10, color: accent, letterSpacing: '0.22em', fontWeight: 800, textTransform: 'uppercase', marginBottom: 6 }}>
             {eyebrow}
           </div>
         )}
         <div style={{
-          fontSize: 22, fontWeight: 800, color: '#fff', letterSpacing: 0.5,
-          display: 'flex', alignItems: 'center', gap: 10,
+          fontFamily: '"Cinzel", "EB Garamond", Georgia, serif',
+          fontSize: 25, fontWeight: 700, color: '#fff', letterSpacing: '0.03em', lineHeight: 1.1,
+          display: 'flex', alignItems: 'center', gap: 14,
         }}>
           {title}
-          <span style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${accent}55, transparent)` }} />
+          <span aria-hidden style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${accent}77, transparent)` }} />
+          <Diamond size={9} style={{ color: `${accent}`, opacity: 0.5, flex: 'none' }} />
         </div>
       </div>
       {children}
@@ -3427,23 +3519,23 @@ function SectionShell({ title, eyebrow, accent, children }: { title: string; eye
 }
 
 // ── ACHIEVEMENTS ───────────────────────────────────────────────────────────
-type Achievement = { id: string; icon: string; title: string; description: string; earned: boolean };
+type Achievement = { id: string; icon: IconKey; title: string; description: string; earned: boolean };
 
 function computeAchievements({ prof, deck, ranked }: { prof: Profile | null; deck: string[]; ranked: any | null }): Achievement[] {
   const wins = prof?.wins ?? 0;
   const games = (prof?.wins ?? 0) + (prof?.losses ?? 0) + (prof?.draws ?? 0);
   const deckSize = deck.length;
   return [
-    { id: 'first-victory', icon: '🏆', title: 'First Victory', description: 'Win your first match.', earned: wins >= 1 },
-    { id: 'rising-star',   icon: '⭐', title: 'Rising Star',   description: 'Win 5 matches.',         earned: wins >= 5 },
-    { id: 'veteran',       icon: '🎖️', title: 'Veteran',       description: 'Play 25 matches.',       earned: games >= 25 },
-    { id: 'streak-5',      icon: '🔥', title: '5 Win Streak',   description: 'Win 5 in a row.',         earned: wins >= 5 && games <= wins + 2 },
-    { id: 'meme-lord',     icon: '🐸', title: 'Meme Lord',      description: 'Win 25 matches.',         earned: wins >= 25 },
-    { id: 'deckbuilder',   icon: '🛠️', title: 'Deckbuilder',    description: 'Build a 60-card deck.',  earned: deckSize >= 60 },
-    { id: 'nft-collector', icon: '💎', title: 'NFT Collector', description: 'Link a Solana wallet.',   earned: !!prof?.walletAddress && !prof.walletAddress.startsWith('0x') },
-    { id: 'placed',        icon: '🏅', title: 'Placed',         description: 'Finish placement matches.', earned: !!ranked && (ranked.placementMatchesRemaining ?? 10) === 0 },
-    { id: 'gold-tier',     icon: '👑', title: 'Gold Tier',      description: 'Reach Gold or higher.',   earned: !!ranked && ['Gold','Platinum','Diamond','Master','Grandmaster','Mythic'].includes(ranked.visibleRank) },
-    { id: 'mythic',        icon: '🔮', title: 'Mythic',         description: 'Climb to Mythic rank.',  earned: ranked?.visibleRank === 'Mythic' },
+    { id: 'first-victory', icon: 'trophy', title: 'First Victory', description: 'Win your first match.', earned: wins >= 1 },
+    { id: 'rising-star',   icon: 'star', title: 'Rising Star',   description: 'Win 5 matches.',         earned: wins >= 5 },
+    { id: 'veteran',       icon: 'medal', title: 'Veteran',       description: 'Play 25 matches.',       earned: games >= 25 },
+    { id: 'streak-5',      icon: 'fire', title: '5 Win Streak',   description: 'Win 5 in a row.',         earned: wins >= 5 && games <= wins + 2 },
+    { id: 'meme-lord',     icon: 'frog', title: 'Meme Lord',      description: 'Win 25 matches.',         earned: wins >= 25 },
+    { id: 'deckbuilder',   icon: 'tools', title: 'Deckbuilder',    description: 'Build a 60-card deck.',  earned: deckSize >= 60 },
+    { id: 'nft-collector', icon: 'gem', title: 'NFT Collector', description: 'Link a Solana wallet.',   earned: !!prof?.walletAddress && !prof.walletAddress.startsWith('0x') },
+    { id: 'placed',        icon: 'medal', title: 'Placed',         description: 'Finish placement matches.', earned: !!ranked && (ranked.placementMatchesRemaining ?? 10) === 0 },
+    { id: 'gold-tier',     icon: 'crown', title: 'Gold Tier',      description: 'Reach Gold or higher.',   earned: !!ranked && ['Gold','Platinum','Diamond','Master','Grandmaster','Mythic'].includes(ranked.visibleRank) },
+    { id: 'mythic',        icon: 'orb', title: 'Mythic',         description: 'Climb to Mythic rank.',  earned: ranked?.visibleRank === 'Mythic' },
   ];
 }
 
@@ -3479,9 +3571,10 @@ function AchievementBadge({ a }: { a: Achievement }) {
         animation: a.earned ? 'achPulse 3s ease-in-out infinite' : 'none',
       }}>
       <div style={{
-        fontSize: 30, lineHeight: 1, marginBottom: 6,
-        filter: a.earned ? `drop-shadow(0 0 8px ${PROFILE_TOKENS.warning}aa)` : 'grayscale(1)',
-      }}>{a.earned ? a.icon : '🔒'}</div>
+        lineHeight: 1, marginBottom: 6, display: 'flex', justifyContent: 'center',
+        color: a.earned ? PROFILE_TOKENS.warning : PROFILE_TOKENS.muted,
+        filter: a.earned ? `drop-shadow(0 0 8px ${PROFILE_TOKENS.warning}aa)` : 'none',
+      }}>{a.earned ? <Icon name={a.icon} size={30} /> : <Lock size={30} />}</div>
       <div style={{ fontSize: 11, fontWeight: 800, color: a.earned ? '#fff' : PROFILE_TOKENS.muted, letterSpacing: 0.5 }}>{a.title}</div>
       <style>{`@keyframes achPulse{0%,100%{box-shadow:0 0 16px ${PROFILE_TOKENS.warning}33,inset 0 0 8px ${PROFILE_TOKENS.warning}22}50%{box-shadow:0 0 22px ${PROFILE_TOKENS.warning}55,inset 0 0 10px ${PROFILE_TOKENS.warning}33}}`}</style>
     </div>
@@ -3516,7 +3609,7 @@ function FavoriteDeck({ deck, myName }: { deck: string[]; myName: string }) {
   return (
     <SectionShell title="Favorite Deck" eyebrow="Your Featured Build" accent={PROFILE_TOKENS.secondary}>
       {deck.length === 0 ? (
-        <EmptyState icon="🃏" title="No deck saved yet"
+        <EmptyState icon="cards" title="No deck saved yet"
           message="Build a 60-card deck below to feature it here." />
       ) : (
         <div style={{ display: 'flex', gap: 18, alignItems: 'stretch', flexWrap: 'wrap' }}>
@@ -3557,7 +3650,7 @@ function FavoriteDeck({ deck, myName }: { deck: string[]; myName: string }) {
               </div>
             </div>
             <div style={{ fontSize: 11, color: PROFILE_TOKENS.muted, marginTop: 14 }}>
-              Edit your deck in the Deck Builder below ↓
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>Edit your deck in the Deck Builder below <ArrowDown size={12} /></span>
             </div>
           </div>
         </div>
@@ -3575,14 +3668,14 @@ function Mini({ label, value, color }: { label: string; value: string; color: st
   );
 }
 
-function EmptyState({ icon, title, message }: { icon: string; title: string; message: string }) {
+function EmptyState({ icon, title, message }: { icon: IconKey; title: string; message: string }) {
   return (
     <div style={{
       textAlign: 'center', padding: '36px 20px',
       background: PROFILE_TOKENS.cardSoft, borderRadius: 12,
       border: `1px dashed ${PROFILE_TOKENS.border}`,
     }}>
-      <div style={{ fontSize: 44, opacity: 0.4, marginBottom: 10 }}>{icon}</div>
+      <div style={{ opacity: 0.4, marginBottom: 10, display: 'flex', justifyContent: 'center', color: PROFILE_TOKENS.muted }}><Icon name={icon} size={44} /></div>
       <div style={{ fontSize: 16, fontWeight: 800, color: '#cfd6e3' }}>{title}</div>
       <div style={{ fontSize: 12, color: PROFILE_TOKENS.muted, marginTop: 4 }}>{message}</div>
     </div>
@@ -3618,7 +3711,7 @@ function ProfileEditModal({ prof, onClose, onSaved }: { prof: Profile; onClose: 
       padding: 20, fontFamily: PROFILE_FONT,
     }}>
       <div onClick={e => e.stopPropagation()} style={{
-        width: 'min(560px, 100%)', maxHeight: '90vh', overflow: 'auto',
+        width: 'min(560px, 100%)', maxHeight: 'calc(100dvh - 40px - env(safe-area-inset-bottom))', overflow: 'auto',
         borderRadius: 16, padding: 24,
         background: `linear-gradient(180deg, ${PROFILE_TOKENS.card}, ${PROFILE_TOKENS.cardSoft})`,
         border: `1px solid ${PROFILE_TOKENS.borderHi}`,
@@ -3626,7 +3719,7 @@ function ProfileEditModal({ prof, onClose, onSaved }: { prof: Profile; onClose: 
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: 0.5 }}>Edit Profile</div>
-          <button onClick={onClose} style={profileChip(false)}>✕</button>
+          <button onClick={onClose} style={profileChip(false)} aria-label="Close"><Close size={14} /></button>
         </div>
         <div style={{ display: 'flex', gap: 18, alignItems: 'center', marginBottom: 18 }}>
           <AvatarFramed src={avatarUrl || null} name={prof.name} glow={PROFILE_TOKENS.secondary} size={84} />
@@ -3711,7 +3804,7 @@ function PublicProfile({ name, onBack }: { name: string; onBack: () => void }) {
   return (
     <div style={{ fontFamily: 'system-ui', background: '#0a0a0c', minHeight: '100vh', color: '#eee' }}>
       <div style={{ padding: '14px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #222' }}>
-        <button onClick={onBack} style={ghostBtn}>← Back</button>
+        <button onClick={onBack} style={ghostBtn}><ArrowLeft size={13} /> Back</button>
         <div style={{ fontWeight: 800, letterSpacing: 1.5 }}>PROFILE</div>
         <div style={{ width: 80 }} />
       </div>
@@ -3739,7 +3832,7 @@ function PublicProfile({ name, onBack }: { name: string; onBack: () => void }) {
                 {prof.avatarUrl ? (
                   <img src={prof.avatarUrl} alt={prof.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 ) : (
-                  <div style={{ fontSize: 64, color: '#444' }}>👤</div>
+                  <div style={{ color: '#444', display: 'flex' }}><User size={64} /></div>
                 )}
               </div>
               <div style={{ marginTop: 18, padding: 14, background: '#101015', border: '1px solid #25252e', borderRadius: 8 }}>
@@ -3781,12 +3874,12 @@ function PublicProfile({ name, onBack }: { name: string; onBack: () => void }) {
           <div style={{ maxWidth: 980, margin: '0 auto', padding: mobile ? '0 14px 40px' : '0 24px 50px' }}>
             <div style={{ padding: 14, background: '#101015', border: '1px solid #25252e', borderRadius: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                <div style={{ fontWeight: 800, color: '#9cf', letterSpacing: 1.5, fontSize: 14 }}>
-                  🛠️ {prof.name.toUpperCase()}'S CUSTOM DECK ({deckGrouped.reduce((s, r) => s + r.n, 0)}/{DECK_SIZE})
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, color: '#9cf', letterSpacing: 1.5, fontSize: 14 }}>
+                  <Tools size={15} /> {prof.name.toUpperCase()}'S CUSTOM DECK ({deckGrouped.reduce((s, r) => s + r.n, 0)}/{DECK_SIZE})
                 </div>
                 {deck.length > 0 && (
                   <div style={{ fontSize: 11, color: deckValid.ok ? '#7fdc7f' : '#fc8' }}>
-                    {deckValid.ok ? '✓ Legal' : 'Incomplete deck'}
+                    {deckValid.ok ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Check size={12} /> Legal</span> : 'Incomplete deck'}
                   </div>
                 )}
               </div>
@@ -3872,15 +3965,15 @@ function SprotoGremlinShowcase({ walletAddress }: { walletAddress: string | null
         display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
         marginBottom: 10, padding: '0 4px',
       }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: '#e9eef7' }}>
-          🦎 Sproto Gremlins <span style={{ color: '#7d8aa3', fontWeight: 500 }}>· {items.length} owned</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 700, color: '#e9eef7' }}>
+          <Lizard size={16} /> Sproto Gremlins <span style={{ color: '#7d8aa3', fontWeight: 500 }}>· {items.length} owned</span>
         </div>
         <a
           href={`https://solscan.io/token/${SPROTO_COLLECTION_MINT}`}
           target="_blank" rel="noopener noreferrer"
-          style={{ fontSize: 11, color: '#7c5cff', textDecoration: 'none' }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#7c5cff', textDecoration: 'none' }}
         >
-          collection ↗
+          collection <ArrowUpRight size={12} />
         </a>
       </div>
       <div style={{
@@ -3960,24 +4053,24 @@ function LibrarySection({ prof }: { prof: Profile | null }) {
         </div>
         {wallet && isSol && (
           <button onClick={load} style={profileChip(false)} disabled={loading}>
-            {loading ? '…' : '↻ Refresh'}
+            {loading ? '…' : <><Refresh size={13} /> Refresh</>}
           </button>
         )}
       </div>
 
       {!wallet && (
-        <EmptyState icon="🔗" title="No wallet linked"
+        <EmptyState icon="link" title="No wallet linked"
           message="Connect a Solana wallet from the home screen to display your Memetic Masters collection." />
       )}
       {wallet && !isSol && (
-        <EmptyState icon="⚠️" title="EVM wallet detected"
+        <EmptyState icon="warning" title="EVM wallet detected"
           message={`Memetic Masters live on Solana. Your linked wallet (${wallet.slice(0,6)}…) is EVM — link a Solana wallet.`} />
       )}
       {err && (
         <div style={{ marginTop: 8, fontSize: 12, color: PROFILE_TOKENS.danger }}>{err}</div>
       )}
       {wallet && isSol && !loading && cards && cards.length === 0 && !err && (
-        <EmptyState icon="🎴" title="No Memetic Masters found"
+        <EmptyState icon="cards" title="No Memetic Masters found"
           message="No Memetic Masters NFTs were found in this wallet. Pick some up to fill your showcase." />
       )}
       {wallet && isSol && loading && (
@@ -4024,7 +4117,7 @@ function LibraryCardTile({ card }: { card: LibraryCard }) {
         {card.image
           ? <img src={card.image} alt={card.name} loading="lazy"
               style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 300ms ease' }} />
-          : <div style={{ fontSize: 36, color: PROFILE_TOKENS.muted }}>🎴</div>}
+          : <div style={{ color: PROFILE_TOKENS.muted, display: 'flex' }}><Cards size={36} /></div>}
       </div>
       <div style={{ padding: '8px 10px' }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -4222,8 +4315,8 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
         background: '#0a1224', border: `1px solid ${PROFILE_TOKENS.border}`,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-          <div style={{ fontSize: 11, letterSpacing: 1.5, fontWeight: 700, color: PROFILE_TOKENS.muted, textTransform: 'uppercase' }}>
-            📚 Deck Library {decks.length > 0 && <span style={{ color: PROFILE_TOKENS.accent }}>({decks.length})</span>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, letterSpacing: 1.5, fontWeight: 700, color: PROFILE_TOKENS.muted, textTransform: 'uppercase' }}>
+            <Books size={14} /> Deck Library {decks.length > 0 && <span style={{ color: PROFILE_TOKENS.accent }}>({decks.length})</span>}
           </div>
           <button onClick={newDeck} disabled={libBusy || saving}
             style={{ ...profileChip(true), opacity: (libBusy || saving) ? 0.5 : 1 }}>
@@ -4246,25 +4339,25 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
                   border: `1px solid ${isEditing ? PROFILE_TOKENS.accent : PROFILE_TOKENS.border}`,
                 }}>
                   <button onClick={() => loadDeck(d)} title="Load into editor"
-                    style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, padding: 0 }}>
-                    {d.isActive ? '⭐ ' : ''}{d.name}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13, padding: 0 }}>
+                    {d.isActive ? <Star size={13} style={{ color: PROFILE_TOKENS.warning }} /> : null}{d.name}
                     <span style={{ marginLeft: 6, fontSize: 10, color: PROFILE_TOKENS.muted, fontWeight: 600 }}>
                       ({d.cards.length})
                     </span>
                   </button>
                   {!d.isActive && (
                     <button onClick={() => setActive(d)} disabled={libBusy} title="Set as active deck"
-                      style={{ background: 'transparent', border: 'none', color: PROFILE_TOKENS.accent, cursor: 'pointer', fontSize: 12 }}>
-                      ⭐
+                      style={{ display: 'inline-flex', background: 'transparent', border: 'none', color: PROFILE_TOKENS.accent, cursor: 'pointer' }}>
+                      <StarOutline size={14} />
                     </button>
                   )}
                   <button onClick={() => renameDeck(d)} disabled={libBusy} title="Rename"
-                    style={{ background: 'transparent', border: 'none', color: PROFILE_TOKENS.muted, cursor: 'pointer', fontSize: 12 }}>
-                    ✎
+                    style={{ display: 'inline-flex', background: 'transparent', border: 'none', color: PROFILE_TOKENS.muted, cursor: 'pointer' }}>
+                    <EditIcon size={14} />
                   </button>
                   <button onClick={() => removeDeck(d)} disabled={libBusy} title="Delete"
-                    style={{ background: 'transparent', border: 'none', color: PROFILE_TOKENS.danger, cursor: 'pointer', fontSize: 12 }}>
-                    🗑
+                    style={{ display: 'inline-flex', background: 'transparent', border: 'none', color: PROFILE_TOKENS.danger, cursor: 'pointer' }}>
+                    <Trash size={14} />
                   </button>
                 </div>
               );
@@ -4291,7 +4384,7 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
           <button onClick={clear} style={profileChip(false)}>Clear</button>
           <button onClick={save} disabled={!validation.ok || saving}
             style={{ ...profileChip(true), opacity: (!validation.ok || saving) ? 0.5 : 1, cursor: (!validation.ok || saving) ? 'not-allowed' : 'pointer' }}>
-            {saving ? 'Saving…' : (editingId != null ? '💾 Save Deck' : '💾 Save as New')}
+            {saving ? 'Saving…' : (editingId != null ? <><Save size={13} /> Save Deck</> : <><Save size={13} /> Save as New</>)}
           </button>
         </div>
       </div>
@@ -4318,7 +4411,7 @@ function DeckbuilderPanel({ myName }: { myName: string }) {
           background: `${PROFILE_TOKENS.warning}11`, border: `1px solid ${PROFILE_TOKENS.warning}55`,
           fontSize: 12, color: PROFILE_TOKENS.warning,
         }}>
-          {validation.issues.slice(0, 3).map((it, i) => <div key={i}>• {it.message}</div>)}
+          {validation.issues.slice(0, 3).map((it, i) => <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Dot size={6} /> {it.message}</div>)}
         </div>
       )}
 
@@ -4620,7 +4713,7 @@ function Lobby({
     setError('');
     try {
       if (useCustom && !myDeckOk) {
-        setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile → Custom Deck.`);
+        setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile \u2192 Custom Deck.`);
         return;
       }
       let wager = parseWager(wagerKind, wagerAmount);
@@ -4675,7 +4768,7 @@ function Lobby({
       setError('You can\'t challenge yourself.'); return;
     }
     if (useCustom && !myDeckOk) {
-      setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile → Custom Deck.`);
+      setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile \u2192 Custom Deck.`);
       return;
     }
     setChallengeBusy(true);
@@ -4817,7 +4910,7 @@ function Lobby({
     const { match: m, seat: pid } = joinTarget;
     try {
       if (joinUseCustom && !validateDeck(joinDeck).ok) {
-        setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile → Custom Deck.`);
+        setError(`Custom deck must be exactly ${DECK_SIZE} cards. Build it in Profile \u2192 Custom Deck.`);
         return;
       }
       await upsertProfileApi(myName);
@@ -4920,26 +5013,32 @@ function Lobby({
           onClick={() => window.open('https://play.workadventu.re/@/asdasd-1775062076/asdasd/memetic-masters-hq', '_blank', 'noopener,noreferrer')}
           title="Enter Memetic Masters HQ on WorkAdventure"
           style={{
-            position: 'fixed', right: 16, top: 16, zIndex: 50,
+            position: 'fixed', zIndex: 50,
+            ...(mobile
+              ? { right: 12, bottom: 'calc(104px + env(safe-area-inset-bottom))' }
+              : { right: 16, top: 16 }),
             background: 'linear-gradient(135deg,#3a1f5a,#1b1230)',
             color: '#fff', border: '1px solid #6c4bd8', borderRadius: 8,
-            padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+            padding: '10px 14px', minHeight: 44, fontWeight: 700, fontSize: 13, cursor: 'pointer',
             boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
           }}
-        >🏛️ Enter Plaza</button>
+        ><span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Temple size={16} /> Enter Plaza</span></button>
 
         {/* VS BOT — single-player launcher lives here now (was a separate landing button). */}
         <button
           onClick={onSolo}
           title="Play a single-player match against the bot"
           style={{
-            position: 'fixed', right: 16, top: 60, zIndex: 50,
+            position: 'fixed', zIndex: 50,
+            ...(mobile
+              ? { right: 12, bottom: 'calc(52px + env(safe-area-inset-bottom))' }
+              : { right: 16, top: 64 }),
             background: 'linear-gradient(135deg,#1f3a5a,#12203a)',
             color: '#fff', border: '1px solid #4b8ad8', borderRadius: 8,
-            padding: '8px 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+            padding: '10px 14px', minHeight: 44, fontWeight: 700, fontSize: 13, cursor: 'pointer',
             boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
           }}
-        >🤖 VS Bot</button>
+        ><span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Robot size={16} /> VS Bot</span></button>
 
         {plazaOpen && (
           <Plaza
@@ -4979,7 +5078,8 @@ function Lobby({
 
         <div style={{
           flex: 1, width: '100%', maxWidth: 1480, margin: '0 auto',
-          padding: mobile ? '14px' : '22px 22px 100px',
+          // Extra bottom room on mobile so the floating Plaza / VS Bot buttons never cover content.
+          padding: mobile ? '14px 14px calc(150px + env(safe-area-inset-bottom))' : '22px 22px 100px',
           display: 'grid', gap: mobile ? 14 : 18,
           gridTemplateColumns: mobile ? '1fr' : 'minmax(280px, 340px) minmax(0, 1fr) minmax(280px, 340px)',
         }}>
@@ -4992,9 +5092,9 @@ function Lobby({
             {/* Center action tabs — one dominant action at a time (Quick Match default). */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
               {([
-                { k: 'quick',     icon: '⚔️', label: 'Quick Match' },
-                { k: 'create',    icon: '➕', label: 'Create Match' },
-                { k: 'challenge', icon: '🎯', label: 'Challenge' },
+                { k: 'quick',     icon: 'swords', label: 'Quick Match' },
+                { k: 'create',    icon: 'plus',   label: 'Create Match' },
+                { k: 'challenge', icon: 'target', label: 'Challenge' },
               ] as const).map(t => {
                 const active = centerTab === t.k;
                 const gold = t.k === 'quick';
@@ -5010,7 +5110,7 @@ function Lobby({
                     boxShadow: active ? (gold ? '0 6px 18px -6px #d9b85f88' : '0 0 20px rgba(143,92,255,0.35)') : 'none',
                     transition: 'all .15s ease', backdropFilter: 'blur(10px)',
                   }}>
-                    <div style={{ fontSize: 18 }}>{t.icon}</div>
+                    <div style={{ display: 'flex', justifyContent: 'center' }}><Icon name={t.icon} size={19} /></div>
                     <div style={{ marginTop: 4 }}>{t.label}</div>
                   </button>
                 );
@@ -5078,7 +5178,7 @@ function Lobby({
             border: '1px solid rgba(217,184,95,0.45)',
             borderRadius: 14,
             padding: 22, width: 'min(560px, calc(100vw - 24px))',
-            maxHeight: 'calc(100vh - 24px)', overflowY: 'auto', color: '#e9eef7',
+            maxHeight: 'calc(100dvh - 24px - env(safe-area-inset-bottom))', overflowY: 'auto', color: '#e9eef7',
             boxShadow: '0 30px 80px #000c',
           }}>
             <h2 style={{ margin: '0 0 6px', fontSize: 22, fontFamily: '"Cinzel", serif', letterSpacing: 1, color: '#d9b85f' }}>Accept Match</h2>
@@ -5134,7 +5234,7 @@ function Lobby({
                   borderRadius: 6, cursor: 'pointer',
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 }}>
-                  <span>🛠️ Use Custom Deck</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Tools size={14} /> Use Custom Deck</span>
                   <span style={{ fontSize: 10, opacity: 0.85 }}>{joinUseCustom ? 'ON' : 'OFF'}</span>
                 </button>
                 {joinUseCustom && myDecks.length > 0 && (
@@ -5167,10 +5267,10 @@ function Lobby({
 // ─────────────────────────────────────────────────────────────────────────────
 const LOBBY_TOKENS = {
   bg:       '#07090f',
-  panel:    'rgba(10,15,25,0.72)',
-  panelHi:  'rgba(16,22,38,0.82)',
-  border:   'rgba(255,255,255,0.08)',
-  borderHi: 'rgba(217,184,95,0.45)',
+  panel:    'rgba(12,11,26,0.78)',
+  panelHi:  'rgba(20,18,42,0.86)',
+  border:   'rgba(217,184,95,0.18)',
+  borderHi: 'rgba(217,184,95,0.52)',
   gold:     '#d9b85f',
   purple:   '#8f5cff',
   green:    '#00d18f',
@@ -5182,30 +5282,24 @@ const LOBBY_TOKENS = {
 const LOBBY_GLASS: React.CSSProperties = {
   background: LOBBY_TOKENS.panel,
   border: `1px solid ${LOBBY_TOKENS.border}`,
-  borderRadius: 14,
-  backdropFilter: 'blur(12px)',
-  WebkitBackdropFilter: 'blur(12px)',
-  boxShadow: '0 22px 60px -28px rgba(0,0,0,0.8)',
+  borderRadius: 16,
+  backdropFilter: 'blur(14px)',
+  WebkitBackdropFilter: 'blur(14px)',
+  boxShadow: `${EDGE.topHighlight}, ${DEPTH.panel}`,
 };
 
+/** Forged gold plate — the lobby's primary call to action. */
 const LOBBY_GOLD_BTN: React.CSSProperties = {
-  padding: '10px 18px',
-  background: 'linear-gradient(180deg, #f0d27a, #c69533)',
-  color: '#1a1408', border: '1px solid #8a6d24',
-  borderRadius: 10, cursor: 'pointer',
-  fontWeight: 800, letterSpacing: 0.5, fontSize: 13,
-  fontFamily: PROFILE_FONT,
-  boxShadow: '0 6px 18px -6px #d9b85f88',
-  transition: '200ms ease',
+  ...goldPlate(false),
+  padding: '12px 20px',
+  fontSize: 13,
 };
 
+/** Obsidian secondary plate with an engraved gold hairline. */
 const LOBBY_GHOST_BTN: React.CSSProperties = {
-  padding: '8px 14px',
-  background: 'rgba(255,255,255,0.04)',
-  color: LOBBY_TOKENS.text, border: `1px solid ${LOBBY_TOKENS.border}`,
-  borderRadius: 10, cursor: 'pointer',
-  fontWeight: 600, fontSize: 13, fontFamily: PROFILE_FONT,
-  transition: '200ms ease',
+  ...obsidianPlate(false),
+  padding: '10px 15px',
+  fontSize: 12.5,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5261,9 +5355,10 @@ function LobbyTopBar({ profile, myName, level, winPct, wins, losses, onBack }: {
         <div style={{
           fontFamily: '"Cinzel", serif', fontSize: 14, color: LOBBY_TOKENS.gold,
           letterSpacing: 4, textTransform: 'uppercase', fontWeight: 700,
-        }}>⚔ Matchmaking Lobby</div>
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}><Swords size={16} /> Matchmaking Lobby</div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={onBack} style={LOBBY_GHOST_BTN}>← Home</button>
+          <button onClick={onBack} style={LOBBY_GHOST_BTN}><ArrowLeft size={13} /> Home</button>
         </div>
       </div>
     </div>
@@ -5293,7 +5388,7 @@ function OpenMatchesPanel({ matches, loading, onRefresh, onJoin }: {
         <button onClick={onRefresh} disabled={loading} style={{
           ...LOBBY_GHOST_BTN, padding: '6px 10px', fontSize: 12,
           opacity: loading ? 0.5 : 1,
-        }} title="Refresh">{loading ? '…' : '↻'}</button>
+        }} title="Refresh" aria-label="Refresh open matches">{loading ? '…' : <Refresh size={14} />}</button>
       </div>
       <div style={{ overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {matches.length === 0 ? (
@@ -5313,7 +5408,7 @@ function EmptyMatchesState() {
       border: `1px dashed ${LOBBY_TOKENS.border}`, borderRadius: 12,
       background: 'rgba(255,255,255,0.02)',
     }}>
-      <div style={{ fontSize: 48, opacity: 0.5, marginBottom: 8 }}>🏰</div>
+      <div style={{ opacity: 0.5, marginBottom: 8, color: LOBBY_TOKENS.muted, display: 'flex', justifyContent: 'center' }}><Castle size={48} /></div>
       <div style={{ fontFamily: '"Cinzel", serif', fontSize: 15, color: '#fff', fontWeight: 700, letterSpacing: 1 }}>No Open Matches</div>
       <div style={{ fontSize: 12, color: LOBBY_TOKENS.muted, marginTop: 6, lineHeight: 1.5 }}>
         Create the first match and challenge<br/>other players to a duel.
@@ -5385,18 +5480,11 @@ function MatchCard({ m, onJoin }: { m: any; onJoin: () => void }) {
         </span>
       </div>
       <button onClick={onJoin} disabled={inProgress}
-        onMouseEnter={e => { if (!inProgress) e.currentTarget.style.transform = 'scale(1.02)'; }}
-        onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+        className="ova-plate ova-plate--gold"
         style={{
-          marginTop: 10, width: '100%', padding: '8px 0',
-          background: inProgress ? 'rgba(40,44,56,0.6)' : 'linear-gradient(180deg, #f0d27a, #c69533)',
-          color: inProgress ? '#6c7283' : '#1a1408',
-          border: `1px solid ${inProgress ? LOBBY_TOKENS.border : '#8a6d24'}`,
-          borderRadius: 8, fontSize: 12, fontWeight: 800, letterSpacing: 1,
-          cursor: inProgress ? 'not-allowed' : 'pointer',
-          transition: '200ms ease',
-          boxShadow: inProgress ? 'none' : '0 4px 12px -4px #d9b85f66',
-        }}>{inProgress ? 'IN PROGRESS' : 'JOIN MATCH →'}</button>
+          marginTop: 12, width: '100%', padding: '10px 0',
+          fontSize: 12, letterSpacing: '0.16em', borderRadius: 9,
+        }}>{inProgress ? 'IN PROGRESS' : <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>JOIN MATCH <ArrowRight size={13} /></span>}</button>
     </div>
   );
 }
@@ -5445,10 +5533,10 @@ function CreateMatchPanel(props: {
         {/* Step 2 — Match type */}
         <CreateStep n={2} title="Match Type">
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <SegBtn active={wagerKind === 'free'} onClick={() => setWagerKind('free')}>🎮 Casual</SegBtn>
-            <SegBtn active={false} disabled title="Use the dedicated Ranked Hub">🏆 Ranked</SegBtn>
-            <SegBtn active={false} disabled title="Coming soon">🥇 Tournament</SegBtn>
-            <SegBtn active={wagerKind === 'master'} onClick={() => setWagerKind('master')}>💎 Wager</SegBtn>
+            <SegBtn active={wagerKind === 'free'} onClick={() => setWagerKind('free')}><Gamepad size={14} /> Casual</SegBtn>
+            <SegBtn active={false} disabled title="Use the dedicated Ranked Hub"><Trophy size={14} /> Ranked</SegBtn>
+            <SegBtn active={false} disabled title="Coming soon"><MedalFirst size={14} /> Tournament</SegBtn>
+            <SegBtn active={wagerKind === 'master'} onClick={() => setWagerKind('master')}><Gem size={14} /> Wager</SegBtn>
           </div>
           {wagerKind === 'master' && (
             <div style={{ marginTop: 10 }}>
@@ -5512,7 +5600,7 @@ function CreateMatchPanel(props: {
                   fontFamily: PROFILE_FONT,
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 }}>
-                <span>{isPrivate ? '🔒 Private' : '🌐 Public'}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>{isPrivate ? <><Lock size={13} /> Private</> : <><Globe size={13} /> Public</>}</span>
                 <span style={{ fontSize: 10, opacity: 0.7 }}>{isPrivate ? 'invite-only' : 'all players'}</span>
               </button>
             </div>
@@ -5520,20 +5608,16 @@ function CreateMatchPanel(props: {
         </CreateStep>
 
         {/* Step 4 — CTA */}
-        <button onClick={onCreate}
-          onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.02)'; e.currentTarget.style.boxShadow = '0 12px 32px -6px rgba(217,184,95,0.65)'; }}
-          onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 8px 22px -8px rgba(217,184,95,0.55)'; }}
+        <button onClick={onCreate} className="ova-plate ova-plate--gold"
           style={{
-            width: '100%', padding: '16px 0',
-            background: 'linear-gradient(180deg, #f5d77a, #c8932a 60%, #a07418)',
-            color: '#1a1408', border: '1px solid #8a6d24',
-            borderRadius: 12, cursor: 'pointer',
-            fontFamily: '"Cinzel", serif',
-            fontWeight: 900, fontSize: 18, letterSpacing: 3, textTransform: 'uppercase',
-            boxShadow: '0 8px 22px -8px rgba(217,184,95,0.55)',
-            transition: '180ms ease',
+            width: '100%', padding: '17px 0', borderRadius: 12,
+            fontSize: 18, letterSpacing: '0.22em',
             animation: 'lobbyCtaGlow 3.4s ease-in-out infinite',
-          }}>⚔ Create Match</button>
+          }}>
+          <Diamond size={10} className="ova-orn" />
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}><Swords size={20} /> Create Match</span>
+          <Diamond size={10} className="ova-orn" />
+        </button>
         <style>{`@keyframes lobbyCtaGlow{0%,100%{filter:drop-shadow(0 0 0px #d9b85f00)}50%{filter:drop-shadow(0 0 14px #d9b85f88)}}`}</style>
       </div>
     </section>
@@ -5581,7 +5665,7 @@ function DeckPicker({ decks, selectedId, onSelect }: {
       >
         {decks.map(d => (
           <option key={d.id} value={d.id}>
-            {d.isActive ? '★ ' : ''}{d.name} ({d.cards.length} cards)
+            {d.isActive ? '\u2605 ' : ''}{d.name} ({d.cards.length} cards)
           </option>
         ))}
       </select>
@@ -5604,6 +5688,7 @@ function SegBtn({ active, disabled, onClick, title, children }: { active: boolea
         fontFamily: PROFILE_FONT,
         opacity: disabled ? 0.5 : 1,
         transition: '180ms ease',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
       }}>{children}</button>
   );
 }
@@ -5665,7 +5750,7 @@ function ChainSelector({ selected, useCustom, canCustom, onPickColor, onPickCust
           boxShadow: useCustom ? `0 0 18px ${LOBBY_TOKENS.purple}66, inset 0 0 12px ${LOBBY_TOKENS.purple}22` : 'none',
           fontFamily: PROFILE_FONT,
         }}>
-        <span style={{ fontSize: 22 }}>🛠️</span>
+        <span style={{ display: 'inline-flex', color: useCustom ? '#fff' : LOBBY_TOKENS.text }}><Tools size={22} /></span>
         <span style={{ fontSize: 11, fontWeight: 800, color: useCustom ? '#fff' : LOBBY_TOKENS.text, letterSpacing: 0.5 }}>Custom</span>
         <span style={{ fontSize: 9, color: useCustom ? '#fff' : LOBBY_TOKENS.muted, letterSpacing: 1, textTransform: 'uppercase' }}>
           {canCustom ? (useCustom ? 'Active' : '60 cards') : 'Locked'}
@@ -5747,8 +5832,8 @@ function ChallengePanel(props: {
       padding: 20, display: 'flex', flexDirection: 'column', gap: 12,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ fontFamily: '"Cinzel", serif', fontSize: 16, fontWeight: 800, color: '#fff', letterSpacing: 1.2 }}>
-          ⚔ Challenge a Player
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: '"Cinzel", serif', fontSize: 16, fontWeight: 800, color: '#fff', letterSpacing: 1.2 }}>
+          <Swords size={17} /> Challenge a Player
         </div>
         <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 2, textTransform: 'uppercase' }}>
           Direct Invite
@@ -5821,7 +5906,7 @@ function ChallengePanel(props: {
                 background: 'rgba(255,255,255,0.04)', border: `1px solid ${LOBBY_TOKENS.border}`,
               }}>
                 <div style={{ fontSize: 12 }}>
-                  <span style={{ color: LOBBY_TOKENS.muted }}>→ </span>
+                  <span style={{ color: LOBBY_TOKENS.muted, display: 'inline-flex', marginRight: 5 }}><ArrowRight size={12} /></span>
                   <b style={{ color: '#fff' }}>{c.toName}</b>
                   {c.wagerKind === 'master' && (
                     <span style={{ color: '#c8a3ff', marginLeft: 6 }}>· {c.wagerAmount} $MASTER</span>
@@ -5897,15 +5982,15 @@ function SolanaWalletPicker({ onPick, onCancel }: {
               onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
             >
               <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 20 }}>
-                  {w.kind === 'phantom' ? '👻' : w.kind === 'solflare' ? '🔥' : '🎒'}
+                <span style={{ display: 'inline-flex' }}>
+                  {w.kind === 'phantom' ? <Ghost size={20} /> : w.kind === 'solflare' ? <Fire size={20} /> : <Backpack size={20} />}
                 </span>
                 <span>{w.label}</span>
               </span>
               <span style={{
                 fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase',
                 color: w.installed ? '#c8a3ff' : LOBBY_TOKENS.muted,
-              }}>{w.installed ? 'Connect' : 'Install →'}</span>
+              }}>{w.installed ? 'Connect' : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>Install <ArrowRight size={11} /></span>}</span>
             </button>
           ))}
         </div>
@@ -5937,8 +6022,9 @@ function IncomingChallengesBanner({ challenges, onAccept, onDecline }: {
       <div style={{
         fontFamily: '"Cinzel", serif', fontSize: 14, color: LOBBY_TOKENS.gold,
         letterSpacing: 1.6, fontWeight: 800, textTransform: 'uppercase',
+        display: 'flex', alignItems: 'center', gap: 9,
       }}>
-        ⚔ {challenges.length} Incoming Challenge{challenges.length === 1 ? '' : 's'}
+        <Swords size={15} /> {challenges.length} Incoming Challenge{challenges.length === 1 ? '' : 's'}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {challenges.slice(0, 5).map(c => {
@@ -6017,7 +6103,7 @@ function challengeInputStyle(): React.CSSProperties {
 // ─────────────────────────────────────────────────────────────────────────────
 // COMMUNITY PANEL (right column)
 // ─────────────────────────────────────────────────────────────────────────────
-type ActivityItem = { id: string; icon: string; text: React.ReactNode; ts?: number };
+type ActivityItem = { id: string; icon: IconKey; text: React.ReactNode; ts?: number };
 
 function buildActivityFeed(matches: any[], leaderboard: Profile[]): ActivityItem[] {
   const items: ActivityItem[] = [];
@@ -6027,7 +6113,7 @@ function buildActivityFeed(matches: any[], leaderboard: Profile[]): ActivityItem
     const isWager = w.kind === 'master';
     items.push({
       id: `m-${m.matchID}`,
-      icon: isWager ? '💎' : '⚔️',
+      icon: isWager ? 'gem' : 'swords',
       text: <><b style={{ color: '#fff' }}>{creator}</b> opened {isWager ? <span style={{ color: '#c8a3ff' }}>a {w.amount} $MASTER wager</span> : 'a casual match'}</>,
     });
   }
@@ -6035,19 +6121,19 @@ function buildActivityFeed(matches: any[], leaderboard: Profile[]): ActivityItem
   if (topPlayer) {
     items.push({
       id: 'lb-top',
-      icon: '👑',
+      icon: 'crown',
       text: <><b style={{ color: '#d9b85f' }}>{topPlayer.name}</b> is the current top player ({topPlayer.wins}W)</>,
     });
   }
   for (const p of leaderboard.slice(1, 4)) {
     items.push({
       id: `lb-${p.name}`,
-      icon: '⭐',
+      icon: 'star',
       text: <><b style={{ color: '#fff' }}>{p.name}</b> sits at {p.wins}W · {p.losses}L</>,
     });
   }
   if (items.length === 0) {
-    items.push({ id: 'idle', icon: '🌙', text: <span style={{ color: '#9faabf' }}>The realm is quiet… for now.</span> });
+    items.push({ id: 'idle', icon: 'moon', text: <span style={{ color: '#9faabf' }}>The realm is quiet… for now.</span> });
   }
   return items;
 }
@@ -6085,7 +6171,7 @@ function CommunityPanel({ leaderboard, onViewProfile, activity }: {
               display: 'flex', gap: 10, padding: '8px 16px',
               fontSize: 12, color: LOBBY_TOKENS.text, lineHeight: 1.4,
             }}>
-              <span style={{ fontSize: 14, lineHeight: 1.2 }}>{a.icon}</span>
+              <span style={{ lineHeight: 1.2, color: LOBBY_TOKENS.gold, display: 'inline-flex' }}><Icon name={a.icon} size={14} /></span>
               <span style={{ flex: 1, minWidth: 0 }}>{a.text}</span>
             </div>
           ))}
@@ -6264,7 +6350,7 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
   const filled = players.filter(p => p.name).length;
   const isFull = filled === 2 && players.length === 2;
 
-  // "Opponent joined → entering the arena" interstitial before the game mounts.
+  // "Opponent joined -> entering the arena" interstitial before the game mounts.
   // Guarded so it fires exactly once (prevents duplicate navigation/starts).
   const [entered, setEntered] = useState(false);
   const enterOnce = useRef(false);
@@ -6318,7 +6404,7 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
   async function copyMatchId() { try { await navigator.clipboard.writeText(seat.matchID); } catch { fallbackCopy(seat.matchID); } flashCopied('id'); }
   async function share() {
     if ((navigator as any).share) {
-      try { await (navigator as any).share({ title: 'On-Chain Virtual Arena', text: 'Join my match on On-Chain Virtual Arena', url: inviteUrl }); return; } catch { /* cancelled → fall through */ }
+      try { await (navigator as any).share({ title: 'On-Chain Virtual Arena', text: 'Join my match on On-Chain Virtual Arena', url: inviteUrl }); return; } catch { /* cancelled -> fall through */ }
     }
     copyInvite();
   }
@@ -6355,17 +6441,19 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
       <MatchChamberBackdrop />
 
       {/* Top chrome */}
-      <div style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+        padding: mobile ? '12px 14px' : '16px 24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
           <HubEmblem size={30} />
           <div style={{ lineHeight: 1 }}>
             <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 10, letterSpacing: '0.22em', color: HUB.muted }}>ON-CHAIN</div>
             <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 14, letterSpacing: '0.1em', color: HUB.goldHi }}>VIRTUAL ARENA</div>
           </div>
         </div>
-        <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, letterSpacing: '0.32em', fontSize: 13, color: HUB.goldHi, textShadow: `0 0 16px ${HUB.gold}66` }}>◇ MATCH LOBBY ◇</div>
-        <button onClick={() => setConfirmLeave(true)} style={{ padding: '9px 16px', borderRadius: 9, background: 'transparent',
-          border: `1px solid ${HUB.gold}`, color: HUB.goldHi, cursor: 'pointer', fontWeight: 800, letterSpacing: '0.06em', fontSize: 12 }}>LEAVE MATCH</button>
+        {!mobile && <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, letterSpacing: '0.32em', fontSize: 13, color: HUB.goldHi, textShadow: `0 0 16px ${HUB.gold}66`,
+          display: 'flex', alignItems: 'center', gap: 12 }}><DiamondOutline size={9} /> MATCH LOBBY <DiamondOutline size={9} /></div>}
+        <button onClick={() => setConfirmLeave(true)} style={{ padding: '9px 16px', minHeight: 44, borderRadius: 9, background: 'transparent', flex: 'none',
+          border: `1px solid ${HUB.gold}`, color: HUB.goldHi, cursor: 'pointer', fontWeight: 800, letterSpacing: '0.06em', fontSize: 12, whiteSpace: 'nowrap' }}>LEAVE MATCH</button>
       </div>
 
       {/* Centered panel */}
@@ -6393,7 +6481,7 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
               padding: '8px 14px', borderRadius: 10, background: 'rgba(8,10,22,0.7)', border: `1px solid ${HUB.gold}44`, color: HUB.text, cursor: 'pointer' }}>
               <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', color: HUB.muted }}>MATCH ID</span>
               <span style={{ fontFamily: F.mono, fontSize: 14, color: HUB.goldHi }}>{seat.matchID.slice(0, 8)}</span>
-              <span style={{ color: copied === 'id' ? HUB.green : HUB.muted }}>{copied === 'id' ? '✓' : '⧉'}</span>
+              <span style={{ color: copied === 'id' ? HUB.green : HUB.muted, display: 'inline-flex' }}>{copied === 'id' ? <Check size={13} /> : <Copy size={13} />}</span>
             </button>
           </div>
 
@@ -6415,19 +6503,19 @@ function MatchSeat({ seat, onLeave }: { seat: Seat; onLeave: () => void }) {
           {/* Invitation */}
           {!opponentJoined && (
             <div style={{ marginTop: 22, paddingTop: 18, borderTop: `1px solid ${HUB.border}` }}>
-              <div style={{ textAlign: 'center', fontFamily: HUB_SERIF, fontWeight: 700, letterSpacing: '0.16em', color: HUB.goldHi, fontSize: 14 }}>◇ INVITE YOUR OPPONENT ◇</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, fontFamily: HUB_SERIF, fontWeight: 700, letterSpacing: '0.16em', color: HUB.goldHi, fontSize: 14 }}><DiamondOutline size={9} /> INVITE YOUR OPPONENT <DiamondOutline size={9} /></div>
               <div style={{ textAlign: 'center', color: HUB.muted, fontSize: 12.5, marginTop: 4 }}>Share this private link to fill the open seat.</div>
               <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap', alignItems: 'stretch' }}>
                 <input readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} aria-label="Invite link"
                   style={{ flex: '1 1 320px', minWidth: 0, padding: '12px 14px', borderRadius: 10, background: 'rgba(6,8,18,0.8)',
                     border: `1px solid ${HUB.border}`, color: HUB.cyan, fontFamily: F.mono, fontSize: 12.5, outline: 'none' }} />
                 <button onClick={copyInvite} style={{ ...hubGoldBtn(false), marginTop: 0, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 20px', fontSize: 13 }}>
-                  ⧉ {copied === 'link' ? 'LINK COPIED' : 'COPY INVITE LINK'}
+                  <Copy size={14} /> {copied === 'link' ? 'LINK COPIED' : 'COPY INVITE LINK'}
                 </button>
                 <button onClick={share} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 20px', borderRadius: 10,
-                  background: `linear-gradient(180deg, ${HUB.purple}, ${HUB.violet})`, color: '#fff', border: `1px solid ${HUB.violet}`, cursor: 'pointer', fontWeight: 800, letterSpacing: '0.04em', fontSize: 13 }}>↗ SHARE</button>
+                  background: `linear-gradient(180deg, ${HUB.purple}, ${HUB.violet})`, color: '#fff', border: `1px solid ${HUB.violet}`, cursor: 'pointer', fontWeight: 800, letterSpacing: '0.04em', fontSize: 13 }}><ArrowUpRight size={14} /> SHARE</button>
               </div>
-              <div style={{ textAlign: 'center', color: HUB.muted, fontSize: 12, marginTop: 14 }}>◇ The duel will begin automatically when Player 1 joins.</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: HUB.muted, fontSize: 12, marginTop: 14 }}><DiamondOutline size={8} /> The duel will begin automatically when Player 1 joins.</div>
             </div>
           )}
         </div>
@@ -6480,16 +6568,16 @@ function ChamberCorner({ pos }: { pos: 'tl' | 'tr' | 'bl' | 'br' }) {
 function ArcaneWaiting({ joined, entering }: { joined: boolean; entering: boolean }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 18 }} role="status" aria-live="polite">
-      <div style={{ position: 'relative', width: 300, height: 60, display: 'grid', placeItems: 'center' }}>
+      <div style={{ position: 'relative', width: 'min(300px, 100%)', height: 60, display: 'grid', placeItems: 'center' }}>
         {/* orbiting rune ring */}
-        <svg width="300" height="60" viewBox="0 0 300 60" style={{ position: 'absolute', inset: 0 }} aria-hidden>
+        <svg viewBox="0 0 300 60" preserveAspectRatio="xMidYMid meet" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} aria-hidden>
           <ellipse cx="150" cy="30" rx="120" ry="26" fill="none" stroke={`${HUB.violet}66`} strokeWidth="1.5" />
           <ellipse className="ml-anim" cx="150" cy="30" rx="120" ry="26" fill="none" stroke={joined ? HUB.green : HUB.violet} strokeWidth="2"
             strokeDasharray="6 12" style={{ animation: 'ml-dash 2.4s linear infinite', filter: `drop-shadow(0 0 6px ${joined ? HUB.green : HUB.violet})` }} />
         </svg>
         {/* side runes */}
-        <span className="ml-anim" style={{ position: 'absolute', left: 8, color: HUB.violet, fontSize: 18, animation: 'ml-float 3s ease-in-out infinite', filter: `drop-shadow(0 0 8px ${HUB.violet})` }}>✦</span>
-        <span className="ml-anim" style={{ position: 'absolute', right: 8, color: HUB.gold, fontSize: 18, animation: 'ml-float 3.6s ease-in-out infinite', filter: `drop-shadow(0 0 8px ${HUB.gold})` }}>◈</span>
+        <span className="ml-anim" style={{ position: 'absolute', left: 8, color: HUB.violet, display: 'inline-flex', animation: 'ml-float 3s ease-in-out infinite', filter: `drop-shadow(0 0 8px ${HUB.violet})` }}><Diamond size={16} /></span>
+        <span className="ml-anim" style={{ position: 'absolute', right: 8, color: HUB.gold, display: 'inline-flex', animation: 'ml-float 3.6s ease-in-out infinite', filter: `drop-shadow(0 0 8px ${HUB.gold})` }}><Diamond size={16} /></span>
         <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: '0.14em', color: HUB.text, textAlign: 'center', padding: '0 40px' }}>
           {entering ? 'ENTERING THE ARENA…' : joined ? 'OPPONENT JOINED' : 'WAITING FOR AN OPPONENT…'}
         </span>
@@ -6597,12 +6685,12 @@ function WagerStatusBadge({ matchID, compact }: { matchID: string; compact?: boo
   }, [custId]);
 
   if (!custId || !status) return null;
-  const label =
-    status.refunded ? '↩ Refunded'
-    : status.settled ? '✅ Settled'
-    : status.p0Funded && status.p1Funded ? '💰 Both deposited — match live'
-    : status.p0Funded || status.p1Funded ? `⌛ Waiting for opponent deposit (${amount} $MASTER each)`
-    : `⌛ Waiting for deposits (${amount} $MASTER each)`;
+  const label: React.ReactNode =
+    status.refunded ? <><ArrowLeft size={13} /> Refunded</>
+    : status.settled ? <><Check size={13} /> Settled</>
+    : status.p0Funded && status.p1Funded ? <><Coins size={13} /> Both deposited — match live</>
+    : status.p0Funded || status.p1Funded ? <><Hourglass size={13} /> Waiting for opponent deposit ({amount} $MASTER each)</>
+    : <><Hourglass size={13} /> Waiting for deposits ({amount} $MASTER each)</>;
   const color =
     status.refunded ? '#aaa'
     : status.settled ? '#22c55e'
@@ -6614,13 +6702,13 @@ function WagerStatusBadge({ matchID, compact }: { matchID: string; compact?: boo
         position: 'fixed', left: 16, top: 16, zIndex: 50,
         background: '#15192a', color, border: `1px solid ${color}`,
         borderRadius: 6, padding: '4px 10px', fontSize: 11, fontWeight: 700,
-        fontFamily: 'Inter, sans-serif',
+        fontFamily: 'Inter, sans-serif', display: 'inline-flex', alignItems: 'center', gap: 6,
       }}>{label}</div>
     );
   }
   return (
     <div style={{
-      display: 'inline-block', marginBottom: 16,
+      display: 'inline-flex', alignItems: 'center', gap: 7, marginBottom: 16,
       background: '#15192a', color, border: `1px solid ${color}`,
       borderRadius: 6, padding: '8px 14px', fontSize: 13, fontWeight: 700,
       fontFamily: 'Inter, sans-serif',
@@ -6699,6 +6787,7 @@ function SoloSetupModal({
   const customInvalid = chosenCustom ? !validateDeck(chosenCustom.cards).ok : false;
 
   const btn = (active: boolean, accent: string): React.CSSProperties => ({
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
     background: active ? accent : '#1a1730',
     color: active ? '#fff' : '#ccc',
     border: `2px solid ${active ? accent : '#3a3050'}`,
@@ -6721,18 +6810,19 @@ function SoloSetupModal({
         border: '1px solid #6c4bd8',
         borderRadius: 14,
         padding: 22, maxWidth: 480, width: '100%',
+        maxHeight: 'calc(100dvh - 32px - env(safe-area-inset-bottom))', overflowY: 'auto',
         color: '#fff', fontFamily: 'Inter, sans-serif',
         boxShadow: '0 18px 50px rgba(0,0,0,0.6)',
         display: 'flex', flexDirection: 'column', gap: 16,
       }}>
         <div>
-          <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: 1 }}>🤖 Play vs Bot</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 20, fontWeight: 800, letterSpacing: 1 }}><Robot size={21} /> Play vs Bot</div>
           <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>Single-player, runs entirely in your browser.</div>
         </div>
 
         <div>
           <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, letterSpacing: 1 }}>DIFFICULTY</div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {(['easy', 'normal', 'hard'] as Difficulty[]).map(d => (
               <button key={d} onClick={() => setDifficulty(d)}
                 style={btn(difficulty === d,
@@ -6745,12 +6835,12 @@ function SoloSetupModal({
 
         <div>
           <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, letterSpacing: 1 }}>MODE</div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={() => setMode('casual')} style={btn(mode === 'casual', '#6c4bd8')}>
               CASUAL
             </button>
             <button onClick={() => setMode('daily')} style={btn(mode === 'daily', '#ffaf3a')}>
-              ⭐ DAILY ({dateKey})
+              <Star size={13} /> DAILY ({dateKey})
             </button>
           </div>
           <div style={{ fontSize: 11, opacity: 0.65, marginTop: 6 }}>
@@ -6788,9 +6878,9 @@ function SoloSetupModal({
                   border: `2px solid ${active ? '#3aa66a' : '#3a3050'}`,
                   borderRadius: 8, padding: '8px 12px',
                   fontWeight: 700, cursor: 'pointer', fontSize: 12,
-                  opacity: ok ? 1 : 0.7,
+                  opacity: ok ? 1 : 0.7, display: 'inline-flex', alignItems: 'center',
                 }} title={ok ? d.name : `${d.name} (invalid — fix in Deck Library)`}>
-                  {d.name}{!ok ? ' ⚠' : ''}
+                  {d.name}{!ok ? <Warning size={12} style={{ marginLeft: 5 }} /> : null}
                 </button>
               );
             })}
@@ -6833,7 +6923,9 @@ function SoloSetupModal({
             background: 'rgba(255,175,58,0.08)', borderRadius: 6,
             border: '1px solid rgba(255,175,58,0.3)',
           }}>
-            Today's best ({difficulty}): {best.win ? `✅ won in ${Math.round(best.ms / 1000)}s · ${best.turns} turns` : `❌ lost in ${best.turns} turns`}
+            Today's best ({difficulty}): {best.win
+              ? <><Check size={12} /> won in {Math.round(best.ms / 1000)}s · {best.turns} turns</>
+              : <><Close size={12} /> lost in {best.turns} turns</>}
           </div>
         )}
 
@@ -6863,7 +6955,7 @@ function SoloSetupModal({
 
 // One-time "Add to Home Screen" banner. Listens for Chrome's
 // beforeinstallprompt; iOS Safari doesn't fire it, so we surface a textual
-// hint there ("tap Share → Add to Home Screen"). Either is dismissable for
+// hint there ("tap Share -> Add to Home Screen"). Either is dismissable for
 // 7 days via localStorage.
 function InstallPrompt() {
   const DISMISS_KEY = 'mmtcg.installDismissedUntil';
@@ -6915,7 +7007,7 @@ function InstallPrompt() {
 
   return (
     <div style={{
-      position: 'fixed', left: 12, right: 12, bottom: 12,
+      position: 'fixed', left: 12, right: 12, bottom: 'calc(12px + env(safe-area-inset-bottom))',
       maxWidth: 460, marginLeft: 'auto', marginRight: 'auto',
       background: 'linear-gradient(135deg, #1b1230 0%, #3a1f5a 100%)',
       color: '#fff', border: '1px solid #6c4bd8', borderRadius: 10,
@@ -6924,7 +7016,7 @@ function InstallPrompt() {
       display: 'flex', alignItems: 'center', gap: 10,
       fontFamily: 'Inter, sans-serif', fontSize: 13,
     }}>
-      <div style={{ fontSize: 22 }}>📲</div>
+      <div style={{ display: 'flex', color: '#c8a3ff' }}><Mobile size={22} /></div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 700, marginBottom: 2 }}>Install On-Chain Virtual Arena</div>
         <div style={{ fontSize: 11, opacity: 0.85 }}>
@@ -6939,10 +7031,10 @@ function InstallPrompt() {
           padding: '6px 12px', fontWeight: 700, cursor: 'pointer', fontSize: 12,
         }}>Install</button>
       )}
-      <button onClick={dismiss} title="Dismiss for a week" style={{
+      <button onClick={dismiss} title="Dismiss for a week" aria-label="Dismiss install prompt" style={{
         background: 'transparent', color: '#aaa', border: 'none',
-        fontSize: 18, cursor: 'pointer', padding: 0, lineHeight: 1,
-      }}>×</button>
+        cursor: 'pointer', padding: 0, lineHeight: 1, display: 'inline-flex',
+      }}><Close size={17} /></button>
     </div>
   );
 }
@@ -7237,7 +7329,8 @@ function RankedQueuePanel({
         <div style={{
           fontFamily: '"Cinzel", "Times New Roman", serif',
           fontSize: 16, fontWeight: 800, letterSpacing: 1.2, color: '#c084fc',
-        }}>🏆 RANKED LADDER</div>
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}><Trophy size={17} /> RANKED LADDER</div>
         {profile && <RankBadge p={profile} size="sm" />}
       </div>
 
@@ -7259,13 +7352,13 @@ function RankedQueuePanel({
               <select
                 value={selectedDeckId ?? ''}
                 onChange={e => setSelectedDeckId(Number(e.target.value))}
-                style={{ flex: 1, padding: '6px 10px', background: '#1a1a1a', color: '#eee', border: '1px solid #444', borderRadius: 4, fontSize: 12 }}
+                style={{ flex: 1, minWidth: 0, padding: '10px', minHeight: 44, background: '#14121f', color: '#eee', border: '1px solid #3a3550', borderRadius: 8, fontSize: 13 }}
               >
                 {decks.map(d => {
                   const valid = validateDeck(d.cards).ok;
                   return (
                     <option key={d.id} value={d.id}>
-                      {d.name} ({d.cards.length}) {d.isActive ? '★' : ''} {valid ? '' : '⚠'}
+                      {d.name} ({d.cards.length}) {d.isActive ? '\u2605' : ''} {valid ? '' : '\u26a0'}
                     </option>
                   );
                 })}
@@ -7275,7 +7368,7 @@ function RankedQueuePanel({
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
             <label style={{ fontSize: 11, color: '#aaa', minWidth: 50 }}>Region:</label>
             <select value={region} onChange={e => setRegion(e.target.value)}
-              style={{ flex: 1, padding: '6px 10px', background: '#1a1a1a', color: '#eee', border: '1px solid #444', borderRadius: 4, fontSize: 12 }}>
+              style={{ flex: 1, minWidth: 0, padding: '10px', minHeight: 44, background: '#14121f', color: '#eee', border: '1px solid #3a3550', borderRadius: 8, fontSize: 13 }}>
               <option value="global">Global</option>
               <option value="na">North America</option>
               <option value="eu">Europe</option>
@@ -7285,14 +7378,9 @@ function RankedQueuePanel({
           <button
             onClick={joinQueue}
             disabled={busy || !deckOk}
-            style={{
-              width: '100%', padding: '12px 18px', fontSize: 14,
-              borderRadius: 8, border: 'none', fontWeight: 800, letterSpacing: 0.6,
-              background: deckOk ? 'linear-gradient(90deg, #7b2cbf, #c084fc)' : '#3a2f6a',
-              color: deckOk ? '#fff' : '#888',
-              cursor: deckOk ? 'pointer' : 'not-allowed',
-            }}
-          >🏆  ENTER RANKED QUEUE</button>
+            className="ova-plate ova-plate--gold"
+            style={{ width: '100%', padding: '14px 18px', fontSize: 13.5, letterSpacing: '0.18em' }}
+          ><Trophy size={16} /> ENTER RANKED QUEUE</button>
           {!deckOk && (
             <div style={{ marginTop: 8, fontSize: 11, color: '#f99', fontStyle: 'italic' }}>
               Pick a valid 60-card deck above to queue.
@@ -7314,7 +7402,7 @@ function RankedQueuePanel({
             MMR window expands ±50 every 10s
           </div>
           <button onClick={leaveQueue} disabled={busy}
-            style={{ marginTop: 10, padding: '6px 14px', background: '#222', color: '#ddd', border: '1px solid #444', borderRadius: 4, cursor: 'pointer', fontSize: 11 }}>
+            style={{ marginTop: 10, padding: '10px 16px', minHeight: 44, background: '#222', color: '#ddd', border: '1px solid #444', borderRadius: 8, cursor: 'pointer', fontSize: 12 }}>
             Leave Queue
           </button>
         </div>
@@ -7475,7 +7563,7 @@ function RankedHub({
   return (
     <Screen
       title="Ranked Ladder"
-      right={<button onClick={onBack} style={ghostBtn}>← Back</button>}
+      right={<button onClick={onBack} style={ghostBtn}><ArrowLeft size={13} /> Back</button>}
     >
       {error && <Banner kind="error">{error}</Banner>}
 
@@ -7536,7 +7624,7 @@ function RankedHub({
                         const valid = validateDeck(d.cards).ok;
                         return (
                           <option key={d.id} value={d.id}>
-                            {d.name} ({d.cards.length}) {d.isActive ? '★' : ''} {valid ? '' : '⚠'}
+                            {d.name} ({d.cards.length}) {d.isActive ? '\u2605' : ''} {valid ? '' : '\u26a0'}
                           </option>
                         );
                       })}
@@ -7555,13 +7643,9 @@ function RankedHub({
                 <button
                   onClick={joinQueue}
                   disabled={busy || !deckOk}
-                  style={{
-                    ...primaryBtn(!!deckOk && !busy),
-                    width: '100%', padding: '12px 18px', fontSize: 16,
-                    background: deckOk ? 'linear-gradient(90deg, #7b2cbf, #c084fc)' : '#444',
-                    cursor: deckOk ? 'pointer' : 'not-allowed',
-                  }}
-                >🏆  ENTER RANKED QUEUE</button>
+                  className="ova-plate ova-plate--gold"
+                  style={{ width: '100%', padding: '14px 18px', fontSize: 14, letterSpacing: '0.18em' }}
+                ><Trophy size={17} /> ENTER RANKED QUEUE</button>
                 {!deckOk && (
                   <div style={{ marginTop: 8, fontSize: 12, color: '#f99', fontStyle: 'italic' }}>
                     You need a valid 60-card deck on your Profile before queueing.
@@ -7621,8 +7705,9 @@ function RankedHub({
             <div style={{
               fontSize: 11, color: '#ffd86a', textTransform: 'uppercase', letterSpacing: 2,
               fontFamily: 'serif', fontWeight: 800, marginBottom: 6,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9,
             }}>
-              👑  Season Champion Prize
+              <Crown size={14} /> Season Champion Prize
             </div>
             <div style={{
               fontFamily: '"Cinzel", "Times New Roman", serif',
@@ -7645,7 +7730,7 @@ function RankedHub({
       </div>
 
       {/* Leaderboard */}
-      <Section title="Season Leaderboard" right={<button onClick={refresh} style={ghostBtn}>↻</button>}>
+      <Section title="Season Leaderboard" right={<button onClick={refresh} style={ghostBtn} aria-label="Refresh leaderboard"><Refresh size={14} /></button>}>
         {leaders.length === 0
           ? <div style={{ color: '#888', fontSize: 13, fontStyle: 'italic' }}>No ranked players yet — be the first.</div>
           : (
@@ -7704,7 +7789,7 @@ function Screen({ title, right, children, fullBleed }: { title: string; right?: 
   const mobile = useIsMobile();
   const pad = fullBleed ? 0 : (mobile ? 12 : 24);
   return (
-    <div style={{ fontFamily: 'system-ui', background: '#000', minHeight: '100vh', padding: pad, color: '#eee' }}>
+    <div style={{ fontFamily: F.body, background: `${SURF.vignette}, ${SURF.obsidian}`, minHeight: '100vh', padding: pad, color: C.textHi }}>
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         marginBottom: fullBleed ? 0 : 16, gap: 8, flexWrap: 'wrap',
@@ -7713,7 +7798,9 @@ function Screen({ title, right, children, fullBleed }: { title: string; right?: 
         top: 0, left: 0, right: 0, zIndex: 4,
         background: fullBleed ? 'linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0))' : 'transparent',
       }}>
-        <h1 style={{ margin: 0, fontSize: mobile ? 18 : 22, textShadow: fullBleed ? '0 2px 8px #000' : undefined }}>{title}</h1>
+        <h1 style={{ margin: 0, fontFamily: F.serif, fontWeight: 700, letterSpacing: '0.06em',
+          fontSize: mobile ? 20 : 26, lineHeight: 1.1, color: C.goldHi,
+          textShadow: fullBleed ? '0 2px 10px rgba(0,0,0,0.85)' : '0 0 26px rgba(217,180,90,0.25)' }}>{title}</h1>
         <div>{right}</div>
       </div>
       {children}
@@ -7722,9 +7809,9 @@ function Screen({ title, right, children, fullBleed }: { title: string; right?: 
 }
 function Section({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div style={{ marginTop: 18, padding: 14, background: '#0f0f0f', border: '1px solid #2a2a2a', borderRadius: 6 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <div style={{ fontWeight: 700, color: '#ccc', fontSize: 14 }}>{title}</div>
+    <div style={{ ...engravedPanel(), marginTop: 20, padding: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12 }}>
+        <div style={{ fontFamily: F.serif, fontWeight: 700, color: C.goldHi, fontSize: 15, letterSpacing: '0.1em' }}>{title}</div>
         <div>{right}</div>
       </div>
       {children}
@@ -7732,9 +7819,21 @@ function Section({ title, right, children }: { title: string; right?: React.Reac
   );
 }
 function Banner({ kind, children }: { kind: 'error' | 'info'; children: React.ReactNode }) {
-  const bg = kind === 'error' ? '#3a0a0a' : '#0a2a3a';
-  const bd = kind === 'error' ? '#844' : '#488';
-  return <div style={{ padding: 10, background: bg, border: `1px solid ${bd}`, color: '#eee', borderRadius: 4, fontSize: 13, marginTop: 8 }}>{children}</div>;
+  const bg = kind === 'error' ? 'rgba(255,107,107,0.10)' : 'rgba(124,92,255,0.10)';
+  const bd = kind === 'error' ? 'rgba(255,107,107,0.5)' : 'rgba(124,92,255,0.5)';
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '12px 16px', background: bg, border: `1px solid ${bd}`, color: C.textHi,
+      borderRadius: 12, fontSize: 13, marginTop: 12, lineHeight: 1.5,
+      boxShadow: EDGE.topHighlight,
+    }}>
+      <span style={{ color: kind === 'error' ? C.danger : C.accentHi, display: 'inline-flex', flexShrink: 0 }}>
+        {kind === 'error' ? <Warning size={16} /> : <Info size={16} />}
+      </span>
+      <span>{children}</span>
+    </div>
+  );
 }
 // ── Wager helpers ───────────────────────────────────────────────────────────
 // Wagers are denominated in $MASTER (Solana SPL token).
@@ -7854,10 +7953,10 @@ const labelStyle: React.CSSProperties = { fontSize: 11, color: '#888', marginBot
 const inputStyle: React.CSSProperties = { flex: 1, padding: '8px 10px', background: '#000', color: '#eee', border: '1px solid #444', borderRadius: 4, fontSize: 14, minWidth: 200 };
 const cardStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 12, padding: 10, background: '#181818', border: '1px solid #2a2a2a', borderRadius: 4 };
 const primaryBtn = (enabled: boolean): React.CSSProperties => ({
-  padding: '8px 16px', background: enabled ? '#2a7' : '#333', color: '#fff',
-  border: 'none', borderRadius: 4, cursor: enabled ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 13,
+  ...goldPlate(!enabled),
+  padding: '11px 20px', fontSize: 13,
 });
-const ghostBtn: React.CSSProperties = { padding: '6px 12px', background: '#222', color: '#ddd', border: '1px solid #444', borderRadius: 4, cursor: 'pointer', fontSize: 12 };
-const disabledBtn: React.CSSProperties = { padding: '8px 16px', background: '#222', color: '#666', border: '1px solid #333', borderRadius: 4, cursor: 'not-allowed', fontSize: 13 };
+const ghostBtn: React.CSSProperties = { ...obsidianPlate(false), minHeight: 40, padding: '10px 15px', fontSize: 12 };
+const disabledBtn: React.CSSProperties = { ...goldPlate(true), padding: '11px 20px', fontSize: 13 };
 // formatRecord re-exported for any other consumer; not used here.
 export { formatRecord };

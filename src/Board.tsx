@@ -13,8 +13,77 @@ import { CardHover, CardPreview } from './CardPreview';
 import { createPortal } from 'react-dom';
 import { VoiceChat } from './Voice';
 import { Haptics } from './haptics';
+import {
+  ArrowDown, ArrowRight, Bolt, Cards, Chain, Chat as ChatIcon, Check, ChevronLeft, ChevronRight,
+  Close, Diamond, Dot, Hand as HandIcon, Minus, Moon, Orb, Plus, Refresh, Robot, Scroll as ScrollIcon,
+  Settings as SettingsIcon, Shield, Skull, Swords, Target, Warning,
+} from './icons';
+import './Board.css';
 
 type Props = BoardProps<GState>;
+
+/** Board palette — mirrors the obsidian/gold concept used across Board.css. */
+const GOLD    = '#E5B84B';
+const GOLD_HI = '#FFD86A';
+
+/** Inline CSS custom properties (React types don't model `--x` keys). */
+type Vars = React.CSSProperties & Record<string, string | number>;
+
+/**
+ * Combat pairing badge rendered over card art: SVG glyph + count in a flex row,
+ * on an obsidian pill with a coloured hairline ring and a hard drop shadow so
+ * it stays legible over any artwork.
+ */
+function CombatBadge({
+  icon, count, tone, title,
+}: { icon: React.ReactNode; count?: number; tone: string; title: string }) {
+  return (
+    <span
+      title={title}
+      aria-label={title}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 2,
+        padding: count == null ? '1px 3px' : '1px 4px 1px 3px',
+        borderRadius: 999,
+        background: 'rgba(8,9,18,0.88)',
+        boxShadow: `0 0 0 1px ${tone}aa, 0 1px 3px rgba(0,0,0,0.85)`,
+        color: tone,
+        lineHeight: 1,
+        filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.9))',
+      }}
+    >
+      <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>
+      {count != null && (
+        <span style={{
+          fontSize: 9, fontWeight: 900, fontFamily: 'system-ui, sans-serif',
+          letterSpacing: 0, lineHeight: 1, position: 'relative', top: '0.5px',
+        }}>{count}</span>
+      )}
+    </span>
+  );
+}
+
+/** Attacker / blocked-by / aura badges shown in a mini-card's footer slot. */
+function CombatBadges({
+  attacking, blockedCount, auraCount,
+}: { attacking?: boolean; blockedCount?: number; auraCount?: number }) {
+  if (!attacking && !blockedCount && !auraCount) return null;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+      {attacking && (
+        <CombatBadge icon={<Swords size={11} />} tone={GOLD_HI} title="Attacking" />
+      )}
+      {!!blockedCount && (
+        <CombatBadge icon={<Shield size={11} />} count={blockedCount} tone="#8FD3FF"
+          title={`Blocked by ${blockedCount}`} />
+      )}
+      {!!auraCount && (
+        <CombatBadge icon={<Orb size={11} />} count={auraCount} tone="#C45CFF"
+          title={`${auraCount} aura(s) attached`} />
+      )}
+    </span>
+  );
+}
 
 function useIsMobile(breakpoint = 720) {
   const [m, setM] = useState(() => typeof window !== 'undefined' && window.innerWidth <= breakpoint);
@@ -32,8 +101,25 @@ function useIsMobile(breakpoint = 720) {
   return m;
 }
 
+/** Landscape-phone check — viewport too short for the full desktop chrome. */
+function useIsShort(maxHeight = 450) {
+  const [s, setS] = useState(() => typeof window !== 'undefined' && window.innerHeight <= maxHeight);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-height: ${maxHeight}px)`);
+    const onChange = () => setS(mq.matches);
+    onChange();
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else mq.addListener(onChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', onChange);
+      else mq.removeListener(onChange);
+    };
+  }, [maxHeight]);
+  return s;
+}
+
 /**
- * Mobile-only zoom wrapper for the playmat. Renders +/-/⤧ buttons.
+ * Mobile-only zoom wrapper for the playmat. Renders zoom-out / reset / zoom-in.
  * When zoom > 1, the inner element scales up via width%; the outer container
  * gets overflow: auto so the user can flick around with native momentum.
  * Single-finger taps go straight through to cards underneath.
@@ -51,53 +137,54 @@ function MobilePlaymatScaler({
   const scrolling = zoom > 1;
   return (
     <div style={{ position: 'relative' }}>
-      <div style={{
+      <div className="brd-scroll" style={{
         overflow: scrolling ? 'auto' : 'visible',
         maxHeight: scrolling ? '70dvh' : 'none',
         WebkitOverflowScrolling: 'touch',
         overscrollBehavior: 'contain',
-        borderRadius: 10,
+        borderRadius: 12,
         // Subtle frame so the zoomable region reads as a viewport.
-        outline: scrolling ? '1px solid rgba(255,215,106,0.25)' : 'none',
+        outline: scrolling ? '1px solid rgba(229,184,75,0.35)' : 'none',
       }}>
         <div style={{
           width: `${zoom * 100}%`,
           margin: scrolling ? 0 : '0 auto',
+          transition: 'width 0.2s cubic-bezier(0.2,0.8,0.2,1)',
         }}>
           {children}
         </div>
       </div>
-      {/* Floating zoom controls — top-right, above the mat. */}
+      {/* Zoom controls sit BELOW the mat, in normal flow: floating them over the
+          top-right corner used to bury the opponent's deck / hand / graveyard
+          zones on a 390px phone, making those cards untappable. */}
       <div style={{
-        position: 'absolute', top: 4, right: 4, zIndex: 5,
-        display: 'flex', gap: 4,
-        background: 'rgba(10,10,20,0.7)', padding: 3, borderRadius: 18,
-        border: '1px solid rgba(255,215,106,0.35)',
+        margin: '8px auto 0', width: 'fit-content', zIndex: 5,
+        display: 'flex', gap: 8,
+        background: 'linear-gradient(180deg, rgba(22,17,32,0.85), rgba(8,7,14,0.9))',
+        padding: 5, borderRadius: 999,
+        border: '1px solid rgba(229,184,75,0.4)',
+        backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+        boxShadow: 'inset 0 1px 0 rgba(255,226,160,0.14), 0 4px 14px rgba(0,0,0,0.5)',
       }}>
-        <button onClick={zoomOut} disabled={zoom <= ZOOMS[0]}
-          aria-label="Zoom out"
-          style={zoomBtnStyle(zoom <= ZOOMS[0])}>−</button>
-        <button onClick={reset}
-          aria-label="Reset zoom"
-          style={{ ...zoomBtnStyle(false), width: 'auto', padding: '0 8px', fontSize: 11 }}>
+        <button onClick={zoomOut} disabled={zoom <= ZOOMS[0]} className="brd-stud"
+          aria-label="Zoom out" title="Zoom out"
+          style={zoomBtnStyle()}><Minus size={19} /></button>
+        <button onClick={reset} className="brd-stud"
+          aria-label="Reset zoom" title="Reset zoom"
+          style={{ ...zoomBtnStyle(), width: 'auto', minWidth: 56, padding: '0 12px', borderRadius: 999, fontSize: 12, fontFamily: '"Cinzel", "Times New Roman", serif' }}>
           {Math.round(zoom * 100)}%
         </button>
-        <button onClick={zoomIn} disabled={zoom >= ZOOMS[ZOOMS.length - 1]}
-          aria-label="Zoom in"
-          style={zoomBtnStyle(zoom >= ZOOMS[ZOOMS.length - 1])}>+</button>
+        <button onClick={zoomIn} disabled={zoom >= ZOOMS[ZOOMS.length - 1]} className="brd-stud"
+          aria-label="Zoom in" title="Zoom in"
+          style={zoomBtnStyle()}><Plus size={19} /></button>
       </div>
     </div>
   );
 }
-function zoomBtnStyle(disabled: boolean): React.CSSProperties {
-  return {
-    width: 30, height: 30, borderRadius: '50%',
-    background: disabled ? '#222' : 'linear-gradient(180deg,#3a2a55,#22163a)',
-    color: disabled ? '#555' : '#ffd76a',
-    border: `1px solid ${disabled ? '#333' : '#ffd76a66'}`,
-    fontWeight: 800, fontSize: 16, lineHeight: 1,
-    cursor: disabled ? 'default' : 'pointer',
-  };
+function zoomBtnStyle(): React.CSSProperties {
+  // Visual treatment lives in `.brd-stud` (bezelled metal stud); this only sizes it.
+  // 44px keeps it at the minimum comfortable touch target.
+  return { width: 44, height: 44, fontWeight: 800, fontSize: 18, lineHeight: 1 };
 }
 
 const COLOR_BAR: React.CSSProperties = { display: 'flex', gap: 6, fontSize: 12, marginTop: 4 };
@@ -182,7 +269,7 @@ function DraggableCard({
     const moved = movedRef.current;
     setDrag(null);
     startRef.current = null; movedRef.current = false; idRef.current = null;
-    if (!moved) return; // short tap → let normal click flow run
+    if (!moved) return; // short tap: let normal click flow run
     onDragStateChange?.(false);
     const drop = findDrop(e.clientX, e.clientY);
     if (drop) { Haptics.play(); onDrop(); }
@@ -247,14 +334,22 @@ function CardFace({
   pinOnTap?: boolean;
 }) {
   const mobile = useIsMobile();
-  const W = mobile ? 92 : 138;
-  const H = mobile ? 134 : 200;
+  const short = useIsShort();
+  const compact = mobile || short; // phones portrait OR landscape
+  const W = compact ? 92 : 138;
+  const H = compact ? 134 : 200;
   if (faceDown) {
     return (
       <div style={{
         width: W, height: H, margin: 2, borderRadius: 8,
-        background: 'repeating-linear-gradient(45deg, #333 0 8px, #555 8px 16px)',
-        border: '1px solid #000', flex: '0 0 auto',
+        background:
+          'repeating-linear-gradient(45deg, rgba(255,255,255,0.045) 0 7px, rgba(255,255,255,0) 7px 14px), ' +
+          'linear-gradient(180deg, #2b2440 0%, #171327 55%, #0e0b18 100%)',
+        border: '1px solid #000',
+        boxShadow:
+          'inset 0 0 0 1px rgba(229,184,75,0.22), inset 0 1px 0 rgba(255,255,255,0.14), ' +
+          '0 2px 5px rgba(0,0,0,0.55), 0 10px 22px rgba(0,0,0,0.45)',
+        flex: '0 0 auto',
       }} />
     );
   }
@@ -262,42 +357,77 @@ function CardFace({
   if (!def) return null;
   const meta = COLOR_META[def.color];
   const dimmed = instance?.summoningSick || instance?.tapped;
+  const tapped = !!instance?.tapped;
+  const damaged = (instance?.damage ?? 0) > 0;
   const tpl = templateFor(def);
+  // Layered rest shadow: contact shadow + cast shadow, so the card lifts off
+  // the mat instead of sitting flat on it. `--shadow` is consumed by .brd-cardface.
+  const restShadow = selected
+    ? `inset 0 0 0 1px rgba(255,246,214,0.55), 0 0 0 1px rgba(120,86,12,0.9), 0 0 20px rgba(255,216,106,0.7), 0 10px 24px rgba(0,0,0,0.55)`
+    : tapped
+      ? 'inset 0 0 14px rgba(0,0,0,0.6), 0 1px 3px rgba(0,0,0,0.6), 0 5px 12px rgba(0,0,0,0.4)'
+      : '0 1px 2px rgba(0,0,0,0.65), 0 4px 10px rgba(0,0,0,0.45), 0 12px 26px rgba(0,0,0,0.32)';
+  const vars: Vars = {
+    '--rot': tapped ? '9deg' : '0deg',
+    '--shadow': restShadow,
+    '--glow': `${meta.hex}99`,
+    '--filter': tapped ? 'saturate(0.55) brightness(0.82)' : 'none',
+  };
   return (
     <CardHover defId={defId} pinOnTap={pinOnTap} onActivate={pinOnTap ? onClick : undefined}>
     <div onClick={onClick}
+      className="brd-cardface"
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }) : undefined}
       style={{
+        ...vars,
         width: W, height: H, margin: 2, padding: tpl ? 0 : 5, borderRadius: 8,
         background: tpl ? undefined : meta.hex,
         backgroundImage: tpl ? `url(${tpl.url})` : undefined,
         backgroundSize: tpl ? '100% 100%' : undefined,
         backgroundRepeat: 'no-repeat',
         color: meta.ink,
-        border: selected ? '3px solid #ff0' : (tpl ? 'none' : '1px solid #000'),
+        // Hairline frame: 1px ink edge; attacker/selected swaps in a gold ring.
+        border: selected ? '2px solid #FFD86A' : '1px solid rgba(0,0,0,0.85)',
         cursor: onClick ? 'pointer' : 'default',
-        boxShadow: instance?.tapped ? 'inset 0 0 0 4px #0008' : undefined,
-        transform: instance?.tapped ? 'rotate(8deg)' : undefined,
-        opacity: dimmed && def.type === 'meme' ? 0.55 : 1,
+        opacity: dimmed && def.type === 'meme' ? 0.62 : 1,
         fontFamily: 'system-ui, sans-serif',
         display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
         position: 'relative', flex: '0 0 auto',
       }}>
       {tpl ? <TemplatedCardFaceContent def={def} instance={instance} footer={footer} tpl={tpl} /> : <>
-      <div style={{ fontWeight: 700, fontSize: 10, lineHeight: 1.05 }}>{def.name}</div>
-      <div style={{ fontSize: 8, opacity: 0.85, marginTop: 1, lineHeight: 1.1 }}>
+      <div style={{ fontWeight: 700, fontSize: 10, lineHeight: 1.05, position: 'relative', zIndex: 1 }}>{def.name}</div>
+      <div style={{ fontSize: 8, opacity: 0.85, marginTop: 1, lineHeight: 1.1, position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 3 }}>
         {def.type.toUpperCase()}
-        {instance?.summoningSick && <span style={{ marginLeft: 3, color: '#000', background: '#ffeb3b', padding: '0 3px', borderRadius: 2, fontSize: 7 }}>SICK</span>}
-        {instance?.tapped && !instance?.summoningSick && <span style={{ marginLeft: 3, color: '#000', background: '#aaa', padding: '0 3px', borderRadius: 2, fontSize: 7 }}>TAPPED</span>}
+        {instance?.summoningSick && (
+          <span title="Summoning sick — cannot attack this turn"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 2, color: '#2a1f00', background: '#ffd76a', padding: '0 3px', borderRadius: 3, fontSize: 7, fontWeight: 800 }}>
+            <Moon size={8} />SICK
+          </span>
+        )}
+        {tapped && !instance?.summoningSick && (
+          <span title="Tapped" style={{ display: 'inline-flex', alignItems: 'center', gap: 2, color: '#111', background: '#b9bcc8', padding: '0 3px', borderRadius: 3, fontSize: 7, fontWeight: 800 }}>
+            <Refresh size={8} />TAPPED
+          </span>
+        )}
       </div>
-      <div style={{ fontSize: 8, marginTop: 3, flex: 1, overflow: 'hidden', lineHeight: 1.15 }}>{def.text}</div>
+      <div style={{ fontSize: 8, marginTop: 3, flex: 1, overflow: 'hidden', lineHeight: 1.15, position: 'relative', zIndex: 1 }}>{def.text}</div>
       {def.type === 'meme' && (
-        <div style={{ alignSelf: 'flex-end', fontWeight: 700, fontSize: 11 }}>
+        <div style={{
+          alignSelf: 'flex-end', fontWeight: 800, fontSize: 11, position: 'relative', zIndex: 1,
+          padding: '0 5px', borderRadius: 4, color: '#F4F2EA',
+          background: 'linear-gradient(180deg, rgba(20,16,10,0.85), rgba(8,6,4,0.9))',
+          boxShadow: 'inset 0 0 0 1px rgba(229,184,75,0.45), 0 1px 2px rgba(0,0,0,0.6)',
+        }}>
           {def.power}/{(def.toughness ?? 1) - (instance?.damage ?? 0)}
         </div>
       )}
-      <CostPips def={def} />
-      {footer && <div style={{ fontSize: 8, lineHeight: 1.1 }}>{footer}</div>}
+      <div style={{ position: 'relative', zIndex: 1 }}><CostPips def={def} /></div>
+      {footer && <div style={{ fontSize: 8, lineHeight: 1.1, position: 'relative', zIndex: 1 }}>{footer}</div>}
       </>}
+      {damaged && <span aria-hidden className="brd-damaged" />}
+      <span aria-hidden className="brd-gloss" />
     </div>
     </CardHover>
   );
@@ -353,8 +483,18 @@ function TemplatedCardFaceContent({ def, instance, footer, tpl }: { def: CardDef
             style={{ position: 'relative', width: '100%', height: '100%', objectFit: 'cover' }} />
         )}
         {/* Status badges overlay on top-right of art */}
-        {instance?.summoningSick && <span style={{ position: 'absolute', top: 2, right: 2, color: '#000', background: '#ffeb3b', padding: '0 3px', borderRadius: 2, fontSize: 6, fontWeight: 800 }}>SICK</span>}
-        {instance?.tapped && !instance?.summoningSick && <span style={{ position: 'absolute', top: 2, right: 2, color: '#000', background: '#aaa', padding: '0 3px', borderRadius: 2, fontSize: 6, fontWeight: 800 }}>TAP</span>}
+        {instance?.summoningSick && (
+          <span title="Summoning sick — cannot attack this turn"
+            style={{ position: 'absolute', top: 2, right: 2, display: 'inline-flex', alignItems: 'center', gap: 1, color: '#2a1f00', background: '#ffd76a', padding: '0 3px', borderRadius: 3, fontSize: 6, fontWeight: 800, boxShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
+            <Moon size={7} />SICK
+          </span>
+        )}
+        {instance?.tapped && !instance?.summoningSick && (
+          <span title="Tapped"
+            style={{ position: 'absolute', top: 2, right: 2, display: 'inline-flex', alignItems: 'center', gap: 1, color: '#111', background: '#b9bcc8', padding: '0 3px', borderRadius: 3, fontSize: 6, fontWeight: 800, boxShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
+            <Refresh size={7} />TAP
+          </span>
+        )}
       </div>
       {/* Type bar */}
       <div style={{
@@ -398,12 +538,22 @@ function GasBar({ gas }: { gas: Record<Color, number> }) {
   );
 }
 
+/**
+ * Small secondary desktop action button — an obsidian forged plate.
+ * Spread onto a <button> together with `className={DESK_BTN_CLASS} style={deskBtn()}` for sizing.
+ */
+const DESK_BTN_CLASS = 'brd-plate brd-plate--obsidian brd-plate--sm';
+function deskBtn(): React.CSSProperties {
+  return { padding: '8px 14px' };
+}
+
 export function ChainsBoard(props: Props) {
   const { G, ctx, moves, playerID, isActive, chatMessages, sendChatMessage, matchID, matchData } = props as Props & {
     matchID?: string;
     matchData?: Array<{ id: number; name?: string; isConnected?: boolean }>;
   };
   const mobile = useIsMobile();
+  const short = useIsShort();
   const myId  = playerID ?? '0';
   const oppId = myId === '0' ? '1' : '0';
   const me   = G.players[myId];
@@ -412,7 +562,7 @@ export function ChainsBoard(props: Props) {
   const [selectedHand, setSelectedHand] = useState<number | null>(null);
   const [targetMode, setTargetMode] = useState<null | { kind: 'meme' | 'any' | 'machine' }>(null);
   // Mobile hand drawer (bottom sheet). On mobile, the hand is collapsed to a
-  // peek bar; tapping ✋ opens a full-screen sheet to browse + play cards.
+  // peek bar; tapping the Hand button opens a full-screen sheet to browse + play cards.
   const [handOpen, setHandOpen] = useState(false);
 
   const myTurn = ctx.currentPlayer === myId;
@@ -587,7 +737,7 @@ export function ChainsBoard(props: Props) {
 
   // On gameover, post result to API. Server dedupes by matchID so it's safe for both clients to post.
   // Solo (vs-bot) matches use a `solo-…` matchID and skip the server hop —
-  // their results are tracked locally via SoloClient → dailyChallenge.ts.
+  // their results are tracked locally via SoloClient -> dailyChallenge.ts.
   const isSolo = !!matchID && matchID.startsWith('solo-');
   const recordedRef = useRef(false);
   useEffect(() => {
@@ -653,7 +803,15 @@ export function ChainsBoard(props: Props) {
   }, [targetMode, selectedHand]);
 
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', padding: mobile ? 6 : 8, color: '#eee', background: '#0a0a10', minHeight: '100vh', height: mobile ? 'auto' : '100dvh', display: 'flex', flexDirection: 'column', overflow: mobile ? 'visible' : 'hidden' }}>
+    <div className="brd" style={{
+      fontFamily: 'system-ui, sans-serif', padding: mobile ? 6 : 8, color: '#eee', background: '#0a0a10',
+      minHeight: '100vh', height: mobile ? 'auto' : '100dvh', display: 'flex', flexDirection: 'column',
+      overflow: mobile ? undefined : 'hidden',
+      // Mobile: never allow horizontal page scroll; leave room for the fixed
+      // bottom action bar (+ notch safe area) so content is never covered.
+      overflowX: mobile ? 'hidden' : undefined,
+      paddingBottom: mobile ? 'calc(118px + env(safe-area-inset-bottom))' : 8,
+    }}>
       {/* Compact top status bar */}
       <TurnBanner
         myTurn={myTurn} turn={ctx.turn}
@@ -673,17 +831,27 @@ export function ChainsBoard(props: Props) {
         onForceEnd={() => moves.forceEndTurn()}
       />
 
-      {/* Selected-card targeting instruction (desktop). */}
-      {targetMode && !mobile && (
+      {/* Selected-card targeting instruction. Desktop pins it under the banner;
+          phones float it just above the chat bubble so it never covers the mat
+          (legal targets pulse gold there) nor the action bar's CANCEL. */}
+      {targetMode && (
         <div style={{
-          position: 'fixed', top: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 120,
+          position: 'fixed', zIndex: 120,
+          ...(mobile
+            ? { left: 10, right: 10, bottom: 'calc(178px + env(safe-area-inset-bottom))', justifyContent: 'center' }
+            : { top: 64, left: '50%', transform: 'translateX(-50%)' }),
           display: 'flex', alignItems: 'center', gap: 12, padding: '8px 18px', borderRadius: 10,
-          background: 'rgba(12,18,32,0.94)', border: '1px solid #C45CFF', color: '#F4F2EA', fontWeight: 700, fontSize: 14,
-          boxShadow: '0 0 22px rgba(196,92,255,0.5)',
+          background: 'linear-gradient(180deg, rgba(22,16,44,0.94), rgba(10,10,22,0.94))',
+          border: '1px solid #C45CFF', color: '#F4F2EA', fontWeight: 700, fontSize: 14,
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.10), 0 0 26px rgba(196,92,255,0.45), 0 10px 26px rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
         }} role="status">
-          <span>🎯 Choose a target</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontFamily: '"Cinzel", "Times New Roman", serif', letterSpacing: 1.2 }}>
+            <Target size={16} color="#C45CFF" />Choose a target
+          </span>
           <button onClick={() => { setSelectedHand(null); setTargetMode(null); }}
-            style={{ background: 'none', border: '1px solid rgba(196,92,255,0.5)', color: '#C45CFF', borderRadius: 6, padding: '3px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+            className="brd-glyph-btn"
+            style={{ color: '#C45CFF', borderColor: 'rgba(196,92,255,0.5)', padding: '4px 10px', fontSize: 12, fontWeight: 700 }}>
             Cancel · Esc
           </button>
         </div>
@@ -712,16 +880,15 @@ export function ChainsBoard(props: Props) {
         <button
           onClick={() => { Haptics.turn(); moves.passTurn(); }}
           title="End your turn (Space)"
+          className={`brd-plate brd-plate--gold ${short ? '' : 'brd-plate--lg'}`}
           style={{
-            position: 'fixed', right: 18, bottom: 18, zIndex: 90,
-            background: 'linear-gradient(180deg, #f0d27a, #c69533)',
-            color: '#1a1408', border: '2px solid #8a6d24',
-            borderRadius: 12, padding: '14px 22px',
-            cursor: 'pointer', fontWeight: 900, fontSize: 15, letterSpacing: 2,
-            boxShadow: '0 6px 24px rgba(217,184,95,0.55), 0 0 0 1px rgba(0,0,0,0.4)',
-            textShadow: '0 1px 0 rgba(255,255,255,0.3)',
+            // Offset from the corner so the host app's bottom-right floating
+            // control (sound toggle) never sits on top of the primary action.
+            position: 'fixed', right: 'calc(72px + env(safe-area-inset-right))',
+            bottom: 'max(18px, env(safe-area-inset-bottom))', zIndex: 90,
+            padding: short ? '10px 18px' : undefined,
           }}
-        >END TURN ⏎</button>
+        >END TURN <ArrowRight size={15} /></button>
       )}
 
       {/* Pre-game mulligan overlay */}
@@ -742,16 +909,22 @@ export function ChainsBoard(props: Props) {
           user doesn't think the UI is frozen. */}
       {isSolo && !myTurn && !mulliganPhase && !ctx.gameover && (
         <div style={{
-          position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)',
+          position: 'fixed', left: '50%', transform: 'translateX(-50%)',
+          // Phones: sit above the action bar. At top:70 it covered the turn
+          // banner's second row (and the help button) on a 390px screen.
+          ...(mobile
+            ? { top: 'calc(98px + env(safe-area-inset-top))', whiteSpace: 'nowrap' as const }
+            : { top: 70 }),
           zIndex: 150, padding: '8px 16px',
           background: 'rgba(76, 29, 149, 0.92)', color: '#fff',
           border: '1px solid #a78bfa', borderRadius: 999,
           fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 700,
           fontSize: 13, letterSpacing: 1, textTransform: 'uppercase',
-          boxShadow: '0 0 16px rgba(167,139,250,0.55)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 0 18px rgba(167,139,250,0.55), 0 8px 20px rgba(0,0,0,0.5)',
           pointerEvents: 'none',
+          display: 'flex', alignItems: 'center', gap: 8,
         }}>
-          🤖 Bot is thinking…
+          <Robot size={15} /> Bot is thinking…
         </div>
       )}
 
@@ -760,7 +933,7 @@ export function ChainsBoard(props: Props) {
         <div style={{
           padding: 16, marginBottom: 10,
           background: 'linear-gradient(180deg, rgba(26,18,64,0.92), rgba(10,10,30,0.92))',
-          border: '1px solid #4c1d95', borderRadius: 6,
+          border: '1px solid #4c1d95', borderRadius: 10,
           boxShadow: '0 0 14px rgba(139,92,246,0.25)',
           fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif',
           color: '#ece1c7',
@@ -779,10 +952,15 @@ export function ChainsBoard(props: Props) {
             {COLORS.map(c => {
               const meta = COLOR_META[c];
               return (
-                <button key={c} onClick={() => moves.chooseColor(c)} style={{
-                  padding: '10px 16px',
-                  background: meta.hex, color: meta.ink,
-                  border: '2px solid #000', borderRadius: 6, fontWeight: 800, cursor: 'pointer', fontSize: 13,
+                <button key={c} onClick={() => moves.chooseColor(c)} className="brd-plate" style={{
+                  ...({
+                    '--plate-bg': `linear-gradient(180deg, ${meta.hex} 0%, ${meta.hex} 42%, rgba(0,0,0,0.42) 100%)`,
+                    '--plate-ink': meta.ink,
+                    '--plate-hairline': 'rgba(229,184,75,0.45)',
+                    '--plate-glow': 'rgba(255,216,106,0.55)',
+                    '--plate-textshadow': '0 1px 1px rgba(0,0,0,0.35)',
+                  } as Vars),
+                  padding: '11px 18px', fontSize: 13,
                 }}>{meta.name}</button>
               );
             })}
@@ -796,7 +974,7 @@ export function ChainsBoard(props: Props) {
           padding: '8px 14px', marginBottom: 10, fontSize: 13,
           fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif',
           background: 'linear-gradient(180deg, rgba(26,18,64,0.92), rgba(10,10,30,0.92))',
-          border: '1px solid #4c1d95', borderRadius: 6, color: '#ece1c7',
+          border: '1px solid #4c1d95', borderRadius: 10, color: '#ece1c7',
           boxShadow: '0 0 14px rgba(139,92,246,0.25)',
         }}>
           Waiting for opponent to choose their deck…
@@ -814,8 +992,9 @@ export function ChainsBoard(props: Props) {
                 ? 'linear-gradient(180deg, rgba(26,18,64,0.92), rgba(10,10,30,0.92))'
                 : 'linear-gradient(180deg, rgba(20,20,28,0.92), rgba(10,10,16,0.92))'),
           border: `1px solid ${inBlockers ? '#a8740f' : (myTurn ? '#4c1d95' : '#2a2a36')}`,
-          borderRadius: 6,
+          borderRadius: 10,
           color: '#ece1c7',
+          transition: 'border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease',
           boxShadow: inBlockers
             ? '0 0 14px rgba(240,179,42,0.25)'
             : (myTurn ? '0 0 14px rgba(139,92,246,0.25)' : 'none'),
@@ -831,13 +1010,18 @@ export function ChainsBoard(props: Props) {
       )}
 
       {notice && (
-        <div style={{ padding: '6px 10px', marginBottom: 6, fontSize: 12, background: '#3a0a0a', border: '1px solid #844', borderRadius: 4, color: '#fdd' }}>
+        <div role="status" style={{ padding: '7px 12px', marginBottom: 6, fontSize: 12, background: 'rgba(228,95,118,0.14)', border: '1px solid rgba(228,95,118,0.55)', borderRadius: 8, color: '#ffc9d3' }}>
           {notice}
         </div>
       )}
 
       {ctx.gameover && (
-        <div style={{ padding: 12, background: '#222', border: '1px solid #555', marginBottom: 8 }}>
+        <div style={{
+          padding: 12, marginBottom: 8, borderRadius: 10,
+          background: 'linear-gradient(180deg, rgba(26,18,64,0.92), rgba(10,10,30,0.92))',
+          border: '1px solid rgba(229,184,75,0.45)',
+          boxShadow: '0 0 18px rgba(229,184,75,0.2)',
+        }}>
           {ctx.gameover.draw
             ? <b>Draw! Both records +1 D.</b>
             : <b>Winner: {ctx.gameover.winner === myId ? myName : oppName} — {ctx.gameover.winner === myId ? 'you got +1 W' : 'you got +1 L'}</b>}
@@ -864,9 +1048,10 @@ export function ChainsBoard(props: Props) {
 
       {/* Playmat — sized to fit alongside hand without scrolling */}
       <div style={{
-        margin: '8px auto',
+        margin: short ? '4px auto' : '8px auto',
         width: '100%',
-        maxWidth: mobile ? '100%' : 'min(1280px, calc(100dvh - 280px))',
+        // Landscape phones (h<450): shrink the reserved chrome so the mat stays usable.
+        maxWidth: mobile ? '100%' : `min(1280px, calc(100dvh - ${short ? 170 : 280}px))`,
       }}>
         <div data-dropzone="battlefield">
         <MobilePlaymatScaler enabled={mobile}>
@@ -917,17 +1102,24 @@ export function ChainsBoard(props: Props) {
 
       {/* Hand — curved fan layout on desktop, collapsed peek bar on mobile */}
       {!mobile && (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ fontSize: 11, opacity: 0.6, letterSpacing: 1, textTransform: 'uppercase', fontWeight: 700, textAlign: 'center', marginBottom: 4 }}>
-            ✋ Hand · {me.hand.length}
+        <div style={{ marginTop: short ? 4 : 8 }}>
+          <div className="brd-zone-label" style={{
+            fontSize: 11, color: 'rgba(229,184,75,0.78)', marginBottom: 5,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            textShadow: '0 1px 3px rgba(0,0,0,0.8)',
+          }}>
+            <Diamond size={7} color="rgba(229,184,75,0.55)" />
+            <HandIcon size={12} />
+            <span>Hand · {me.hand.length}</span>
+            <Diamond size={7} color="rgba(229,184,75,0.55)" />
           </div>
-          <div style={{
+          <div className="brd-scroll" style={{
             display: 'flex', flexWrap: 'nowrap',
             overflowX: 'auto', overflowY: 'visible',
             WebkitOverflowScrolling: 'touch',
             paddingBottom: 4,
             justifyContent: 'center', alignItems: 'flex-end',
-            minHeight: 176,
+            minHeight: short ? 120 : 176,
             perspective: 1400,
           }}>
             {me.hand.map((id, i) => {
@@ -939,17 +1131,12 @@ export function ChainsBoard(props: Props) {
               const overlap = n > 7 ? -34 : n > 5 ? -26 : -18;      // tighten for larger hands
               const rest = `translateY(${arc}px) rotate(${rot}deg)`;
               return (
-                <div key={i} style={{
-                  transform: rest,
+                <div key={i} className="brd-fan" style={{
+                  ...({ '--rest': rest, '--z': selectedHand === i ? 20 : i } as Vars),
                   transformOrigin: '50% 130%',
                   marginLeft: i === 0 ? 0 : overlap,
-                  transition: 'transform 0.18s cubic-bezier(0.2,0.8,0.2,1)',
-                  zIndex: selectedHand === i ? 20 : i,
                   flex: '0 0 auto',
-                }}
-                  onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-22px) rotate(0deg) scale(1.14)'; e.currentTarget.style.zIndex = '30'; }}
-                  onMouseLeave={e => { e.currentTarget.style.transform = rest; e.currentTarget.style.zIndex = String(selectedHand === i ? 20 : i); }}
-                >
+                }}>
                   <DraggableCard
                     defId={id}
                     onDrop={() => isActive && myTurn && !inBlockers && tryPlay(i)}
@@ -983,6 +1170,7 @@ export function ChainsBoard(props: Props) {
           onConfirmBlocks={() => { Haptics.attack(); moves.confirmBlocks(); }}
           targetMode={!!targetMode}
           onCancelTarget={() => { setSelectedHand(null); setTargetMode(null); }}
+          onOpenRules={() => setShowRules(true)}
         />
       )}
       {mobile && handOpen && (
@@ -1001,15 +1189,19 @@ export function ChainsBoard(props: Props) {
         <GasBar gas={me.gas} />
         {myTurn && !inBlockers && (
           <>
-            <button onClick={() => moves.confirmAttackers()} disabled={G.combat.attackers.length === 0}>
-              Attack with {G.combat.attackers.length} meme(s)
+            <button onClick={() => moves.confirmAttackers()} disabled={G.combat.attackers.length === 0}
+              className={`brd-plate brd-plate--sm ${G.combat.attackers.length > 0 ? 'brd-plate--crimson' : 'brd-plate--obsidian'}`}
+              style={deskBtn()}>
+              <Swords size={13} /> Attack with {G.combat.attackers.length} meme(s)
             </button>
-            <button onClick={() => moves.passTurn()}>End Turn</button>
+            <button onClick={() => moves.passTurn()} className="brd-plate brd-plate--gold brd-plate--sm" style={deskBtn()}>End Turn</button>
           </>
         )}
         {inBlockers && (
           <>
-            <button onClick={() => moves.confirmBlocks()}>Confirm Blocks</button>
+            <button onClick={() => moves.confirmBlocks()} className="brd-plate brd-plate--steel brd-plate--sm" style={deskBtn()}>
+              <Shield size={13} /> Confirm Blocks
+            </button>
             <span style={{ fontSize: 12 }}>
               {blockSel.blockerUid
                 ? `Blocker selected (${blockSel.blockerUid}). Click an attacking opponent meme above to assign it.`
@@ -1018,18 +1210,21 @@ export function ChainsBoard(props: Props) {
           </>
         )}
         {targetMode && (
-          <button onClick={() => { setSelectedHand(null); setTargetMode(null); }}>Cancel target</button>
+          <button onClick={() => { setSelectedHand(null); setTargetMode(null); }} className={DESK_BTN_CLASS} style={deskBtn()}>Cancel target</button>
         )}
       </div>
       )}
 
       {/* Block assignment row */}
       {inBlockers && blockSel.blockerUid && (
-        <div style={{ marginTop: 8, padding: 8, border: '1px dashed #888' }}>
-          <div style={{ fontSize: 12, marginBottom: 4 }}>Assign blocker {blockSel.blockerUid} to attacker:</div>
-          <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{
+          marginTop: 8, padding: 10, borderRadius: 10,
+          border: '1px dashed rgba(229,184,75,0.5)', background: 'rgba(18,18,31,0.75)',
+        }}>
+          <div style={{ fontSize: 12, marginBottom: 6 }}>Assign blocker {blockSel.blockerUid} to attacker:</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {G.combat.attackers.map(a => (
-              <button key={a.memeUid} onClick={() => {
+              <button key={a.memeUid} className={DESK_BTN_CLASS} style={deskBtn()} onClick={() => {
                 moves.declareBlocker(blockSel.blockerUid!, a.memeUid);
                 setBlockSel({});
               }}>{a.memeUid}</button>
@@ -1038,10 +1233,15 @@ export function ChainsBoard(props: Props) {
         </div>
       )}
 
-      {/* Log */}
-      <details style={{ marginTop: 12 }}>
-        <summary style={{ cursor: 'pointer', opacity: 0.7 }}>Log ({G.log.length})</summary>
-        <pre style={{ fontSize: 11, maxHeight: 200, overflow: 'auto', background: '#000', padding: 8 }}>
+      {/* Log. On phones this is the only in-page action log (the right rail is
+          desktop-only), so keep its summary clear of the floating chat bubble. */}
+      <details style={{ marginTop: 12, paddingLeft: mobile ? 68 : 0 }}>
+        <summary style={{ cursor: 'pointer', opacity: 0.75, minHeight: 44, display: 'flex', alignItems: 'center' }}>Log ({G.log.length})</summary>
+        <pre className="brd-scroll" style={{
+          fontSize: 11, maxHeight: 200, overflow: 'auto',
+          background: 'rgba(10,10,20,0.85)', padding: 10, borderRadius: 10,
+          border: '1px solid rgba(150,140,190,0.14)',
+        }}>
           {G.log.slice(-80).join('\n')}
         </pre>
       </details>
@@ -1148,21 +1348,18 @@ function ChatPanel({
     return (
       <button
         onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 50); }}
+        className="brd-stud"
         style={{
           position: 'fixed',
           left: mobile ? 10 : 16,
-          bottom: mobile ? 84 : 16, // sit above the mobile action bar
+          // Sit above the mobile action bar + notch safe area.
+          bottom: mobile ? 'calc(120px + env(safe-area-inset-bottom))' : 16,
           zIndex: 90,
-          width: 48, height: 48, borderRadius: 24,
-          background: '#1a1a1a', color: '#eee',
-          border: '1px solid #444',
-          boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
-          cursor: 'pointer', fontSize: 20,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 48, height: 48,
         }}
-        title="Open chat"
+        title="Open chat" aria-label="Open chat"
       >
-        💬
+        <ChatIcon size={20} />
         {unread > 0 && (
           <span style={{
             position: 'absolute', top: -4, right: -4,
@@ -1180,31 +1377,33 @@ function ChatPanel({
     <div style={{
       position: 'fixed',
       left: mobile ? 8 : 16,
-      bottom: mobile ? 76 : 16,
+      bottom: mobile ? 'calc(118px + env(safe-area-inset-bottom))' : 16,
       zIndex: 90,
       width: mobile ? 'calc(100vw - 16px)' : 320,
       maxWidth: 'calc(100vw - 16px)',
-      border: '1px solid #444', borderRadius: 8, background: '#161616',
-      boxShadow: '0 6px 22px rgba(0,0,0,0.55)',
+      border: '1px solid rgba(229,184,75,0.35)', borderRadius: 12,
+      background: 'linear-gradient(180deg, rgba(20,16,30,0.94), rgba(9,8,16,0.95))',
+      backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
       display: 'flex', flexDirection: 'column',
-    }}>
+      overflow: 'hidden',
+    }} className="brd-panel">
       <div style={{
-        padding: '6px 10px', background: '#222', fontSize: 12, fontWeight: 700,
-        color: '#ccc', borderBottom: '1px solid #333',
-        borderTopLeftRadius: 8, borderTopRightRadius: 8,
+        padding: '7px 10px', background: 'rgba(6,7,17,0.55)',
+        fontFamily: '"Cinzel", "Times New Roman", serif',
+        fontSize: 11, fontWeight: 800, letterSpacing: 1.6, textTransform: 'uppercase',
+        color: GOLD, borderBottom: '1px solid rgba(229,184,75,0.22)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
-        <span>💬 Chat</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><ChatIcon size={13} /> Chat</span>
         <button
           onClick={() => setOpen(false)}
-          style={{
-            background: 'transparent', border: 'none', color: '#aaa',
-            cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 4px',
-          }}
+          aria-label="Hide chat"
+          className="brd-glyph-btn"
+          style={{ minWidth: 44, minHeight: 44, padding: '0 6px' }}
           title="Hide chat"
-        >×</button>
+        ><Close size={18} /></button>
       </div>
-      <div ref={listRef} style={{ height: mobile ? 180 : 220, overflowY: 'auto', padding: 8, fontSize: 12, fontFamily: 'system-ui' }}>
+      <div ref={listRef} className="brd-scroll" style={{ height: mobile ? 'min(180px, 32dvh)' : 220, overflowY: 'auto', padding: 8, fontSize: 12, fontFamily: 'system-ui' }}>
         {messages.length === 0 && (
           <div style={{ color: '#666', fontStyle: 'italic' }}>No messages yet. Talk smack.</div>
         )}
@@ -1214,14 +1413,17 @@ function ChatPanel({
             ? m.payload
             : (m.payload && typeof m.payload.text === 'string' ? m.payload.text : JSON.stringify(m.payload));
           return (
-            <div key={m.id} style={{ marginBottom: 4, color: mine ? '#9f9' : '#9cf' }}>
-              <span style={{ fontWeight: 700 }}>P{m.sender}{mine ? ' (you)' : ''}:</span>{' '}
-              <span style={{ color: '#eee' }}>{text}</span>
+            <div key={m.id} style={{ marginBottom: 6, lineHeight: 1.5 }}>
+              <span style={{
+                fontWeight: 800, fontSize: 10, letterSpacing: 0.8, textTransform: 'uppercase',
+                color: mine ? '#39E879' : '#7fb3ff',
+              }}>P{m.sender}{mine ? ' (you)' : ''}</span>{' '}
+              <span style={{ color: '#F4F2EA' }}>{text}</span>
             </div>
           );
         })}
       </div>
-      <div style={{ display: 'flex', gap: 6, padding: 6, borderTop: '1px solid #333', background: '#1a1a1a', borderBottomLeftRadius: 8, borderBottomRightRadius: 8 }}>
+      <div style={{ display: 'flex', gap: 6, padding: 8, borderTop: '1px solid rgba(229,184,75,0.22)', background: 'rgba(6,7,17,0.5)' }}>
         <input
           ref={inputRef}
           value={draft}
@@ -1229,18 +1431,20 @@ function ChatPanel({
           onKeyDown={e => { if (e.key === 'Enter') send(); }}
           placeholder={sendChatMessage ? 'Type a message and press Enter' : 'Chat unavailable'}
           disabled={!sendChatMessage}
+          aria-label="Chat message"
           style={{
-            flex: 1, padding: '6px 8px', background: '#000', color: '#eee',
-            border: '1px solid #444', borderRadius: 4, fontFamily: 'system-ui', fontSize: 12,
+            flex: 1, minWidth: 0, padding: '12px 10px', minHeight: 44, color: '#F4F2EA',
+            background: 'linear-gradient(180deg, #070A14, #0C1120)',
+            border: '1px solid rgba(229,184,75,0.20)', borderRadius: 8,
+            boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.6)',
+            fontFamily: 'system-ui', fontSize: 12,
           }}
         />
         <button
           onClick={send}
           disabled={!sendChatMessage || !draft.trim()}
-          style={{
-            padding: '6px 14px', background: '#2a7', color: '#fff',
-            border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 700, fontSize: 12,
-          }}
+          className="brd-plate brd-plate--gold brd-plate--sm"
+          style={{ padding: '10px 16px', minHeight: 44 }}
         >Send</button>
       </div>
     </div>
@@ -1253,13 +1457,14 @@ function MatchRail({ entries, myId, messages, sendChatMessage }: {
   messages: Array<{ id: string; sender: string; payload: any }>;
   sendChatMessage?: (msg: any) => void;
 }) {
+  const short = useIsShort();
   const [tab, setTab] = useState<'log' | 'chat'>('log');
-  const [collapsed, setCollapsed] = useState(false);
+  // Landscape phones: start collapsed so the rail never covers the mat.
+  const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && window.innerHeight <= 450);
   const [draft, setDraft] = useState('');
   const [lastSeen, setLastSeen] = useState(0);
   const logRef = React.useRef<HTMLDivElement>(null);
   const chatRef = React.useRef<HTMLDivElement>(null);
-  const GOLD = '#E5B84B';
 
   useEffect(() => { if (tab === 'log' && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [entries.length, tab]);
   useEffect(() => {
@@ -1281,55 +1486,97 @@ function MatchRail({ entries, myId, messages, sendChatMessage }: {
 
   if (collapsed) {
     return (
-      <button onClick={() => setCollapsed(false)} aria-label="Expand match rail" title="Expand rail" style={{
-        position: 'fixed', top: 80, right: 0, zIndex: 60, width: 34, height: 84, borderRadius: '10px 0 0 10px',
-        background: 'rgba(12,18,32,0.9)', border: `1px solid ${GOLD}55`, borderRight: 'none', color: GOLD, cursor: 'pointer', fontSize: 16,
+      <button onClick={() => setCollapsed(false)} aria-label="Expand match rail" title="Expand rail" className="brd-tab" style={{
+        position: 'fixed', top: short ? 56 : 80, right: 0, zIndex: 60, width: 34, height: 84, borderRadius: '10px 0 0 10px',
+        background: 'linear-gradient(180deg, rgba(24,19,36,0.94), rgba(10,9,18,0.94))',
+        backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        border: `1px solid ${GOLD}55`, borderRight: 'none', color: GOLD, cursor: 'pointer',
+        boxShadow: 'inset 1px 0 0 rgba(255,226,160,0.12), -6px 0 18px rgba(0,0,0,0.5)',
         display: 'grid', placeItems: 'center',
       }}>
-        »{unread > 0 && <span style={{ position: 'absolute', top: 6, right: 6, background: '#E45F76', color: '#fff', fontSize: 9, fontWeight: 800, borderRadius: 8, minWidth: 16, height: 16, display: 'grid', placeItems: 'center', padding: '0 4px' }}>{unread > 9 ? '9+' : unread}</span>}
+        <ChevronLeft size={16} />
+        {unread > 0 && <span style={{ position: 'absolute', top: 6, right: 6, background: '#E45F76', color: '#fff', fontSize: 9, fontWeight: 800, borderRadius: 8, minWidth: 16, height: 16, display: 'grid', placeItems: 'center', padding: '0 4px' }}>{unread > 9 ? '9+' : unread}</span>}
       </button>
     );
   }
   const tabBtn = (active: boolean): React.CSSProperties => ({
-    flex: 1, padding: '10px 8px', cursor: 'pointer', background: 'none', border: 'none',
-    fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 800, fontSize: 12, letterSpacing: 1.4,
-    color: active ? GOLD : '#989BB0', borderBottom: `2px solid ${active ? GOLD : 'transparent'}`,
+    flex: 1, padding: '11px 8px', cursor: 'pointer', border: 'none',
+    background: active
+      ? 'linear-gradient(180deg, rgba(229,184,75,0.13), rgba(229,184,75,0))'
+      : 'none',
+    fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 800, fontSize: 11.5, letterSpacing: 1.8,
+    color: active ? GOLD_HI : '#989BB0',
+    textShadow: active ? '0 0 10px rgba(229,184,75,0.45)' : 'none',
+    borderBottom: `2px solid ${active ? GOLD : 'transparent'}`,
   });
   return (
-    <div style={{
-      position: 'fixed', top: 80, right: 16, bottom: 100, width: 300, zIndex: 60,
-      background: 'rgba(12,18,32,0.86)', border: `1px solid ${GOLD}44`, borderRadius: 12,
-      boxShadow: '0 0 24px rgba(142,77,255,0.15), 0 10px 30px #000a', backdropFilter: 'blur(8px)',
+    <div className="brd-panel" style={{
+      position: 'fixed', top: short ? 56 : 80, right: short ? 8 : 16, bottom: short ? 64 : 100,
+      width: short ? 240 : 300, maxWidth: 'calc(100vw - 24px)', zIndex: 60,
+      // Dark parchment: warm-black gradient under an engraved gold hairline.
+      background: 'linear-gradient(180deg, rgba(24,19,34,0.93) 0%, rgba(13,11,21,0.94) 45%, rgba(8,7,14,0.95) 100%)',
+      border: `1px solid ${GOLD}44`, borderRadius: 12,
+      backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${GOLD}22` }}>
-        <button onClick={() => setTab('log')} style={tabBtn(tab === 'log')}>ACTION LOG</button>
-        <button onClick={() => { setTab('chat'); setLastSeen(messages.length); }} style={tabBtn(tab === 'chat')}>
+      <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${GOLD}2e`, background: 'rgba(0,0,0,0.28)' }}>
+        <button onClick={() => setTab('log')} className="brd-tab" style={tabBtn(tab === 'log')}>ACTION LOG</button>
+        <button onClick={() => { setTab('chat'); setLastSeen(messages.length); }} className="brd-tab" style={tabBtn(tab === 'chat')}>
           CHAT{unread > 0 && tab !== 'chat' && <span style={{ marginLeft: 6, background: '#E45F76', color: '#fff', fontSize: 9, borderRadius: 8, padding: '1px 5px' }}>{unread > 9 ? '9+' : unread}</span>}
         </button>
-        <button onClick={() => setCollapsed(true)} aria-label="Collapse rail" title="Collapse" style={{ background: 'none', border: 'none', color: '#989BB0', cursor: 'pointer', fontSize: 16, padding: '0 12px' }}>«</button>
+        <button onClick={() => setCollapsed(true)} aria-label="Collapse rail" title="Collapse" className="brd-glyph-btn"
+          style={{ border: 'none', padding: '0 12px', height: 34 }}><ChevronRight size={16} /></button>
       </div>
       {tab === 'log' ? (
-        <div ref={logRef} style={{ flex: 1, overflow: 'auto', padding: '10px 12px', fontSize: 12, lineHeight: 1.5, fontFamily: 'system-ui' }}>
+        <div ref={logRef} className="brd-scroll" style={{ flex: 1, overflow: 'auto', padding: '10px 12px', fontSize: 12, lineHeight: 1.55, fontFamily: 'system-ui' }}>
           {entries.length === 0
             ? <div style={{ opacity: 0.4 }}>(No actions yet)</div>
-            : entries.slice(-200).map((line, i) => <div key={i} style={{ color: colorFor(line), marginBottom: 3, wordBreak: 'break-word' }}>{line}</div>)}
+            : entries.slice(-200).map((line, i) => {
+                const isTurn = line.startsWith('— Turn');
+                return (
+                  <div key={i} style={{
+                    color: colorFor(line), wordBreak: 'break-word',
+                    marginBottom: isTurn ? 6 : 3, marginTop: isTurn ? 8 : 0,
+                    paddingLeft: isTurn ? 0 : 8,
+                    borderLeft: isTurn ? 'none' : '1px solid rgba(229,184,75,0.14)',
+                    fontFamily: isTurn ? '"Cinzel", "Times New Roman", serif' : undefined,
+                    fontWeight: isTurn ? 800 : 400,
+                    letterSpacing: isTurn ? 1.1 : 0,
+                    fontSize: isTurn ? 11 : 12,
+                    textTransform: isTurn ? 'uppercase' : undefined,
+                  }}>{line}</div>
+                );
+              })}
         </div>
       ) : (
         <>
-          <div ref={chatRef} style={{ flex: 1, overflow: 'auto', padding: '10px 12px', fontSize: 12, fontFamily: 'system-ui' }}>
+          <div ref={chatRef} className="brd-scroll" style={{ flex: 1, overflow: 'auto', padding: '10px 12px', fontSize: 12, fontFamily: 'system-ui' }}>
             {messages.length === 0 && <div style={{ color: '#6b7387', fontStyle: 'italic' }}>No messages yet.</div>}
             {messages.map(m => {
               const mine = m.sender === myId;
               const text = typeof m.payload === 'string' ? m.payload : (m.payload && typeof m.payload.text === 'string' ? m.payload.text : JSON.stringify(m.payload));
-              return <div key={m.id} style={{ marginBottom: 5, color: mine ? '#39E879' : '#7fb3ff' }}><b>P{m.sender}{mine ? ' (you)' : ''}:</b> <span style={{ color: '#F4F2EA' }}>{text}</span></div>;
+              return (
+                <div key={m.id} style={{ marginBottom: 8, lineHeight: 1.5 }}>
+                  <div style={{
+                    fontSize: 9.5, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase',
+                    color: mine ? '#39E879' : '#7fb3ff', marginBottom: 1,
+                  }}>P{m.sender}{mine ? ' (you)' : ''}</div>
+                  <div style={{ color: '#F4F2EA' }}>{text}</div>
+                </div>
+              );
             })}
           </div>
-          <div style={{ display: 'flex', gap: 6, padding: 8, borderTop: `1px solid ${GOLD}22` }}>
+          <div style={{ display: 'flex', gap: 6, padding: 8, borderTop: `1px solid ${GOLD}2e`, background: 'rgba(0,0,0,0.25)' }}>
             <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') send(); }}
               placeholder={sendChatMessage ? 'Message…' : 'Chat unavailable'} disabled={!sendChatMessage} aria-label="Chat message"
-              style={{ flex: 1, padding: '8px 10px', background: '#090D19', color: '#F4F2EA', border: '1px solid #2a3350', borderRadius: 8, fontSize: 12 }} />
-            <button onClick={send} disabled={!sendChatMessage || !draft.trim()} style={{ padding: '8px 14px', background: 'linear-gradient(180deg,#FFD86A,#c69533)', color: '#1a1408', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 800, fontSize: 12 }}>Send</button>
+              style={{
+                flex: 1, minWidth: 0, padding: '8px 10px', color: '#F4F2EA',
+                background: 'linear-gradient(180deg, #070A14, #0C1120)',
+                border: `1px solid ${GOLD}33`, borderRadius: 8, fontSize: 12,
+                boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.6)',
+              }} />
+            <button onClick={send} disabled={!sendChatMessage || !draft.trim()}
+              className="brd-plate brd-plate--gold brd-plate--sm" style={{ padding: '8px 14px' }}>Send</button>
           </div>
         </>
       )}
@@ -1415,11 +1662,8 @@ function WagerPayoutModal({
               fontSize: 12, color: '#ece1c7', wordBreak: 'break-all',
             }}>
               <span style={{ flex: 1 }}>{winnerWallet}</span>
-              <button onClick={() => copy(winnerWallet)} style={{
-                padding: '4px 10px', fontSize: 11, fontWeight: 800,
-                background: '#4c1d95', color: '#fff', border: '1px solid #6b2fc9',
-                borderRadius: 3, cursor: 'pointer', letterSpacing: 0.5, textTransform: 'uppercase',
-              }}>Copy</button>
+              <button onClick={() => copy(winnerWallet)} className="brd-plate brd-plate--obsidian brd-plate--sm"
+                style={{ padding: '5px 12px' }}>Copy</button>
             </div>
           ) : (
             <div style={{
@@ -1440,12 +1684,8 @@ function WagerPayoutModal({
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>
-          <button onClick={() => setDismissed(true)} style={{
-            padding: '8px 16px', fontWeight: 800, fontSize: 13, letterSpacing: 1, textTransform: 'uppercase',
-            background: 'linear-gradient(180deg, #f0b32a, #a8740f)', color: '#1a1408',
-            border: '1px solid #6a5520', borderRadius: 4, cursor: 'pointer',
-            fontFamily: '"Cinzel", "Times New Roman", serif',
-          }}>Close</button>
+          <button onClick={() => setDismissed(true)} className="brd-plate brd-plate--gold"
+            style={{ padding: '9px 20px', fontSize: 13 }}>Close</button>
         </div>
       </div>
     </div>
@@ -1461,7 +1701,8 @@ function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: str
 
   const siteUrl = (typeof window !== 'undefined' ? window.location.origin : 'https://www.masterstcg.com');
   const imgUrl = `${siteUrl}/share-win.jpg`;
-  const tweetText = `I just won in On-Chain Virtual Arena! ⚔️\n\nPlay the 5-chain onchain card game at ${siteUrl}`;
+  // Plain text only — the tweet body is a string, so no emoji/pictographs here.
+  const tweetText = `I just won in On-Chain Virtual Arena!\n\nPlay the 5-chain onchain card game at ${siteUrl}`;
   const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
 
   async function downloadImage() {
@@ -1522,24 +1763,13 @@ function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: str
         </div>
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
-          <a href={intentUrl} target="_blank" rel="noopener noreferrer" style={{
-            padding: '10px 18px', fontWeight: 800, fontSize: 13, letterSpacing: 1, textTransform: 'uppercase',
-            background: '#000', color: '#fff', border: '1px solid #ffd66e', borderRadius: 4,
-            textDecoration: 'none', cursor: 'pointer',
-            fontFamily: '"Cinzel", "Times New Roman", serif',
-          }}>Share on X</a>
-          <button onClick={downloadImage} style={{
-            padding: '10px 18px', fontWeight: 800, fontSize: 13, letterSpacing: 1, textTransform: 'uppercase',
-            background: 'linear-gradient(180deg, #4c1d95, #2a0f5a)', color: '#ece1c7',
-            border: '1px solid #6b2fc9', borderRadius: 4, cursor: 'pointer',
-            fontFamily: '"Cinzel", "Times New Roman", serif',
-          }}>Download Image</button>
-          <button onClick={() => setDismissed(true)} style={{
-            padding: '10px 18px', fontWeight: 800, fontSize: 13, letterSpacing: 1, textTransform: 'uppercase',
-            background: 'linear-gradient(180deg, #f0b32a, #a8740f)', color: '#1a1408',
-            border: '1px solid #6a5520', borderRadius: 4, cursor: 'pointer',
-            fontFamily: '"Cinzel", "Times New Roman", serif',
-          }}>Close</button>
+          <a href={intentUrl} target="_blank" rel="noopener noreferrer"
+            className="brd-plate brd-plate--obsidian"
+            style={{ padding: '10px 18px', fontSize: 13, textDecoration: 'none' }}>Share on X</a>
+          <button onClick={downloadImage} className="brd-plate brd-plate--violet"
+            style={{ padding: '10px 18px', fontSize: 13 }}>Download Image</button>
+          <button onClick={() => setDismissed(true)} className="brd-plate brd-plate--gold"
+            style={{ padding: '10px 18px', fontSize: 13 }}>Close</button>
         </div>
       </div>
     </div>
@@ -1724,7 +1954,7 @@ function NodeStack({
   return (
     <div style={{
       position: 'relative',
-      width: 68, height: 96,
+      width: MINI_W, aspectRatio: '68 / 96', flex: '0 0 auto',
       // Reserve room for the offset ghost layers so adjacent zones don't overlap us.
       marginRight: 4 * ghostLayers,
       marginBottom: 4 * ghostLayers,
@@ -1744,7 +1974,7 @@ function NodeStack({
           <div key={i} aria-hidden style={{
             position: 'absolute',
             left: 4 * depth, top: 4 * depth,
-            width: 68, height: 96, borderRadius: 6,
+            width: '100%', height: '100%', borderRadius: 6,
             background: meta.hex, opacity: 0.55,
             border: '1px solid #000',
             boxShadow: '0 2px 6px #000a',
@@ -1767,19 +1997,27 @@ function NodeStack({
       <div style={{
         position: 'absolute',
         right: -6, top: -6,
-        background: allTapped ? '#7a3030' : '#1e7a3a',
+        background: allTapped
+          ? 'linear-gradient(180deg,#a04b4b,#5d2222)'
+          : 'linear-gradient(180deg,#3fa564,#155c2b)',
         color: '#fff',
-        border: '1px solid #000',
+        border: '1px solid rgba(0,0,0,0.8)',
         borderRadius: 10,
         padding: '1px 6px',
         fontSize: 10, fontWeight: 800,
         letterSpacing: 0.5,
-        boxShadow: '0 1px 4px #000a',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 1px 4px rgba(0,0,0,0.7)',
         zIndex: 2,
         pointerEvents: 'none',
         whiteSpace: 'nowrap',
+        display: 'inline-flex', alignItems: 'center', gap: 2,
       }}>
-        ×{total}{tappedCount > 0 && <span style={{ opacity: 0.85, marginLeft: 3 }}>({tappedCount}⤓)</span>}
+        ×{total}
+        {tappedCount > 0 && (
+          <span style={{ opacity: 0.9, marginLeft: 2, display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+            ({tappedCount}<ArrowDown size={9} />)
+          </span>
+        )}
       </div>
     </div>
   );
@@ -1835,7 +2073,7 @@ function collectAurasOn(
  * UI-side pump bonus from auras (cosmetic; the server is the source of truth).
  * Only the symmetric +2/+2 aura tweaks the displayed P/T — asymmetric sword /
  * shield auras still apply on the backend, but are signaled in the UI via the
- * 🔮 chip count rather than tweaking one stat.
+ * aura-orb badge count rather than tweaking one stat.
  */
 function auraPowerForUI(auras: Array<{ effect?: string }>): number {
   let n = 0;
@@ -1898,23 +2136,40 @@ function Playmat(props: {
     <div style={{
       position: 'relative',
       width: '100%',
-      maxWidth: 'min(1280px, calc(100dvh - 280px))',
+      // Parent wrapper (in ChainsBoard) owns the responsive max-width.
+      maxWidth: '100%',
       aspectRatio: '1 / 1',
       margin: '8px auto', borderRadius: 16, overflow: 'hidden',
-      border: '1px solid rgba(229,184,75,0.45)',
-      boxShadow: '0 0 40px rgba(142,77,255,0.15), 0 0 60px #000a inset, 0 10px 40px #000c',
+      // Gilded outer bezel: bronze edge outside, gold hairline inside.
+      border: '1px solid rgba(122,84,18,0.9)',
+      boxShadow:
+        'inset 0 0 0 1px rgba(229,184,75,0.34),' +
+        'inset 0 1px 0 rgba(255,236,178,0.20),' +
+        'inset 0 0 90px rgba(0,0,0,0.85),' +
+        '0 0 40px rgba(142,77,255,0.15), 0 14px 46px rgba(0,0,0,0.8)',
       isolation: 'isolate',
+      // Container-query units (cqw) size the mini-cards relative to the mat,
+      // so they step down on phones AND grow back when MobileZoom zooms in.
+      containerType: 'inline-size',
     }}>
       {/* Obsidian mat surface — the arena scene, heavily darkened + navy-tinted so cards pop. */}
       <div style={{
         position: 'absolute', inset: 0,
         backgroundImage: 'url(/playmat.png?v=2)', backgroundSize: 'cover', backgroundPosition: 'center',
-        filter: 'blur(2px) brightness(0.28) saturate(0.6)',
+        filter: 'blur(2.5px) brightness(0.24) saturate(0.55) contrast(1.05)',
         zIndex: 0,
       }} />
-      <div style={{
+      {/* Scrim + vignette: pushes the art back so card frames read as the top layer. */}
+      <div aria-hidden style={{
         position: 'absolute', inset: 0, zIndex: 0,
-        background: 'radial-gradient(120% 90% at 50% 50%, rgba(8,13,24,0.35) 0%, rgba(5,7,17,0.82) 100%)',
+        background:
+          'radial-gradient(120% 92% at 50% 50%, rgba(8,13,24,0.30) 0%, rgba(5,7,17,0.86) 72%, rgba(2,3,8,0.95) 100%)',
+      }} />
+      <div aria-hidden style={{
+        position: 'absolute', inset: 0, zIndex: 0,
+        background:
+          'linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 16%, rgba(0,0,0,0) 84%, rgba(0,0,0,0.55) 100%),' +
+          'linear-gradient(90deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0) 12%, rgba(0,0,0,0) 88%, rgba(0,0,0,0.45) 100%)',
       }} />
       {/* Violet lane light */}
       <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0,
@@ -1925,6 +2180,14 @@ function Playmat(props: {
         background: 'linear-gradient(90deg, transparent, rgba(196,92,255,0.85), rgba(255,216,106,0.55), rgba(196,92,255,0.85), transparent)',
         boxShadow: '0 0 14px rgba(196,92,255,0.55)',
       }} />
+      {/* Heraldic diamond set on the centre rule. */}
+      <div aria-hidden style={{
+        position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', zIndex: 0,
+        display: 'grid', placeItems: 'center', color: GOLD_HI,
+        filter: 'drop-shadow(0 0 6px rgba(255,216,106,0.75))',
+      }}>
+        <Diamond size={9} />
+      </div>
       {/* Built on Robinhood watermark — low-contrast, behind all cards/zones. */}
       <img src="/built-on-robinhood.png?v=2" alt="" aria-hidden style={{
         position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
@@ -1932,30 +2195,30 @@ function Playmat(props: {
       }} />
       <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
       {/* ─── OPPONENT SIDE (rotated for face-to-face feel) ─── */}
-      <ZoneSlot rect={Z.oppGrave} icon="☠️" label={`Graveyard (${opp.graveyard.length})`} compactLabel={`☠️ ${opp.graveyard.length}`} rotated>
+      <ZoneSlot rect={Z.oppGrave} icon={<Skull size={11} />} label={`Graveyard (${opp.graveyard.length})`} compactLabel={`${opp.graveyard.length}`} rotated>
         {opp.graveyard.slice(-1).map((id, i) => <MiniCard key={i} defId={id} faceUp />)}
       </ZoneSlot>
-      <ZoneSlot rect={Z.oppNodes} icon="🌐" label={`Opp Nodes (${opp.nodes.length})`} compactLabel={`🌐 Nodes · ${opp.nodes.length}`} rotated>
+      <ZoneSlot rect={Z.oppNodes} icon={<Chain size={11} />} label={`Opp Nodes (${opp.nodes.length})`} compactLabel={`Nodes · ${opp.nodes.length}`} rotated>
         {renderNodes(opp.nodes)}
       </ZoneSlot>
-      <ZoneSlot rect={Z.oppDeck} icon="📚" label={`Deck (${oppDeckCount})`} compactLabel={`📚 ${oppDeckCount}`} rotated>
+      <ZoneSlot rect={Z.oppDeck} icon={<Cards size={11} />} label={`Deck (${oppDeckCount})`} compactLabel={`${oppDeckCount}`} rotated>
         {oppDeckCount > 0 && <MiniCard faceDown />}
       </ZoneSlot>
-      <ZoneSlot rect={Z.oppMaindeck} icon="✋" label={`Hand (${opp.hand.length})`} compactLabel={`✋ ${opp.hand.length}`} rotated>
+      <ZoneSlot rect={Z.oppMaindeck} icon={<HandIcon size={11} />} label={`Hand (${opp.hand.length})`} compactLabel={`${opp.hand.length}`} rotated>
         {opp.hand.length > 0 && (
-          <div style={{ color: '#fff', fontSize: 14, fontWeight: 700, textShadow: '0 1px 4px #000' }}>
-            🂠 × {opp.hand.length}
+          <div style={{ color: '#fff', fontSize: 14, fontWeight: 700, textShadow: '0 1px 4px #000', display: 'flex', alignItems: 'center', gap: 5 }}>
+            <Cards size={16} color={GOLD} /> × {opp.hand.length}
           </div>
         )}
       </ZoneSlot>
-      <ZoneSlot rect={Z.oppMachines} icon="⚙️" label={`Machines (${opp.machines.filter(m => !m.attachedTo).length})`} compactLabel={`⚙️ ${opp.machines.filter(m => !m.attachedTo).length}`} rotated>
+      <ZoneSlot rect={Z.oppMachines} icon={<SettingsIcon size={11} />} label={`Machines (${opp.machines.filter(m => !m.attachedTo).length})`} compactLabel={`${opp.machines.filter(m => !m.attachedTo).length}`} rotated>
         {opp.machines.filter(m => !m.attachedTo).map(inst => (
           <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp
             onClick={machineTargetable ? () => onMachineClick(inst.uid) : undefined}
             targetable={machineTargetable} />
         ))}
       </ZoneSlot>
-      <ZoneSlot rect={Z.oppBattle} icon="⚔️" label={`Battlefield — ${COLOR_META[opp.color].name}`} compactLabel={`⚔️ ${COLOR_META[opp.color].name}`} rotated>
+      <ZoneSlot rect={Z.oppBattle} icon={<Swords size={11} />} label={`Battlefield — ${COLOR_META[opp.color].name}`} compactLabel={COLOR_META[opp.color].name} rotated>
         {opp.memes.map(inst => {
           const attacking = attackerSide === 'opp' && attackers.includes(inst.uid);
           const blockedBy = blocks[inst.uid] ?? [];
@@ -1969,8 +2232,9 @@ function Playmat(props: {
               onClick={(memeTargetable || blockable) ? () => onOppMemeClick(inst.uid) : undefined}
               targetable={memeTargetable || blockable}
               selected={attacking}
+              blocked={blockedBy.length > 0}
               footer={
-                <>{attacking && '⚔️'}{blockedBy.length > 0 && ` 🛡${blockedBy.length}`}{auras.length > 0 && ` 🔮${auras.length}`}</>
+                <CombatBadges attacking={attacking} blockedCount={blockedBy.length} auraCount={auras.length} />
               } />
           );
         })}
@@ -1990,7 +2254,7 @@ function Playmat(props: {
         onClick={playerTargetable ? onMyPlayerClick : undefined}
         side="me" deckCount={myDeckCount} handCount={me.hand.length} seat={myId}
       />
-      <ZoneSlot rect={Z.myBattle} icon="⚔️" label={`Your Battlefield — ${COLOR_META[me.color].name}`} compactLabel={`⚔️ ${COLOR_META[me.color].name}`}>
+      <ZoneSlot rect={Z.myBattle} icon={<Swords size={11} />} label={`Your Battlefield — ${COLOR_META[me.color].name}`} compactLabel={COLOR_META[me.color].name}>
         {me.memes.map(inst => {
           const attacking = attackerSide === 'me' && attackers.includes(inst.uid);
           const blockedBy = blocks[inst.uid] ?? [];
@@ -2001,29 +2265,30 @@ function Playmat(props: {
               onClick={() => onMyMemeClick(inst.uid)}
               targetable={memeTargetable}
               selected={inst.uid === selectedBlocker || attacking}
+              blocked={blockedBy.length > 0}
               footer={
-                <>{attacking && '⚔️'}{blockedBy.length > 0 && ` 🛡${blockedBy.length}`}{auras.length > 0 && ` 🔮${auras.length}`}</>
+                <CombatBadges attacking={attacking} blockedCount={blockedBy.length} auraCount={auras.length} />
               } />
           );
         })}
       </ZoneSlot>
-      <ZoneSlot rect={Z.myMachines} icon="⚙️" label={`Machines (${me.machines.filter(m => !m.attachedTo).length})`} compactLabel={`⚙️ ${me.machines.filter(m => !m.attachedTo).length}`}>
+      <ZoneSlot rect={Z.myMachines} icon={<SettingsIcon size={11} />} label={`Machines (${me.machines.filter(m => !m.attachedTo).length})`} compactLabel={`${me.machines.filter(m => !m.attachedTo).length}`}>
         {me.machines.filter(m => !m.attachedTo).map(inst => (
           <MiniCard key={inst.uid} defId={inst.defId} instance={inst} faceUp
             onClick={machineTargetable ? () => onMachineClick(inst.uid) : undefined}
             targetable={machineTargetable} />
         ))}
       </ZoneSlot>
-      <ZoneSlot rect={Z.myMaindeck} icon="📜" label="Main Deck" compactLabel="📜">
+      <ZoneSlot rect={Z.myMaindeck} icon={<ScrollIcon size={11} />} label="Main Deck" compactLabel="">
         <div style={{ color: '#888', fontSize: 10 }}>—</div>
       </ZoneSlot>
-      <ZoneSlot rect={Z.myDeck} icon="📚" label={`Deck (${myDeckCount})`} compactLabel={`📚 ${myDeckCount}`}>
+      <ZoneSlot rect={Z.myDeck} icon={<Cards size={11} />} label={`Deck (${myDeckCount})`} compactLabel={`${myDeckCount}`}>
         {myDeckCount > 0 && <MiniCard faceDown />}
       </ZoneSlot>
-      <ZoneSlot rect={Z.myNodes} icon="🌐" label={`Your Nodes (${me.nodes.length}) — click to tap`} compactLabel={`🌐 Nodes · ${me.nodes.length}`}>
+      <ZoneSlot rect={Z.myNodes} icon={<Chain size={11} />} label={`Your Nodes (${me.nodes.length}) — click to tap`} compactLabel={`Nodes · ${me.nodes.length}`}>
         {renderNodes(me.nodes, onNodeClick)}
       </ZoneSlot>
-      <ZoneSlot rect={Z.myGrave} icon="☠️" label={`Graveyard (${me.graveyard.length})`} compactLabel={`☠️ ${me.graveyard.length}`}>
+      <ZoneSlot rect={Z.myGrave} icon={<Skull size={11} />} label={`Graveyard (${me.graveyard.length})`} compactLabel={`${me.graveyard.length}`}>
         {me.graveyard.slice(-1).map((id, i) => <MiniCard key={i} defId={id} faceUp />)}
       </ZoneSlot>
       </div>
@@ -2035,46 +2300,62 @@ function ZoneSlot({
   rect, label, compactLabel, icon, children, rotated, onClick, targetable,
 }: {
   rect: { left: number; top: number; w: number; h: number };
-  label: string; compactLabel?: string; icon?: string;
+  label: string; compactLabel?: string; icon?: React.ReactNode;
   children: React.ReactNode; rotated?: boolean;
   onClick?: () => void; targetable?: boolean;
 }) {
+  const mobile = useIsMobile();
   return (
     <div
       onClick={onClick}
       title={label}
+      className={`brd-zone${targetable ? ' brd-targetable' : ''}`}
       style={{
         position: 'absolute',
         left: `${rect.left}%`, top: `${rect.top}%`,
         width: `${rect.w}%`, height: `${rect.h}%`,
-        border: targetable ? '2px dashed #ffeb3b' : '1px solid rgba(120,180,255,0.18)',
+        // Engraved stone inset: dark well, hairline gold rim, cut-in shadow.
+        border: targetable ? '2px dashed #FFD86A' : '1px solid rgba(229,184,75,0.20)',
         borderRadius: 8,
-        background: 'rgba(0,0,0,0.35)',
-        backdropFilter: 'blur(1px)',
+        background: 'linear-gradient(180deg, rgba(6,8,16,0.52) 0%, rgba(3,4,10,0.62) 100%)',
+        backdropFilter: 'blur(1.5px)', WebkitBackdropFilter: 'blur(1.5px)',
         boxShadow: targetable
-          ? '0 0 14px rgba(255,235,59,0.45), inset 0 0 12px rgba(0,0,0,0.4)'
-          : 'inset 0 0 12px rgba(0,0,0,0.45)',
+          ? '0 0 14px rgba(255,216,106,0.5), inset 0 0 12px rgba(0,0,0,0.4)'
+          : 'inset 0 2px 6px rgba(0,0,0,0.75), inset 0 -1px 0 rgba(255,226,160,0.09), inset 0 0 22px rgba(0,0,0,0.55)',
         padding: 3,
         overflow: 'hidden',
         cursor: onClick ? 'pointer' : 'default',
         transform: rotated ? 'rotate(180deg)' : undefined,
-        transition: 'box-shadow 0.2s ease, border-color 0.2s ease',
       }}
     >
-      <div style={{
-        position: 'absolute', top: 3, left: 6, right: 6,
-        fontSize: 11, color: 'rgba(220,235,255,0.92)',
-        letterSpacing: 0.6, textShadow: '0 1px 3px #000, 0 0 4px #000',
-        pointerEvents: 'none', fontWeight: 700,
+      {/* Engraved rule under the zone label. */}
+      <span aria-hidden style={{
+        position: 'absolute', top: 16, left: 6, right: 6, height: 1, pointerEvents: 'none',
+        background: 'linear-gradient(90deg, transparent, rgba(229,184,75,0.30), transparent)',
+      }} />
+      <div className="brd-zone-label" style={{
+        position: 'absolute', top: 2, left: 6, right: 6,
+        fontSize: 'clamp(9px, 1.4cqw, 11px)', color: 'rgba(229,184,75,0.82)',
+        textShadow: '0 1px 3px #000, 0 0 5px #000',
+        pointerEvents: 'none',
         display: 'flex', alignItems: 'center', gap: 4,
+        overflow: 'hidden', whiteSpace: 'nowrap',
       }}>
-        <span>{compactLabel ?? (icon ? `${icon} ${label}` : label)}</span>
+        {icon}
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{compactLabel ?? label}</span>
       </div>
-      <div style={{
+      <div className="brd-scroll" style={{
         position: 'absolute', top: 18, left: 3, right: 3, bottom: 3,
-        display: 'flex', flexWrap: 'wrap', gap: 3,
+        display: 'flex', gap: 3,
+        // Phones: keep every card on ONE horizontally-scrolling row. Wrapping
+        // pushed later cards into a second row that the short zone clipped —
+        // they ended up sitting behind their neighbours and untappable.
+        flexWrap: mobile ? 'nowrap' : 'wrap',
         alignContent: 'flex-start', justifyContent: 'center', alignItems: 'center',
-        overflow: 'hidden',
+        // Crowded zones scroll internally instead of clipping cards out of reach.
+        overflowX: 'auto', overflowY: mobile ? 'hidden' : 'auto',
+        WebkitOverflowScrolling: 'touch',
+        overscrollBehavior: 'contain',
       }}>{children}</div>
     </div>
   );
@@ -2091,56 +2372,115 @@ function LifeBadge({
   side: 'me' | 'opp'; deckCount: number; handCount: number; seat: string;
 }) {
   void color;
+  const mobile = useIsMobile();
   const A = side === 'me' ? '#298BFF' : '#E45F76';   // player blue / opponent red-violet
   const A2 = side === 'me' ? '#8E4DFF' : '#C45CFF';  // violet highlight
-  const GOLD = '#E5B84B';
   const isRight = position === 'topRight';
-  const pos: React.CSSProperties = isRight ? { top: 12, right: 14 } : { bottom: 12, left: 14 };
-  const orbGlow = targetable ? '0 0 22px rgba(255,235,59,0.85), 0 0 4px rgba(255,235,59,0.9)' : `0 0 22px ${A}88, 0 4px 16px #000c`;
+  // Phones: park the orb in the mat's dedicated life slot (the free band either
+  // side of the centre rule). The old corner anchor sat on top of the Nodes and
+  // Battlefield zones at 390px, so tapping a node — or targeting a player —
+  // hit the HUD instead of the card underneath. Name + chips are dropped there
+  // (the names live in the turn banner, the counts in the zone labels).
+  const pos: React.CSSProperties = mobile
+    ? (isRight ? { top: '37%', right: '1.5%' } : { top: '52%', left: '1.5%' })
+    : (isRight ? { top: 12, right: 14 } : { bottom: 12, left: 14 });
+  const orbGlow = targetable
+    ? 'inset 0 3px 10px rgba(255,255,255,0.30), inset 0 -8px 16px rgba(0,0,0,0.55), 0 0 24px rgba(255,216,106,0.85), 0 0 5px rgba(255,216,106,0.9)'
+    : `inset 0 3px 12px rgba(255,255,255,0.28), inset 0 -9px 18px rgba(0,0,0,0.6), 0 0 22px ${A}80, 0 6px 18px rgba(0,0,0,0.75)`;
+
+  // Damage / heal flash: re-key the animation class whenever the total moves.
+  const prevLife = useRef(life);
+  const [flash, setFlash] = useState<{ dir: 'hit' | 'heal'; n: number } | null>(null);
+  useEffect(() => {
+    if (prevLife.current === life) return;
+    const dir = life < prevLife.current ? 'hit' : 'heal';
+    prevLife.current = life;
+    setFlash(f => ({ dir, n: (f?.n ?? 0) + 1 }));
+  }, [life]);
+
   const chip: React.CSSProperties = {
-    fontSize: 10, fontWeight: 700, color: '#cdd2e2', background: 'rgba(6,7,17,0.65)',
-    border: '1px solid #2a3350', borderRadius: 5, padding: '2px 7px', letterSpacing: 0.4,
+    fontSize: 'clamp(9px, 1.4cqw, 10px)', fontWeight: 800, color: '#e6dcc4',
+    background: 'linear-gradient(180deg, rgba(18,15,26,0.88), rgba(6,7,14,0.9))',
+    border: '1px solid rgba(229,184,75,0.28)', borderRadius: 5, padding: '2px 7px',
+    letterSpacing: 1, textTransform: 'uppercase',
+    boxShadow: 'inset 0 1px 0 rgba(255,226,160,0.16), 0 1px 3px rgba(0,0,0,0.6)',
+    whiteSpace: 'nowrap',
   };
   return (
     <div
       onClick={onClick}
       title={`${name} — ${life} life · Deck ${deckCount} · Hand ${handCount}`}
       aria-label={`${name}, ${life} life, ${deckCount} in deck, ${handCount} in hand`}
+      className={targetable ? 'brd-targetable' : undefined}
       style={{
         position: 'absolute', ...pos, zIndex: 5,
-        display: 'flex', alignItems: 'center', gap: 10,
+        display: 'flex', alignItems: 'center', gap: 'clamp(6px, 1.2cqw, 10px)',
         cursor: onClick ? 'pointer' : 'default', pointerEvents: 'auto',
         flexDirection: isRight ? 'row-reverse' : 'row',
+        maxWidth: '46cqw',
       }}>
-      {/* crystal life orb */}
-      <div style={{
-        position: 'relative', width: 76, height: 76, borderRadius: '50%', flex: '0 0 auto',
-        background: `radial-gradient(circle at 32% 28%, ${A2}, ${A} 46%, #10131f 82%)`,
-        border: `3px solid ${targetable ? '#ffeb3b' : GOLD}`, boxShadow: orbGlow,
-        display: 'grid', placeItems: 'center', color: '#fff', textShadow: '0 2px 8px #000',
-        fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 900, fontSize: 34, lineHeight: 1,
-        transition: 'transform 0.15s ease',
-      }}>
-        {life}
-        <span aria-hidden style={{ position: 'absolute', inset: 3, borderRadius: '50%', border: `1px solid ${A}55` }} />
+      {/* Set gemstone in a forged bezel — scales with the mat so it never
+          overlaps zones on phones. The border carries a conic "metal" ring;
+          the face is a radial gem with a specular highlight and inner glow. */}
+      <div
+        key={flash?.n ?? 0}
+        className={flash ? (flash.dir === 'hit' ? 'brd-orb-hit' : 'brd-orb-heal') : undefined}
+        style={{
+          position: 'relative', width: 'clamp(48px, 10.5cqw, 76px)', aspectRatio: '1 / 1', borderRadius: '50%', flex: '0 0 auto',
+          background:
+            `radial-gradient(circle at 34% 26%, ${A2}, ${A} 44%, #0b0e1a 86%) padding-box, ` +
+            (targetable
+              ? 'linear-gradient(180deg, #FFD86A, #b9862a) border-box'
+              : 'conic-gradient(from 210deg, #6d5220, #f0dba0 12%, #a8862f 30%, #fff2c8 48%, #7f6224 64%, #ddc27a 82%, #6d5220 100%) border-box'),
+          border: '3px solid transparent',
+          boxShadow: orbGlow,
+          display: 'grid', placeItems: 'center', color: '#fff',
+          textShadow: '0 2px 8px #000, 0 0 14px rgba(0,0,0,0.8)',
+          fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 900, fontSize: 'clamp(20px, 4.6cqw, 34px)', lineHeight: 1,
+          transition: 'box-shadow 0.2s ease',
+        }}>
+        <span style={{ position: 'relative', zIndex: 2 }}>{life}</span>
+        {/* inner facet ring */}
+        <span aria-hidden style={{
+          position: 'absolute', inset: '9%', borderRadius: '50%',
+          border: `1px solid ${A}66`,
+          boxShadow: `inset 0 0 14px ${A2}55`,
+        }} />
+        {/* specular glint */}
+        <span aria-hidden style={{
+          position: 'absolute', left: '17%', top: '11%', width: '40%', height: '26%',
+          borderRadius: '50%', pointerEvents: 'none',
+          background: 'radial-gradient(closest-side, rgba(255,255,255,0.72), rgba(255,255,255,0) 100%)',
+          filter: 'blur(0.5px)',
+        }} />
       </div>
-      {/* name + seat + counts */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: isRight ? 'flex-end' : 'flex-start' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexDirection: isRight ? 'row-reverse' : 'row' }}>
+      {/* name + seat + counts — desktop only; see `pos` above for the phone case */}
+      {!mobile && (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: isRight ? 'flex-end' : 'flex-start', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexDirection: isRight ? 'row-reverse' : 'row', minWidth: 0 }}>
           <span style={{
-            background: 'rgba(6,7,17,0.72)', backdropFilter: 'blur(4px)', padding: '3px 10px', borderRadius: 6,
-            border: `1px solid ${A}66`, color: '#F4F2EA', fontSize: 12, fontWeight: 800,
-            maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            background: 'linear-gradient(180deg, rgba(16,14,26,0.86), rgba(5,6,13,0.9))',
+            backdropFilter: 'blur(4px)', padding: '3px 11px', borderRadius: 6,
+            border: `1px solid ${A}66`, color: '#F4F2EA',
+            fontFamily: '"Cinzel", "Times New Roman", serif',
+            fontSize: 'clamp(10px, 1.6cqw, 12px)', fontWeight: 800, letterSpacing: 0.6,
+            boxShadow: `inset 0 1px 0 rgba(255,255,255,0.12), 0 0 12px ${A}33, 0 2px 6px rgba(0,0,0,0.6)`,
+            maxWidth: 'clamp(76px, 22cqw, 150px)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{name}</span>
           {side === 'me' && (
-            <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1, color: '#0a0f1e', background: GOLD, borderRadius: 5, padding: '2px 6px' }}>YOU · P{seat}</span>
+            <span style={{
+              fontSize: 9, fontWeight: 800, letterSpacing: 1, color: '#241703',
+              background: 'linear-gradient(180deg, #f7dc93, #c08f2c)', borderRadius: 5, padding: '2px 6px',
+              boxShadow: 'inset 0 1px 0 rgba(255,250,220,0.7), 0 1px 3px rgba(0,0,0,0.6)',
+            }}>YOU · P{seat}</span>
           )}
         </div>
         <div style={{ display: 'flex', gap: 6, flexDirection: isRight ? 'row-reverse' : 'row' }}>
-          <span style={chip}>DECK {deckCount}</span>
-          <span style={chip}>HAND {handCount}</span>
+          <span className="brd-chip" style={chip}>DECK {deckCount}</span>
+          <span className="brd-chip" style={chip}>HAND {handCount}</span>
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -2149,7 +2489,7 @@ function LifeBadge({
 // ─────────────────────────────────────────────────────────────────────────────
 /**
  * Mobile sticky bottom action bar. Holds the game-critical buttons + a
- * compact GasBar + the ✋ Hand toggle. Sits above the iOS safe-area inset.
+ * compact GasBar + the Hand toggle. Sits above the iOS safe-area inset.
  */
 function MobileActionBar({
   gas, handCount, onOpenHand,
@@ -2157,6 +2497,7 @@ function MobileActionBar({
   canEndTurn, onEndTurn,
   inBlockers, onConfirmBlocks,
   targetMode, onCancelTarget,
+  onOpenRules,
 }: {
   gas: Record<Color, number>;
   handCount: number;
@@ -2170,58 +2511,75 @@ function MobileActionBar({
   onConfirmBlocks: () => void;
   targetMode: boolean;
   onCancelTarget: () => void;
+  onOpenRules: () => void;
 }) {
   return (
     <div style={{
       position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 90,
       paddingBottom: 'env(safe-area-inset-bottom)',
-      background: 'linear-gradient(180deg, rgba(10,10,20,0.85), rgba(0,0,0,0.96))',
-      borderTop: '1px solid rgba(255,215,106,0.35)',
-      boxShadow: '0 -8px 24px rgba(0,0,0,0.6)',
-      backdropFilter: 'blur(8px)',
+      background: 'linear-gradient(180deg, rgba(22,17,32,0.90), rgba(4,4,9,0.97))',
+      borderTop: '1px solid rgba(229,184,75,0.45)',
+      boxShadow: 'inset 0 1px 0 rgba(255,226,160,0.16), 0 -10px 28px rgba(0,0,0,0.65)',
+      backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
     }}>
+      {/* Wraps instead of scrolling: with CANCEL + END TURN + HAND all live at
+          once the row is wider than a 390px phone, and a horizontally-scrolled
+          bar hid the right-hand buttons off-screen. */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        padding: '8px 8px',
-        overflowX: 'auto', WebkitOverflowScrolling: 'touch',
+        display: 'flex', alignItems: 'center', flexWrap: 'wrap',
+        columnGap: 6, rowGap: 6,
+        // Right padding clears the host app's bottom-right floating control
+        // (sound toggle) so ATTACK / END TURN / HAND are never underneath it.
+        paddingTop: 7, paddingBottom: 7,
+        paddingLeft: 'max(8px, env(safe-area-inset-left))',
+        paddingRight: 'calc(58px + env(safe-area-inset-right))',
+        justifyContent: 'flex-end',
       }}>
-        {/* Compact gas pips */}
-        <div style={{ display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
-          {COLORS.map(c => gas[c] > 0 && <Pip key={c} c={c} n={gas[c]} />)}
+        {/* Help + gas keep the left edge; actions right-align and wrap below. */}
+        <button onClick={onOpenRules} title="How to play" aria-label="How to play"
+          className="brd-stud"
+          style={{ width: 44, height: 44, flex: '0 0 auto', fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 800, fontSize: 15 }}
+        >?</button>
+        {/* Compact gas pool — labelled so it is readable without zooming. */}
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0, marginRight: 'auto' }}>
+          <span className="brd-zone-label" style={{ fontSize: 10, color: 'rgba(229,184,75,0.8)' }}>Gas</span>
+          {COLORS.some(c => gas[c] > 0)
+            ? COLORS.map(c => gas[c] > 0 && <Pip key={c} c={c} n={gas[c]} />)
+            : <span style={{ fontSize: 12, fontWeight: 800, color: '#6f7488' }}>0</span>}
         </div>
-        <div style={{ flex: 1 }} />
         {targetMode && (
-          <button onClick={onCancelTarget} style={mobBtn('#888')}>✕ CANCEL</button>
+          <button onClick={onCancelTarget} className="brd-plate brd-plate--obsidian" style={mobBtn()}
+            aria-label="Cancel targeting"><Close size={14} /> CANCEL</button>
         )}
         {canAttack && (
-          <button onClick={onAttack} style={mobBtn('#ff5d33')}>⚔ ATTACK ({attackerCount})</button>
+          <button onClick={onAttack} className="brd-plate brd-plate--crimson" style={mobBtn()}
+            aria-label={`Attack with ${attackerCount}`}><Swords size={14} /> ATTACK ({attackerCount})</button>
         )}
         {inBlockers && (
-          <button onClick={onConfirmBlocks} style={mobBtn('#5fcfff')}>🛡 BLOCKS</button>
+          <button onClick={onConfirmBlocks} className="brd-plate brd-plate--steel" style={mobBtn()}
+            aria-label="Confirm blocks"><Shield size={14} /> BLOCKS</button>
         )}
         {canEndTurn && (
-          <button onClick={onEndTurn} style={mobBtn('#f0d27a', '#1a1408')}>END TURN</button>
+          <button onClick={onEndTurn} className="brd-plate brd-plate--gold" style={mobBtn()}>END TURN</button>
         )}
-        <button onClick={onOpenHand} style={{ ...mobBtn('#9b6cff'), position: 'relative' }}>
-          ✋ HAND
+        <button onClick={onOpenHand} className="brd-plate brd-plate--violet"
+          style={{ ...mobBtn(), position: 'relative' }} aria-label={`Open hand (${handCount} cards)`}>
+          <HandIcon size={14} /> HAND
           <span style={{
-            marginLeft: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9,
-            background: '#fff', color: '#1a1408', fontWeight: 900, fontSize: 11,
+            background: 'linear-gradient(180deg,#f7dc93,#c08f2c)', color: '#241703',
+            boxShadow: 'inset 0 1px 0 rgba(255,250,220,0.7), 0 1px 2px rgba(0,0,0,0.6)',
+            fontFamily: 'system-ui, sans-serif', fontWeight: 900, fontSize: 11, letterSpacing: 0,
           }}>{handCount}</span>
         </button>
       </div>
     </div>
   );
 }
-function mobBtn(color: string, ink: string = '#fff'): React.CSSProperties {
-  return {
-    background: color, color: ink, border: `1px solid ${color}`,
-    borderRadius: 8, padding: '10px 12px', cursor: 'pointer',
-    fontWeight: 800, fontSize: 13, letterSpacing: 1,
-    minHeight: 44, flexShrink: 0,
-    boxShadow: `0 0 10px ${color}66`,
-  };
+/** Sizing only — the forged-plate look comes from `.brd-plate--*` in Board.css. */
+function mobBtn(): React.CSSProperties {
+  return { padding: '10px 11px', fontSize: 12, letterSpacing: '0.08em', minHeight: 44, flexShrink: 0 };
 }
 
 /**
@@ -2247,7 +2605,7 @@ function MobileHandSheet({
       transition: 'background 0.15s ease',
       pointerEvents: dragging ? 'none' : 'auto',
     }}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div onClick={e => e.stopPropagation()} className="brd-scroll" style={{
         width: '100%', maxHeight: '85dvh', overflowY: 'auto',
         background: 'linear-gradient(180deg, rgba(28,18,52,0.98), rgba(10,8,22,0.99))',
         borderTop: '1px solid rgba(143,92,255,0.55)',
@@ -2260,15 +2618,15 @@ function MobileHandSheet({
         pointerEvents: dragging ? 'none' : 'auto',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontWeight: 800, fontSize: 14, letterSpacing: 1.5, color: '#ffd76a' }}>
-            ✋ YOUR HAND ({hand.length})
+          <div className="brd-zone-label" style={{
+            fontSize: 14, letterSpacing: 2, color: GOLD_HI,
+            display: 'flex', alignItems: 'center', gap: 8,
+            textShadow: '0 0 12px rgba(255,216,106,0.35)',
+          }}>
+            <HandIcon size={15} /> Your Hand ({hand.length})
           </div>
-          <button onClick={onClose} style={{
-            background: 'transparent', color: '#fff',
-            border: '1px solid #555', borderRadius: 6,
-            padding: '8px 14px', cursor: 'pointer', fontWeight: 700,
-            minHeight: 44, minWidth: 44,
-          }}>✕</button>
+          <button onClick={onClose} className="brd-glyph-btn" aria-label="Close hand" title="Close hand"
+            style={{ padding: '8px 14px', minHeight: 44, minWidth: 44 }}><Close size={18} /></button>
         </div>
         {hand.length === 0 ? (
           <div style={{ padding: 20, color: '#aab', textAlign: 'center' }}>
@@ -2277,7 +2635,7 @@ function MobileHandSheet({
         ) : (
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))',
             gap: 10,
           }}>
             {hand.map((id, i) => (
@@ -2326,6 +2684,7 @@ function MulliganModal({
   onMulligan: () => void;
   onForceEnd: () => void;
 }) {
+  const mobile = useIsMobile();
   const nextSize = mulliganDrawCount(mulliganCount + 1);
   const atFloor = hand.length <= MULLIGAN_FLOOR;
   // Live countdown tick.
@@ -2352,19 +2711,27 @@ function MulliganModal({
       position: 'fixed', inset: 0, zIndex: 150,
       background: 'rgba(4,6,12,0.86)', backdropFilter: 'blur(8px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: 20,
+      // Phones: hug the safe area so the modal is never under the notch/home bar.
+      padding: mobile
+        ? 'max(10px, env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom))'
+        : 20,
     }}>
-      <div style={{
-        width: 'min(960px, 100%)', maxHeight: '92dvh', overflow: 'auto',
-        background: 'linear-gradient(180deg, rgba(28,18,52,0.96), rgba(10,8,22,0.96))',
-        border: '1px solid rgba(143,92,255,0.55)',
-        boxShadow: '0 0 32px rgba(143,92,255,0.35)',
-        borderRadius: 12, padding: 24,
-        display: 'flex', flexDirection: 'column', gap: 16,
+      <div className="brd-scroll brd-panel" style={{
+        width: 'min(960px, 100%)', maxHeight: mobile ? '100%' : '92dvh', overflow: 'auto',
+        background: 'linear-gradient(180deg, rgba(30,22,54,0.97), rgba(9,7,18,0.97))',
+        border: '1px solid rgba(229,184,75,0.42)',
+        borderRadius: 12, padding: mobile ? 14 : 24,
+        display: 'flex', flexDirection: 'column', gap: mobile ? 12 : 16,
       }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontFamily: '"Cinzel", serif', fontSize: 22, fontWeight: 800, letterSpacing: 2, color: '#fff' }}>
-            ⏳ MULLIGAN
+          <div style={{
+            fontFamily: '"Cinzel", serif', fontSize: 22, fontWeight: 800, letterSpacing: 3, color: GOLD_HI,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12,
+            textShadow: '0 0 18px rgba(255,216,106,0.4)',
+          }}>
+            <Diamond size={9} color="rgba(229,184,75,0.7)" />
+            <Cards size={19} /> MULLIGAN
+            <Diamond size={9} color="rgba(229,184,75,0.7)" />
           </div>
           <div style={{ fontSize: 12, color: '#aab', marginTop: 4 }}>
             {done
@@ -2379,10 +2746,18 @@ function MulliganModal({
           </div>
         </div>
 
-        <div style={{
-          display: 'flex', flexWrap: 'wrap', gap: 8,
-          justifyContent: 'center', padding: 12,
-          background: 'rgba(0,0,0,0.35)', borderRadius: 8,
+        {/* Phones: one horizontally-scrolling row keeps KEEP / MULLIGAN on
+            screen. Wrapping the 7 cards into a grid pushed both buttons below
+            the fold, which read as "there is no way to continue". */}
+        <div className="brd-scroll" style={{
+          display: 'flex', flexWrap: mobile ? 'nowrap' : 'wrap', gap: 8,
+          justifyContent: mobile ? 'flex-start' : 'center',
+          overflowX: mobile ? 'auto' : 'visible',
+          WebkitOverflowScrolling: 'touch',
+          padding: mobile ? 8 : 14,
+          background: 'linear-gradient(180deg, rgba(0,0,0,0.45), rgba(0,0,0,0.3))',
+          border: '1px solid rgba(229,184,75,0.18)', borderRadius: 8,
+          boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.7)',
         }}>
           {hand.map((defId, i) => (
             <CardFace key={i} defId={defId} />
@@ -2393,49 +2768,33 @@ function MulliganModal({
           <button
             onClick={onKeep}
             disabled={done}
-            style={{
-              background: done ? 'rgba(255,255,255,0.08)' : 'linear-gradient(180deg, #56d97a, #1e7a3a)',
-              color: '#fff', border: '1px solid #1e7a3a',
-              padding: '10px 24px', borderRadius: 8,
-              cursor: done ? 'default' : 'pointer',
-              fontWeight: 800, fontSize: 14, letterSpacing: 1,
-              opacity: done ? 0.5 : 1,
-              boxShadow: done ? 'none' : '0 0 12px rgba(86,217,122,0.4)',
-            }}>✓ KEEP HAND</button>
+            className="brd-plate brd-plate--gold"
+            style={{ padding: '11px 24px', fontSize: 13, minHeight: 44 }}
+          ><Check size={15} /> KEEP HAND</button>
           <button
             onClick={onMulligan}
             disabled={done || atFloor}
             title={atFloor ? `Already at floor (${MULLIGAN_FLOOR} cards).` : `Redraw to ${nextSize} cards.`}
-            style={{
-              background: (done || atFloor) ? 'rgba(255,255,255,0.08)' : 'linear-gradient(180deg, #f0b32a, #c46a1c)',
-              color: '#fff', border: '1px solid #7a4010',
-              padding: '10px 24px', borderRadius: 8,
-              cursor: (done || atFloor) ? 'default' : 'pointer',
-              fontWeight: 800, fontSize: 14, letterSpacing: 1,
-              opacity: (done || atFloor) ? 0.5 : 1,
-              boxShadow: (done || atFloor) ? 'none' : '0 0 12px rgba(240,179,42,0.4)',
-            }}>🔄 MULLIGAN ({nextSize})</button>
+            className="brd-plate brd-plate--obsidian"
+            style={{ padding: '11px 24px', fontSize: 13, minHeight: 44 }}
+          ><Refresh size={15} /> MULLIGAN ({nextSize})</button>
           {waitingOnOpp && expired && (
             <button
               onClick={onForceEnd}
               title="Opponent ran out of time — start the match anyway."
-              style={{
-                background: 'linear-gradient(180deg, #ef4444, #7a1d1d)',
-                color: '#fff', border: '1px solid #7a1d1d',
-                padding: '10px 24px', borderRadius: 8,
-                cursor: 'pointer',
-                fontWeight: 800, fontSize: 14, letterSpacing: 1,
-                boxShadow: '0 0 12px rgba(239,68,68,0.5)',
-              }}>⚡ START MATCH</button>
+              className="brd-plate brd-plate--crimson"
+              style={{ padding: '11px 24px', fontSize: 13, minHeight: 44 }}
+            ><Bolt size={15} /> START MATCH</button>
           )}
         </div>
 
         {waitingOnOpp && deadline > 0 && (
           <div style={{
             textAlign: 'center', fontSize: 11, color: expired ? '#ef4444' : '#aab', letterSpacing: 1,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
           }}>
             {expired
-              ? '⏰ Opponent timed out — click Start Match to begin.'
+              ? <><Warning size={12} /> Opponent timed out — click Start Match to begin.</>
               : `Auto-starting in ${remainingS}s if opponent doesn't respond…`}
           </div>
         )}
@@ -2444,8 +2803,12 @@ function MulliganModal({
           display: 'flex', justifyContent: 'center', gap: 18,
           fontSize: 11, color: '#9aa', letterSpacing: 1,
         }}>
-          <span style={{ color: done ? '#56d97a' : '#aab' }}>● You {done ? 'ready' : 'choosing…'}</span>
-          <span style={{ color: oppDone ? '#56d97a' : '#aab' }}>● Opponent {oppDone ? 'ready' : 'choosing…'}</span>
+          <span style={{ color: done ? '#56d97a' : '#aab', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <Dot size={8} /> You {done ? 'ready' : 'choosing…'}
+          </span>
+          <span style={{ color: oppDone ? '#56d97a' : '#aab', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <Dot size={8} /> Opponent {oppDone ? 'ready' : 'choosing…'}
+          </span>
         </div>
       </div>
     </div>
@@ -2478,6 +2841,8 @@ function TurnBanner({
   canForceEnd: boolean;
   onForceEnd: () => void;
 }) {
+  const mobile = useIsMobile();
+  const short = useIsShort();
   const dotColor = myTurn ? '#298BFF' : '#E45F76';       // player blue / opponent red-violet
   const bannerAccent = myTurn ? '#FFD86A' : '#C45CFF';   // gold / violet illumination
   const headline = myTurn ? 'YOUR TURN' : "OPPONENT'S TURN";
@@ -2524,19 +2889,35 @@ function TurnBanner({
   return (
     <div style={{
       position: 'relative',
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      gap: 12, padding: '6px 14px', borderRadius: 10,
-      background: 'linear-gradient(180deg, rgba(20,20,30,0.95), rgba(10,10,14,0.95))',
-      border: `1px solid ${dotColor}55`,
-      boxShadow: `0 0 18px ${dotColor}33`,
+      display: 'flex', alignItems: 'center', justifyContent: mobile ? 'center' : 'space-between',
+      gap: mobile ? 8 : 12, borderRadius: 10,
+      padding: mobile ? '8px 10px' : '9px 16px',
+      // The host app pins its own control (Exit / close) to the top-right corner,
+      // which used to sit on top of the banner's END TURN / help stud (desktop)
+      // and the TURN chip (phones). Reserve that corner on both, and let the
+      // right cluster wrap rather than squash on a narrow screen.
+      paddingRight: mobile ? 110 : 118,
+      flexWrap: mobile ? 'wrap' : 'nowrap',
+      // Heraldic bar: stone ground, thin gold rules top and bottom.
+      background:
+        `linear-gradient(180deg, rgba(28,24,40,0.92) 0%, rgba(14,12,22,0.92) 48%, rgba(8,7,13,0.94) 100%)`,
+      backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+      border: `1px solid ${dotColor}44`,
+      boxShadow: `inset 0 1px 0 rgba(255,226,160,0.10), inset 0 0 40px rgba(0,0,0,0.55), 0 0 20px ${dotColor}2e, 0 6px 20px rgba(0,0,0,0.55)`,
+      transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
     }}>
-      <div style={{ fontSize: 11, color: '#9aa', fontWeight: 600, minWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span aria-hidden className="brd-rule" style={{ top: 3 }} />
+      <span aria-hidden className="brd-rule" style={{ bottom: 3 }} />
+      {!mobile && (
+      <div style={{ fontSize: 11, color: '#9aa', fontWeight: 600, minWidth: short ? 0 : 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         VS <b style={{ color: '#fff' }}>{oppName}</b> <span style={{ opacity: 0.6 }}>({formatRecord(oppProfile)})</span>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, textAlign: 'center' }}>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, textAlign: 'center', minWidth: 0 }}>
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', justifyContent: 'center',
-          fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 800, fontSize: 20, letterSpacing: 3,
+          display: 'flex', alignItems: 'center', gap: mobile ? 8 : 12, flexWrap: 'wrap', justifyContent: 'center',
+          fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 800,
+          fontSize: mobile ? 14 : short ? 16 : 20, letterSpacing: mobile ? 1.5 : 3,
           color: '#F4F2EA', textShadow: `0 0 16px ${bannerAccent}`,
         }}>
           <span aria-hidden style={{
@@ -2545,85 +2926,91 @@ function TurnBanner({
             animation: 'pulse-dot 1.6s ease-in-out infinite',
           }} />
           {headline}
-          <span style={{ fontFamily: 'system-ui', fontWeight: 700, fontSize: 12, color: bannerAccent, letterSpacing: 1 }}>TURN {turn}</span>
+          <span style={{
+            fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 800, fontSize: 12,
+            color: bannerAccent, letterSpacing: 1.6,
+            padding: '2px 9px', borderRadius: 4,
+            background: 'linear-gradient(180deg, rgba(0,0,0,0.5), rgba(0,0,0,0.28))',
+            boxShadow: `inset 0 0 0 1px ${bannerAccent}44`,
+          }}>TURN {turn}</span>
           {canEndTurn && (
             <span style={{
               fontFamily: 'system-ui', fontWeight: 800, fontSize: 13, letterSpacing: 1,
-              color: timerColor, padding: '2px 8px', borderRadius: 6,
-              background: `${timerColor}22`, border: `1px solid ${timerColor}66`,
+              color: timerColor, padding: '3px 9px', borderRadius: 5,
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              background: `linear-gradient(180deg, ${timerColor}26, ${timerColor}12)`,
+              boxShadow: `inset 0 0 0 1px ${timerColor}66, inset 0 1px 0 rgba(255,255,255,0.12)`,
               animation: lowTime ? 'pulse-dot 0.8s ease-in-out infinite' : 'none',
-            }} title="Auto-end-turn in">⏱ {secondsLeft}s</span>
+            }} title="Auto-end-turn in"><Refresh size={12} /> {secondsLeft}s</span>
           )}
           {showForceCountdown && (
             <span style={{
               fontFamily: 'system-ui', fontWeight: 700, fontSize: 11, letterSpacing: 1,
-              color: '#ffb84a', padding: '2px 8px', borderRadius: 6,
-              background: '#ffb84a22', border: '1px solid #ffb84a55',
+              color: '#ffb84a', padding: '3px 9px', borderRadius: 5,
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              background: 'linear-gradient(180deg, #ffb84a26, #ffb84a12)',
+              boxShadow: 'inset 0 0 0 1px #ffb84a55',
             }} title="Opponent has been thinking a long time — you'll be able to force-end their turn soon.">
-              ⏳ {Math.ceil(oppMsLeft / 1000)}s
+              <Warning size={12} /> {Math.ceil(oppMsLeft / 1000)}s
             </span>
           )}
         </div>
-        <div aria-live="polite" style={{ fontFamily: 'system-ui', fontWeight: 500, fontSize: 11, color: '#989BB0', letterSpacing: 0.5 }}>
-          {myTurn ? `Your move · ${phase.toUpperCase()}` : 'Opponent is deciding…'}
+        {/* Phase line — flanked by heraldic diamonds, current phase in gold. */}
+        <div aria-live="polite" style={{
+          fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 700, fontSize: 10.5,
+          color: '#989BB0', letterSpacing: 2, textTransform: 'uppercase',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}>
+          <Diamond size={6} color={myTurn ? 'rgba(229,184,75,0.65)' : 'rgba(152,155,176,0.45)'} />
+          {myTurn
+            ? <>Your move · <b style={{ color: bannerAccent, textShadow: `0 0 10px ${bannerAccent}66`, letterSpacing: 2.4 }}>{phase.toUpperCase()}</b></>
+            : 'Opponent is deciding…'}
+          <Diamond size={6} color={myTurn ? 'rgba(229,184,75,0.65)' : 'rgba(152,155,176,0.45)'} />
         </div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 160, justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: mobile || short ? 0 : 160, justifyContent: 'flex-end' }}>
+        {!mobile && (
         <span style={{ fontSize: 11, color: '#9aa', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           <b style={{ color: '#fff' }}>{myName}</b> <span style={{ opacity: 0.6 }}>({formatRecord(myProfile)})</span>
         </span>
-        {canAttack && attackerCount > 0 && (
+        )}
+        {/* Phase buttons live in the MobileActionBar on phones — keep the banner compact there. */}
+        {!mobile && canAttack && attackerCount > 0 && (
           <button onClick={onConfirmAttackers} title="Swing with selected attackers"
-            style={{
-              background: 'linear-gradient(180deg, #ff7e5f, #c43e1c)',
-              color: '#fff', border: '1px solid #7a2510',
-              borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
-              fontWeight: 800, fontSize: 12, letterSpacing: 1,
-              boxShadow: '0 0 10px #ff5d3388',
-              animation: 'pulse-dot 1.6s ease-in-out infinite',
-            }}>⚔ ATTACK ({attackerCount})</button>
+            className="brd-plate brd-plate--crimson brd-plate--sm"
+            style={{ padding: '7px 13px' }}
+          ><Swords size={13} /> ATTACK ({attackerCount})</button>
         )}
-        {inBlockers && (
+        {!mobile && inBlockers && (
           <button onClick={onConfirmBlocks} title="Lock in blockers and resolve combat"
-            style={{
-              background: 'linear-gradient(180deg, #5fcfff, #1c75c4)',
-              color: '#fff', border: '1px solid #103a6a',
-              borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
-              fontWeight: 800, fontSize: 12, letterSpacing: 1,
-              boxShadow: '0 0 10px #5fcfff88',
-            }}>🛡 CONFIRM BLOCKS</button>
+            className="brd-plate brd-plate--steel brd-plate--sm"
+            style={{ padding: '7px 13px' }}
+          ><Shield size={13} /> CONFIRM BLOCKS</button>
         )}
-        {canEndTurn && (
+        {!mobile && canEndTurn && (
           <button onClick={onEndTurn} title="End your turn (auto-ends at 0s)"
-            style={{
-              background: 'linear-gradient(180deg, #f0d27a, #c69533)',
-              color: '#1a1408', border: '1px solid #8a6d24',
-              borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
-              fontWeight: 800, fontSize: 12, letterSpacing: 1,
-              boxShadow: '0 0 8px #d9b85f55',
-            }}>END TURN</button>
+            className="brd-plate brd-plate--gold brd-plate--sm"
+            style={{ padding: '7px 13px' }}
+          >END TURN</button>
         )}
         {showForceBtn && (
           <button onClick={onForceEnd} title="Opponent appears stuck or disconnected — force-end their turn."
-            style={{
-              background: 'linear-gradient(180deg, #ff5d73, #b1273f)',
-              color: '#fff', border: '1px solid #6e1224',
-              borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
-              fontWeight: 800, fontSize: 12, letterSpacing: 1,
-              boxShadow: '0 0 10px #ff5d7388',
-              animation: 'pulse-dot 1.6s ease-in-out infinite',
-            }}>⚡ FORCE END</button>
+            className="brd-plate brd-plate--crimson brd-plate--sm"
+            style={{ padding: mobile ? '10px 14px' : '7px 13px', minHeight: mobile ? 44 : undefined }}
+          ><Bolt size={13} /> FORCE END</button>
         )}
-        <button onClick={onOpenRules} title="How to play"
-          style={{
-            background: 'linear-gradient(180deg,#3a2a55,#22163a)',
-            color: '#ffd76a', border: '1px solid #ffd76a55',
-            borderRadius: '50%', width: 28, height: 28, cursor: 'pointer',
-            fontWeight: 800, fontSize: 14, lineHeight: 1,
-            boxShadow: '0 0 8px #ffd76a44',
-          }}>?</button>
+        {/* Phones get the help stud in the MobileActionBar instead — keeping it
+            here made the banner wrap under the host app's top-right control. */}
+        {!mobile && (
+          <button onClick={onOpenRules} title="How to play" aria-label="How to play"
+            className="brd-stud"
+            style={{
+              width: 30, height: 30, flex: '0 0 auto',
+              fontFamily: '"Cinzel", "Times New Roman", serif',
+              fontWeight: 800, fontSize: 14, lineHeight: 1,
+            }}>?</button>
+        )}
       </div>
-      <style>{`@keyframes pulse-dot { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(0.85); } }`}</style>
     </div>
   );
 }
@@ -2636,13 +3023,14 @@ function RulesDrawer({ onClose }: { onClose: () => void }) {
       background: 'rgba(0,0,0,0.7)',
       display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end',
     }}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div onClick={e => e.stopPropagation()} className="brd-scroll" style={{
         width: 'min(720px, 100%)', height: '100%',
         background: 'linear-gradient(180deg, #15101e, #0a0710)',
         borderLeft: '1px solid #ffd76a55',
         boxShadow: '-12px 0 32px #000c',
         overflowY: 'auto',
         padding: 20,
+        paddingBottom: 'calc(20px + env(safe-area-inset-bottom))',
         display: 'flex', flexDirection: 'column', gap: 16,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -2650,11 +3038,8 @@ function RulesDrawer({ onClose }: { onClose: () => void }) {
             fontFamily: '"Cinzel", "Times New Roman", serif',
             fontSize: 22, fontWeight: 800, color: '#ffd76a', letterSpacing: 2,
           }}>HOW TO PLAY</div>
-          <button onClick={onClose} style={{
-            background: 'transparent', color: '#fff',
-            border: '1px solid #555', borderRadius: 6,
-            padding: '4px 12px', cursor: 'pointer', fontWeight: 700,
-          }}>✕</button>
+          <button onClick={onClose} className="brd-glyph-btn" aria-label="Close rules" title="Close rules"
+            style={{ padding: '7px 12px', minHeight: 36, minWidth: 40 }}><Close size={17} /></button>
         </div>
         <div style={{
           borderRadius: 10, overflow: 'hidden',
@@ -2677,73 +3062,114 @@ function RulesDrawer({ onClose }: { onClose: () => void }) {
   );
 }
 
+// Mini-card width relative to the playmat container (cqw): full 68px on
+// desktop mats, stepping down to 46px on a 360px phone — and back up again
+// when the MobileZoom wrapper widens the mat. Height follows via aspect-ratio.
+const MINI_W = 'clamp(46px, 9.5cqw, 68px)';
+const MINI_BACK_W = 'clamp(34px, 6.7cqw, 48px)';
+
 function MiniCard({
-  defId, instance, faceUp, faceDown, onClick, selected, targetable, footer, pumpBonus,
+  defId, instance, faceUp, faceDown, onClick, selected, targetable, footer, pumpBonus, blocked,
 }: {
   defId?: string; instance?: Instance;
   faceUp?: boolean; faceDown?: boolean;
   onClick?: () => void; selected?: boolean; targetable?: boolean;
   footer?: React.ReactNode;
   pumpBonus?: number;
+  /** This attacker has at least one blocker assigned — tinted steel-blue. */
+  blocked?: boolean;
 }) {
   if (faceDown || !defId) {
     return (
       <div style={{
-        width: 48, height: 68, borderRadius: 5,
-        background: 'repeating-linear-gradient(45deg, #2a2a3a 0 5px, #3a3a4a 5px 10px)',
-        border: '1px solid #000',
-        boxShadow: '0 2px 6px #0008',
+        width: MINI_BACK_W, aspectRatio: '48 / 68', borderRadius: 5,
+        background:
+          'repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0 4px, rgba(255,255,255,0) 4px 8px), ' +
+          'linear-gradient(180deg, #2a2440 0%, #171326 58%, #0d0b16 100%)',
+        border: '1px solid rgba(0,0,0,0.85)',
+        boxShadow:
+          'inset 0 0 0 1px rgba(229,184,75,0.22), inset 0 1px 0 rgba(255,255,255,0.12), ' +
+          '0 1px 2px rgba(0,0,0,0.65), 0 5px 12px rgba(0,0,0,0.45)',
+        flex: '0 0 auto',
       }} />
     );
   }
   const def = CARDS[defId];
   if (!def) return null;
   const meta = COLOR_META[def.color];
+  const tapped = !!instance?.tapped;
+  const sick = !!instance?.summoningSick && def.type === 'meme';
+  const damaged = (instance?.damage ?? 0) > 0;
+  // Layered rest shadow so cards visibly sit *above* the mat rather than on it.
+  const restShadow = selected
+    ? 'inset 0 0 0 1px rgba(255,246,214,0.5), 0 0 20px rgba(255,216,106,0.85), 0 3px 8px rgba(0,0,0,0.7)'
+    : blocked
+      ? 'inset 0 0 0 1px rgba(143,211,255,0.45), 0 0 12px rgba(143,211,255,0.45), 0 3px 8px rgba(0,0,0,0.65)'
+      : tapped
+        ? 'inset 0 0 10px rgba(0,0,0,0.65), 0 1px 3px rgba(0,0,0,0.7)'
+        : '0 1px 2px rgba(0,0,0,0.7), 0 4px 9px rgba(0,0,0,0.5), 0 9px 20px rgba(0,0,0,0.3)';
+  const vars: Vars = {
+    '--rot': tapped ? '11deg' : '0deg',
+    '--shadow': restShadow,
+    '--glow': `${meta.hex}bb`,
+    '--filter': tapped ? 'saturate(0.5) brightness(0.78)' : 'none',
+  };
+  const title = sick
+    ? `${def.name} — summoning sick, cannot attack this turn`
+    : tapped ? `${def.name} — tapped` : def.name;
   return (
     <CardHover defId={defId}>
     <div onClick={onClick}
-      onMouseEnter={e => {
-        e.currentTarget.style.transform = `${instance?.tapped ? 'rotate(8deg) ' : ''}translateY(-4px) scale(1.08)`;
-        e.currentTarget.style.zIndex = '20';
-        e.currentTarget.style.boxShadow = `0 6px 18px ${meta.hex}aa, 0 0 12px ${meta.hex}88`;
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.transform = instance?.tapped ? 'rotate(8deg)' : '';
-        e.currentTarget.style.zIndex = '';
-        e.currentTarget.style.boxShadow = instance?.tapped
-          ? 'inset 0 0 0 3px #0008, 0 2px 6px #000a'
-          : selected ? `0 0 14px ${meta.hex}, 0 0 4px #ffeb3b` : '0 2px 6px #000a';
-      }}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      title={title}
+      onKeyDown={onClick ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }) : undefined}
+      className={`brd-mini${targetable ? ' brd-targetable' : ''}`}
       style={{
-        width: 68, height: 96, padding: 3, borderRadius: 6,
+        ...vars,
+        width: MINI_W, aspectRatio: '68 / 96', padding: 3, borderRadius: 6,
         background: meta.hex, color: meta.ink,
-        border: selected ? '2px solid #ffeb3b' : targetable ? '2px dashed #ffeb3b' : '1px solid #000',
+        // Attacker/selected: solid gold ring. Targetable: dashed gold + pulse.
+        border: selected ? '2px solid #FFD86A' : targetable ? '2px dashed #FFD86A' : '1px solid rgba(0,0,0,0.85)',
         cursor: onClick ? 'pointer' : 'default',
-        boxShadow: instance?.tapped
-          ? 'inset 0 0 0 3px #0008, 0 2px 6px #000a'
-          : selected ? `0 0 14px ${meta.hex}, 0 0 4px #ffeb3b` : '0 2px 6px #000a',
-        transform: instance?.tapped ? 'rotate(8deg)' : undefined,
-        opacity: instance?.summoningSick && def.type === 'meme' ? 0.6 : 1,
+        opacity: sick ? 0.66 : 1,
         display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
         fontFamily: 'system-ui',
         position: 'relative',
-        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+        flex: '0 0 auto',
       }}>
-      <div style={{ fontSize: 8, fontWeight: 800, lineHeight: 1.0, overflow: 'hidden' }}>{def.name}</div>
+      <div style={{
+        fontSize: 8, fontWeight: 800, lineHeight: 1.0, overflow: 'hidden',
+        position: 'relative', zIndex: 2, textShadow: '0 1px 0 rgba(255,255,255,0.22)',
+      }}>{def.name}</div>
       {def.power != null && def.toughness != null && (() => {
         const bonus = pumpBonus ?? 0;
         const pow = (def.power ?? 0) + bonus;
         const tou = (def.toughness ?? 1) + bonus - (instance?.damage ?? 0);
         return (
-          <div style={{ fontSize: 10, fontWeight: 800, alignSelf: 'flex-end',
-            background: '#000a', padding: '0 4px', borderRadius: 3,
-            color: bonus > 0 ? '#7CFC7C' : undefined,
-            textShadow: bonus > 0 ? '0 0 4px #0f0' : undefined }}>
+          <div style={{
+            fontSize: 10, fontWeight: 800, alignSelf: 'flex-end',
+            position: 'relative', zIndex: 2,
+            background: 'linear-gradient(180deg, rgba(18,14,8,0.86), rgba(6,5,3,0.92))',
+            padding: '0 4px', borderRadius: 3,
+            boxShadow: 'inset 0 0 0 1px rgba(229,184,75,0.4)',
+            color: bonus > 0 ? '#7CFC7C' : '#F4F2EA',
+            textShadow: bonus > 0 ? '0 0 5px rgba(0,255,0,0.7)' : '0 1px 2px rgba(0,0,0,0.8)',
+          }}>
             {pow}/{tou}
           </div>
         );
       })()}
-      {footer && <div style={{ fontSize: 7, lineHeight: 1.0 }}>{footer}</div>}
+      {footer && <div style={{ fontSize: 7, lineHeight: 1.0, position: 'relative', zIndex: 2 }}>{footer}</div>}
+      {sick && (
+        <span aria-hidden style={{
+          position: 'absolute', top: 2, left: 2, zIndex: 2,
+          display: 'grid', placeItems: 'center', color: '#FFD86A',
+          filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.95))',
+        }}><Moon size={10} /></span>
+      )}
+      {damaged && <span aria-hidden className="brd-damaged" />}
+      <span aria-hidden className="brd-gloss" />
     </div>
     </CardHover>
   );
@@ -2817,11 +3243,10 @@ function Zone({
                 selected={inst.uid === selectedUid || attacking}
                 onClick={onClick ? () => onClick(inst.uid) : undefined}
                 footer={
-                  <>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                     <span style={{ opacity: 0.6 }}>{inst.uid}</span>
-                    {attacking && <span style={{ color: '#f55', marginLeft: 4 }}>⚔️</span>}
-                    {blockedBy.length > 0 && <span style={{ color: '#5cf', marginLeft: 4 }}>🛡{blockedBy.length}</span>}
-                  </>
+                    <CombatBadges attacking={attacking} blockedCount={blockedBy.length} />
+                  </span>
                 }
               />
               {targetable && <div style={{
@@ -2838,7 +3263,7 @@ function Zone({
 function CombatStrip({ G, ctx, myId }: { G: GState; ctx: any; myId: string }) {
   if (G.combat.attackers.length === 0) return <div style={{ fontSize: 12, opacity: 0.5 }}>No combat in progress.</div>;
   return (
-    <div style={{ padding: 6, background: '#1a1a1a', border: '1px solid #444' }}>
+    <div style={{ padding: '6px 10px', background: 'rgba(18,18,31,0.8)', border: '1px solid rgba(228,95,118,0.4)', borderRadius: 8 }}>
       <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
         Combat — attacker: P{ctx.currentPlayer}
       </div>

@@ -1,13 +1,13 @@
 // src/Boosters.tsx
 // Booster Vault — a premium collectible-opening experience for On-Chain Virtual
-// Arena. Three understandable stages: Purchase → Mint → Reveal. Buying a pack
+// Arena. Three understandable stages: Purchase -> Mint -> Reveal. Buying a pack
 // mints 5 random cards + 1 guaranteed foil as NFTs on Robinhood Chain via the
 // CardPack contract. All prices, balances and card results come from live,
 // authoritative on-chain data — the client never invents a pull, and cards are
 // only revealed after the mint transaction is confirmed on-chain.
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { color as C, font as F, radius as R, shadow as SH } from './theme';
+import { color as C, font as F, radius as R, shadow as SH, surface as SURF, edge as EDGE, depth as DEPTH } from './theme';
 import { CARDS, COLOR_META } from './cards';
 import {
   mintPack, resumePack, packCostEstimate, getEthBalance,
@@ -16,6 +16,10 @@ import {
 } from './pack-evm';
 import { connectRobinhoodChain, shortAddr } from './wallet';
 import { formatEther, type Address } from 'viem';
+import {
+  ArrowLeft, Check, Copy, SoundOn, SoundOff, Diamond, DiamondOutline,
+  Warning, Star,
+} from './icons';
 
 // ── Transaction state machine ───────────────────────────────────────────────
 type Tx =
@@ -310,12 +314,14 @@ function TopBar({ onBack, connected, onRobinhood, switching, account, copied, on
         <button onClick={onBack} style={{
           marginLeft: 10, background: 'none', border: 'none', color: C.textMid, cursor: 'pointer',
           fontWeight: 700, letterSpacing: '0.1em', fontSize: 12,
-        }}>← BOOSTER PACKS</button>
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+        }}><ArrowLeft size={14} /> BOOSTER PACKS</button>
       </div>
 
       <div style={{ fontFamily: F.display, fontWeight: 700, letterSpacing: '0.28em', fontSize: 14,
-        color: C.goldHi, textShadow: '0 0 18px rgba(217,180,90,0.4)', whiteSpace: 'nowrap' }}>
-        ◇ BOOSTER VAULT ◇
+        color: C.goldHi, textShadow: '0 0 18px rgba(217,180,90,0.4)', whiteSpace: 'nowrap',
+        display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+        <DiamondOutline size={9} /> BOOSTER VAULT <DiamondOutline size={9} />
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, justifyContent: 'flex-end', minWidth: 0 }}>
@@ -329,13 +335,15 @@ function TopBar({ onBack, connected, onRobinhood, switching, account, copied, on
             padding: '6px 12px', borderRadius: R.pill, background: C.bg2, border: `1px solid ${C.border}`,
             color: C.textHi, cursor: 'pointer', fontFamily: F.mono, fontSize: 12 }}>
             {shortAddr(account)}
-            <span style={{ color: copied ? C.success : C.textMid, fontSize: 12 }}>{copied ? '✓' : '⧉'}</span>
+            <span style={{ color: copied ? C.success : C.textMid, display: 'inline-flex' }}>
+              {copied ? <Check size={13} /> : <Copy size={13} />}
+            </span>
           </button>
         )}
         <button onClick={onToggleMute} aria-label={muted ? 'Unmute' : 'Mute'} style={{
           width: 36, height: 36, display: 'grid', placeItems: 'center', borderRadius: 9,
           background: C.bg2, border: `1px solid ${C.gold}55`, color: C.goldHi, cursor: 'pointer', fontSize: 15 }}>
-          {muted ? '🔇' : '🔊'}
+          {muted ? <SoundOff size={16} /> : <SoundOn size={16} />}
         </button>
       </div>
     </div>
@@ -372,7 +380,10 @@ function PackHero({ mobile, minting, onCardList, onOdds }: { mobile: boolean; mi
       <div style={{ color: C.textMid, fontSize: mobile ? 12 : 14, fontWeight: 600, letterSpacing: '0.14em' }}>
         5 RANDOM CARDS + 1 GUARANTEED FOIL
       </div>
-      <div style={{ color: C.accentHi, fontSize: 12, letterSpacing: '0.12em', opacity: 0.9 }}>◇ Minted on Robinhood Chain ◇</div>
+      <div style={{ color: C.accentHi, fontSize: 12, letterSpacing: '0.12em', opacity: 0.9,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+        <DiamondOutline size={8} /> Minted on Robinhood Chain <DiamondOutline size={8} />
+      </div>
 
       {/* Pack on a glowing violet pedestal. */}
       <div style={{ position: 'relative', display: 'grid', placeItems: 'center', margin: mobile ? '6px 0' : '4px 0', width: '100%' }}>
@@ -390,7 +401,7 @@ function PackHero({ mobile, minting, onCardList, onOdds }: { mobile: boolean; mi
 
       <div style={{ display: 'flex', gap: 18, alignItems: 'center', marginTop: 4 }}>
         <button className="ova-linkbtn" onClick={onCardList}>VIEW CARD LIST</button>
-        <span style={{ color: C.gold, opacity: 0.5 }}>◇</span>
+        <span style={{ color: C.gold, opacity: 0.5, display: 'inline-flex' }}><DiamondOutline size={9} /></span>
         <button className="ova-linkbtn" onClick={onOdds}>VIEW ODDS</button>
       </div>
     </section>
@@ -510,13 +521,15 @@ function PurchasePanel(props: {
   return (
     <aside style={{ position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 16, height: '100%',
-        padding: mobile ? 18 : 22, borderRadius: R.lg, background: 'linear-gradient(180deg, rgba(20,18,42,0.92), rgba(12,11,26,0.92))',
-        border: `1px solid ${C.gold}44`, boxShadow: `${SH.lg}, inset 0 0 0 1px rgba(255,255,255,0.02)`, overflow: 'auto' }}>
+        padding: mobile ? 20 : 24, borderRadius: R.lg, background: 'linear-gradient(180deg, rgba(28,24,56,0.92), rgba(12,11,26,0.94))',
+        border: `1px solid ${C.gold}55`, boxShadow: `${EDGE.topHighlight}, ${DEPTH.panelHi}, 0 0 50px -26px rgba(217,180,90,0.6)`, overflow: 'auto' }}>
         {/* ornate corners */}
         {['tl', 'tr', 'bl', 'br'].map((k) => <Corner key={k} pos={k as any} />)}
 
         <div style={{ textAlign: 'center', fontFamily: F.display, fontWeight: 700, letterSpacing: '0.14em',
-          fontSize: 16, color: C.goldHi }}>◈ OPEN A GENESIS PACK ◈</div>
+          fontSize: 16, color: C.goldHi, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+          <Diamond size={9} /> OPEN A GENESIS PACK <Diamond size={9} />
+        </div>
 
         <Stepper stageIndex={stageIndex} tx={tx} />
 
@@ -583,7 +596,7 @@ function Stepper({ stageIndex, tx }: { stageIndex: number; tx: Tx }) {
                 color: done || active ? '#fff' : C.textLo,
                 border: `1px solid ${done ? C.success : active ? C.accentHi : C.border}`,
                 boxShadow: active ? `0 0 14px ${C.accent}88` : 'none' }}>
-                {done ? '✓' : i + 1}
+                {done ? <Check size={15} /> : i + 1}
               </div>
               <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.1em', color: active ? C.textHi : C.textLo }}>{s}</span>
             </div>
@@ -620,21 +633,26 @@ function PrimaryAction({ tx, connected, onRobinhood, switching, pending, priceEt
 
   return (
     <button onClick={onClick} disabled={disabled} style={{
-      position: 'relative', width: '100%', padding: '15px 18px', borderRadius: R.md, cursor: disabled ? 'default' : 'pointer',
-      fontFamily: F.display, fontWeight: 800, fontSize: 15, letterSpacing: '0.08em', color: disabled ? '#efe6c9aa' : '#20170a',
-      background: disabled ? 'linear-gradient(180deg,#5a4c28,#3a3018)' : 'linear-gradient(180deg,#f7e6b0,#d9b45a 55%,#b98f34)',
-      border: `1px solid ${disabled ? '#6a5a30' : '#8a6d24'}`,
-      boxShadow: disabled ? 'none' : '0 8px 26px rgba(217,180,90,0.4)',
-      transition: 'transform .12s ease, box-shadow .2s ease', overflow: 'hidden',
-      opacity: disabled ? 0.9 : 1,
+      position: 'relative', width: '100%', padding: '16px 18px', borderRadius: R.md, cursor: disabled ? 'not-allowed' : 'pointer',
+      fontFamily: F.serif, fontWeight: 700, fontSize: 15, letterSpacing: '0.16em', textTransform: 'uppercase',
+      color: disabled ? 'rgba(240,230,201,0.42)' : '#22190a',
+      background: disabled ? SURF.goldPlateDead : SURF.goldPlate,
+      border: `1px solid ${disabled ? '#4a4230' : EDGE.bronze}`,
+      textShadow: disabled ? 'none' : '0 1px 0 rgba(255,255,255,0.28)',
+      boxShadow: disabled ? 'inset 0 1px 0 rgba(255,255,255,0.06)' : `${EDGE.bevel}, ${DEPTH.goldGlow}`,
+      transition: 'transform 160ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 180ms ease, background 180ms ease',
+      overflow: 'hidden', filter: disabled ? 'saturate(0.45)' : undefined,
     }}
-      onMouseDown={(e) => { if (!disabled) (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(1px) scale(0.995)'; }}
-      onMouseUp={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'none'; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'none'; }}
+      onMouseEnter={(e) => { if (!disabled) { const el = e.currentTarget as HTMLButtonElement; el.style.background = SURF.goldPlateHot; el.style.boxShadow = `${EDGE.bevel}, ${DEPTH.goldGlowHot}`; el.style.transform = 'translateY(-1px)'; } }}
+      onMouseDown={(e) => { if (!disabled) { const el = e.currentTarget as HTMLButtonElement; el.style.transform = 'translateY(1px)'; el.style.boxShadow = `${EDGE.bevelSunk}, 0 2px 8px -4px rgba(217,180,90,0.5)`; } }}
+      onMouseUp={(e) => { if (!disabled) { const el = e.currentTarget as HTMLButtonElement; el.style.transform = 'translateY(-1px)'; el.style.boxShadow = `${EDGE.bevel}, ${DEPTH.goldGlowHot}`; } }}
+      onMouseLeave={(e) => { const el = e.currentTarget as HTMLButtonElement; el.style.transform = 'none'; el.style.background = disabled ? SURF.goldPlateDead : SURF.goldPlate; el.style.boxShadow = disabled ? 'inset 0 1px 0 rgba(255,255,255,0.06)' : `${EDGE.bevel}, ${DEPTH.goldGlow}`; }}
     >
       {pending && <span aria-hidden style={{ position: 'absolute', top: 0, bottom: 0, width: '40%',
         background: 'linear-gradient(100deg, transparent, rgba(255,255,255,0.35), transparent)', animation: 'ova-sheen 1.4s linear infinite' }} />}
-      ◆ {label} ◆
+      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+        <Diamond size={9} /> {label} <Diamond size={9} />
+      </span>
     </button>
   );
 }
@@ -648,7 +666,7 @@ function PendingHash({ hash }: { hash: `0x${string}` }) {
       <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: C.textMid }}>TX HASH</span>
       <button onClick={copy} title="Copy transaction hash" style={{ display: 'flex', alignItems: 'center', gap: 8,
         background: 'none', border: 'none', color: C.textHi, cursor: 'pointer', fontFamily: F.mono, fontSize: 12 }}>
-        {shortAddr(hash)} <span style={{ color: copied ? C.success : C.textMid }}>{copied ? '✓' : '⧉'}</span>
+        {shortAddr(hash)} <span style={{ color: copied ? C.success : C.textMid, display: 'inline-flex' }}>{copied ? <Check size={13} /> : <Copy size={13} />}</span>
       </button>
     </div>
   );
@@ -662,7 +680,7 @@ function ErrorCard({ box, account, copied, onAddFunds, onRetry, onSwitch }: {
   return (
     <div style={{ padding: 14, borderRadius: R.md, background: 'rgba(255,107,107,0.08)', border: `1px solid ${C.danger}66` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <span style={{ color: C.danger, fontSize: 16 }}>⚠</span>
+        <span style={{ color: C.danger, display: 'inline-flex' }}><Warning size={17} /></span>
         <span style={{ fontWeight: 800, letterSpacing: '0.08em', color: C.danger, fontSize: 14 }}>{box.heading}</span>
       </div>
       <div style={{ fontSize: 13, color: C.textMid, lineHeight: 1.5 }}>{box.message}</div>
@@ -670,7 +688,9 @@ function ErrorCard({ box, account, copied, onAddFunds, onRetry, onSwitch }: {
         {box.kind === 'insufficient' && (
           <button onClick={onAddFunds} style={{ padding: '9px 16px', borderRadius: R.sm, background: C.danger, color: '#fff',
             border: 'none', fontWeight: 800, letterSpacing: '0.06em', fontSize: 12, cursor: 'pointer' }}>
-            {copied ? 'ADDRESS COPIED ✓' : 'ADD FUNDS'}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+              {copied ? <>ADDRESS COPIED <Check size={13} /></> : 'ADD FUNDS'}
+            </span>
           </button>
         )}
         {box.kind === 'wrong_network' && (
@@ -833,7 +853,7 @@ function RevealCard({ card, flipped, focused, burst, arc, onClick, onFocus }: {
             ? <img src={card.image} alt={card.name} style={{ width: '100%', height: '64%', objectFit: 'contain', zIndex: 1, filter: 'drop-shadow(0 4px 10px rgba(0,0,0,0.5))' }} />
             : <div style={{ width: '66%', height: '60%', borderRadius: 10, background: `radial-gradient(circle at 50% 40%, ${chainHex}, transparent 70%)`, zIndex: 1 }} />}
           <div style={{ fontSize: 11, fontWeight: 700, color: '#fff', textAlign: 'center', lineHeight: 1.15, zIndex: 1 }}>{card.name}</div>
-          {card.foil && <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.2em', color: '#ffe9a8', zIndex: 1 }}>✦ FOIL</div>}
+          {card.foil && <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.2em', color: '#ffe9a8', zIndex: 1, display: 'flex', alignItems: 'center', gap: 5 }}><Star size={9} /> FOIL</div>}
         </div>
       </div>
     </div>

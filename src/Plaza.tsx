@@ -4,6 +4,7 @@
 // Renders to a single <canvas>; no extra deps.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Temple } from './icons';
 
 type Color = 'bnb' | 'sol' | 'eth' | 'robinhood' | 'base';
 
@@ -207,7 +208,9 @@ export function Plaza({
         display: 'flex', gap: 12, alignItems: 'center', marginBottom: 10,
         color: '#fff', fontFamily: 'Inter, sans-serif',
       }}>
-        <div style={{ fontWeight: 800, fontSize: 16 }}>🏛️ Memetic Plaza</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 16 }}>
+          <Temple size={18} /> Memetic Plaza
+        </div>
         <div style={{ opacity: 0.6, fontSize: 12 }}>WASD / arrows to move · walk into a table to join · ESC to dismiss</div>
         <button onClick={onClose} style={{
           marginLeft: 12, background: '#333', color: '#fff',

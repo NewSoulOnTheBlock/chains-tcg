@@ -1,0 +1,420 @@
+/* src/Board.css — styles used ONLY by src/Board.tsx (imported nowhere else).
+   Keeps keyframes, scrollbar styling, focus rings, hover/lift states and the
+   reduced-motion guard out of inline styles, where they are impossible to
+   express.
+
+   Visual language: modern medieval / high-fantasy TCG client. Obsidian and
+   stone surfaces, forged-gold plates, engraved hairlines, set-gemstone life
+   orbs. Colour values mirror src/theme.ts (accentHi #9d86ff) and the board's
+   obsidian/gold concept (gold #E5B84B / #FFD86A).
+
+   Convention: anything that has to change on :hover / :active is driven from
+   here via CSS custom properties set inline in Board.tsx (inline styles beat
+   class rules, so the resting value is passed as a var instead). */
+
+.brd {
+  --brd-gold: #E5B84B;
+  --brd-gold-hi: #FFD86A;
+  --brd-bronze: #8a6420;
+  --brd-bronze-dk: #4a3410;
+  --brd-violet: #8E4DFF;
+  --brd-violet-hi: #C45CFF;
+  --brd-red: #E45F76;
+  --brd-blue: #298BFF;
+  --brd-ink: #F4F2EA;
+  --brd-muted: #989BB0;
+  /* One shared easing + duration so every lift/tap feels like one system. */
+  --brd-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --brd-dur: 170ms;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Keyframes ─────────────────────────────────────────────────────────── */
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(0.85); }
+}
+
+/* Gold "pick a target" pulse — ring + halo breathe together. */
+@keyframes brd-target-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(255, 216, 106, 0.55),
+                0 0 8px rgba(255, 216, 106, 0.30),
+                0 4px 12px rgba(0, 0, 0, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(255, 216, 106, 0.95),
+                0 0 22px rgba(255, 216, 106, 0.75),
+                0 4px 12px rgba(0, 0, 0, 0.55);
+  }
+}
+.brd-targetable { animation: brd-target-pulse 1.5s ease-in-out infinite; }
+
+/* Life-orb hit flash — keyed off the life total so it re-fires on each change. */
+@keyframes brd-damage-flash {
+  0%   { filter: brightness(1.6) saturate(1.35); }
+  55%  { filter: brightness(1.08) saturate(1.1); }
+  100% { filter: none; }
+}
+.brd-orb-hit { animation: brd-damage-flash 620ms ease-out 1; }
+
+@keyframes brd-heal-flash {
+  0%   { filter: brightness(1.45) saturate(1.25) hue-rotate(-14deg); }
+  100% { filter: none; }
+}
+.brd-orb-heal { animation: brd-heal-flash 620ms ease-out 1; }
+
+/* ── Cards ─────────────────────────────────────────────────────────────── */
+
+/* Shared card behaviour. `--rot` carries the tapped rotation, `--shadow` the
+   resting layered shadow, `--glow` the chain-colour hover halo, `--z` the
+   resting stacking order. None of these are set inline, so :hover wins. */
+.brd-mini,
+.brd-cardface {
+  transform: rotate(var(--rot, 0deg));
+  box-shadow: var(--shadow, 0 2px 6px rgba(0, 0, 0, 0.55));
+  filter: var(--filter, none);
+  z-index: var(--z, auto);
+  transition:
+    transform var(--brd-dur) var(--brd-ease),
+    box-shadow var(--brd-dur) ease,
+    filter var(--brd-dur) ease,
+    border-color var(--brd-dur) ease,
+    opacity var(--brd-dur) ease;
+}
+
+.brd-mini[role="button"]:hover {
+  transform: rotate(var(--rot, 0deg)) translateY(-5px) scale(1.07);
+  z-index: 25;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    0 0 14px var(--glow, rgba(255, 255, 255, 0.35)),
+    0 12px 22px rgba(0, 0, 0, 0.62);
+  filter: brightness(1.07);
+}
+.brd-mini[role="button"]:active {
+  transform: rotate(var(--rot, 0deg)) translateY(-1px) scale(1.02);
+  transition-duration: 80ms;
+}
+
+/* Hand cards live inside .brd-fan, which owns the raise; the face itself only
+   brightens so the two effects never fight over `transform`. */
+.brd-fan {
+  transform: var(--rest, none);
+  z-index: var(--z, auto);
+  transition: transform var(--brd-dur) var(--brd-ease), filter var(--brd-dur) ease;
+}
+.brd-fan:hover {
+  transform: translateY(-22px) rotate(0deg) scale(1.15);
+  z-index: 60;
+  filter: drop-shadow(0 18px 26px rgba(0, 0, 0, 0.65));
+}
+.brd-fan:hover .brd-cardface {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.20),
+    0 0 18px var(--glow, rgba(255, 255, 255, 0.3)),
+    0 10px 26px rgba(0, 0, 0, 0.55);
+  filter: brightness(1.05);
+}
+
+/* Gloss / edge highlight laid over card art — the "under glass" read. */
+.brd-gloss {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.20) 0%, rgba(255, 255, 255, 0.05) 26%, rgba(255, 255, 255, 0) 52%),
+    linear-gradient(0deg, rgba(0, 0, 0, 0.30) 0%, rgba(0, 0, 0, 0) 34%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.30),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5);
+}
+
+/* Damage wash for a meme that has taken (non-lethal) damage. */
+.brd-damaged {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 118%, rgba(228, 95, 118, 0.55), rgba(228, 95, 118, 0) 68%);
+}
+
+/* ── Forged plates: the medieval button system ─────────────────────────── */
+/*
+ * A plate is drawn by ::before (chamfered face, beveled by inset shadows) with
+ * ::after carrying the engraved hairline. The button box itself stays
+ * unclipped so focus outlines and glows are never cut off.
+ */
+.brd-plate {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 18px;
+  border: none;
+  background: none;
+  color: var(--plate-ink, #2b1c05);
+  font-family: "Cinzel", "Times New Roman", serif;
+  font-weight: 800;
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  text-shadow: var(--plate-textshadow, 0 1px 0 rgba(255, 255, 255, 0.28));
+  transition: transform 90ms var(--brd-ease), filter var(--brd-dur) ease, color var(--brd-dur) ease;
+}
+.brd-plate::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  clip-path: polygon(
+    7px 0, calc(100% - 7px) 0, 100% 7px, 100% calc(100% - 7px),
+    calc(100% - 7px) 100%, 7px 100%, 0 calc(100% - 7px), 0 7px
+  );
+  background: var(--plate-bg, linear-gradient(180deg, #2a2438, #14111f));
+  box-shadow:
+    inset 0 1px 0 var(--plate-top, rgba(255, 255, 255, 0.45)),
+    inset 0 -2px 3px var(--plate-bottom, rgba(0, 0, 0, 0.55)),
+    inset 0 0 0 1px var(--plate-edge, rgba(0, 0, 0, 0.6));
+  transition: box-shadow var(--brd-dur) ease, filter var(--brd-dur) ease;
+}
+/* Engraved hairline, inset from the chamfer. */
+.brd-plate::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  z-index: -1;
+  pointer-events: none;
+  clip-path: polygon(
+    5px 0, calc(100% - 5px) 0, 100% 5px, 100% calc(100% - 5px),
+    calc(100% - 5px) 100%, 5px 100%, 0 calc(100% - 5px), 0 5px
+  );
+  box-shadow: inset 0 0 0 1px var(--plate-hairline, rgba(255, 216, 106, 0.26));
+  transition: box-shadow var(--brd-dur) ease;
+}
+.brd-plate:hover:not(:disabled) {
+  filter: drop-shadow(0 0 9px var(--plate-glow, rgba(255, 216, 106, 0.55)));
+}
+.brd-plate:hover:not(:disabled)::before { filter: brightness(1.09); }
+.brd-plate:hover:not(:disabled)::after {
+  box-shadow: inset 0 0 0 1px var(--plate-hairline-hi, rgba(255, 216, 106, 0.62));
+}
+/* Pressed: the plate sinks into its housing. */
+.brd-plate:active:not(:disabled) { transform: translateY(1px); }
+.brd-plate:active:not(:disabled)::before {
+  box-shadow:
+    inset 0 3px 7px rgba(0, 0, 0, 0.62),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.7);
+  filter: brightness(0.94);
+}
+.brd-plate:disabled { cursor: default; filter: grayscale(0.65) brightness(0.5); }
+
+/* Forged gold — primary actions. */
+.brd-plate--gold {
+  --plate-bg: linear-gradient(180deg, #b78430 0%, #f7dc93 11%, #ecc463 40%, #c08f2c 72%, #7d5412 100%);
+  --plate-edge: rgba(58, 39, 8, 0.85);
+  --plate-top: rgba(255, 249, 214, 0.85);
+  --plate-bottom: rgba(60, 38, 4, 0.6);
+  --plate-hairline: rgba(74, 48, 8, 0.45);
+  --plate-hairline-hi: rgba(255, 250, 220, 0.6);
+  --plate-glow: rgba(255, 216, 106, 0.7);
+  --plate-ink: #241703;
+  --plate-textshadow: 0 1px 0 rgba(255, 245, 205, 0.55);
+}
+
+/* Obsidian — secondary actions, engraved gold hairline + gold label. */
+.brd-plate--obsidian {
+  --plate-bg: linear-gradient(180deg, #302943 0%, #1e1932 16%, #15121f 62%, #0d0b15 100%);
+  --plate-edge: rgba(0, 0, 0, 0.8);
+  --plate-top: rgba(190, 175, 230, 0.28);
+  --plate-bottom: rgba(0, 0, 0, 0.7);
+  --plate-hairline: rgba(229, 184, 75, 0.32);
+  --plate-hairline-hi: rgba(255, 216, 106, 0.85);
+  --plate-glow: rgba(229, 184, 75, 0.45);
+  --plate-ink: #E5B84B;
+  --plate-textshadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+.brd-plate--obsidian:hover:not(:disabled) { color: var(--brd-gold-hi); }
+
+/* Tempered steel — combat responses (blocks). */
+.brd-plate--steel {
+  --plate-bg: linear-gradient(180deg, #4d6b8c 0%, #9dbcd8 12%, #5d7f9f 42%, #33506c 74%, #1d3147 100%);
+  --plate-edge: rgba(8, 20, 34, 0.85);
+  --plate-top: rgba(226, 240, 255, 0.75);
+  --plate-bottom: rgba(4, 14, 26, 0.65);
+  --plate-hairline: rgba(12, 28, 46, 0.5);
+  --plate-hairline-hi: rgba(226, 240, 255, 0.6);
+  --plate-glow: rgba(140, 195, 240, 0.6);
+  --plate-ink: #0b1a2a;
+  --plate-textshadow: 0 1px 0 rgba(226, 240, 255, 0.5);
+}
+
+/* Crimson bronze — attack / danger / force actions. Muted, not signal-red. */
+.brd-plate--crimson {
+  --plate-bg: linear-gradient(180deg, #8e3742 0%, #c4707a 11%, #9b3f4b 42%, #6c2632 74%, #45151d 100%);
+  --plate-edge: rgba(30, 8, 12, 0.85);
+  --plate-top: rgba(255, 216, 216, 0.5);
+  --plate-bottom: rgba(24, 6, 10, 0.65);
+  --plate-hairline: rgba(229, 184, 75, 0.30);
+  --plate-hairline-hi: rgba(255, 216, 106, 0.65);
+  --plate-glow: rgba(196, 90, 100, 0.62);
+  --plate-ink: #F7E7DD;
+  --plate-textshadow: 0 1px 2px rgba(40, 8, 12, 0.9);
+}
+
+/* Arcane violet — hand / utility on the mobile bar. */
+.brd-plate--violet {
+  --plate-bg: linear-gradient(180deg, #5a3ba0 0%, #9a7ae0 12%, #6b47bd 44%, #442a7c 74%, #281649 100%);
+  --plate-edge: rgba(16, 8, 32, 0.85);
+  --plate-top: rgba(226, 214, 255, 0.55);
+  --plate-bottom: rgba(12, 6, 24, 0.65);
+  --plate-hairline: rgba(229, 184, 75, 0.28);
+  --plate-hairline-hi: rgba(255, 216, 106, 0.6);
+  --plate-glow: rgba(154, 122, 224, 0.6);
+  --plate-ink: #F2ECFF;
+  --plate-textshadow: 0 1px 2px rgba(16, 8, 32, 0.9);
+}
+
+/* Larger hero variant for the floating END TURN. */
+.brd-plate--lg { padding: 14px 24px; font-size: 14px; letter-spacing: 0.22em; }
+.brd-plate--sm { padding: 6px 12px; font-size: 11px; letter-spacing: 0.12em; }
+
+/* Coarse pointers always get a comfortable target. */
+@media (pointer: coarse) {
+  .brd-plate,
+  .brd-stud,
+  .brd-glyph-btn { min-height: 44px; min-width: 44px; }
+}
+
+/* Round bezelled control (zoom, help) — a metal stud rather than a plate. */
+.brd-stud {
+  position: relative;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 26%, #2f2846, #171325 62%, #0d0b14 100%) padding-box,
+    conic-gradient(from 210deg, #6d5220, #e8cd85 12%, #a8862f 30%, #f3e0a8 48%, #7f6224 64%, #d8bd72 82%, #6d5220 100%) border-box;
+  border: 2px solid transparent;
+  color: var(--brd-gold-hi);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -2px 5px rgba(0, 0, 0, 0.6),
+    0 2px 8px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: filter var(--brd-dur) ease, transform 90ms var(--brd-ease), box-shadow var(--brd-dur) ease;
+}
+.brd-stud:hover:not(:disabled) {
+  filter: brightness(1.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 -2px 5px rgba(0, 0, 0, 0.6),
+    0 0 14px rgba(255, 216, 106, 0.5);
+}
+.brd-stud:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: inset 0 3px 7px rgba(0, 0, 0, 0.7);
+}
+.brd-stud:disabled { cursor: default; filter: grayscale(0.7) brightness(0.5); }
+
+/* Bare icon control (close, collapse) — engraved, no plate. */
+.brd-glyph-btn {
+  background: none;
+  border: 1px solid rgba(229, 184, 75, 0.22);
+  border-radius: 5px;
+  color: var(--brd-muted);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  transition: color var(--brd-dur) ease, border-color var(--brd-dur) ease, background-color var(--brd-dur) ease;
+}
+.brd-glyph-btn:hover {
+  color: var(--brd-gold-hi);
+  border-color: rgba(229, 184, 75, 0.6);
+  background: rgba(229, 184, 75, 0.08);
+}
+
+/* ── Zones & panels ────────────────────────────────────────────────────── */
+
+/* Zone frame — an engraved stone inset cut into the mat. */
+.brd-zone {
+  transition: box-shadow var(--brd-dur) ease, border-color var(--brd-dur) ease,
+              background-color var(--brd-dur) ease;
+}
+.brd-zone-label {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-variant-caps: all-small-caps;
+  font-weight: 700;
+  font-family: "Cinzel", "Times New Roman", serif;
+}
+
+.brd-chip {
+  transition: border-color var(--brd-dur) ease, color var(--brd-dur) ease,
+              background-color var(--brd-dur) ease;
+}
+
+/* Dark-parchment panel: blur + engraved gold hairline + inner top highlight. */
+.brd-panel {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 226, 160, 0.10),
+    inset 0 0 0 1px rgba(229, 184, 75, 0.07),
+    inset 0 0 40px rgba(0, 0, 0, 0.5),
+    0 0 26px rgba(142, 77, 255, 0.12),
+    0 14px 38px rgba(0, 0, 0, 0.66);
+}
+.brd-tab {
+  transition: color var(--brd-dur) ease, border-color var(--brd-dur) ease,
+              background-color var(--brd-dur) ease;
+}
+.brd-tab:hover { color: var(--brd-gold-hi); background: rgba(229, 184, 75, 0.07); }
+
+/* Heraldic rule — the thin gold line above/below the turn banner. */
+.brd-rule {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(229, 184, 75, 0.75) 25%, rgba(255, 216, 106, 0.9) 50%, rgba(229, 184, 75, 0.75) 75%, transparent);
+}
+
+/* ── Thin, obsidian/gold scrollbars for log, chat, zones and sheets. ────── */
+.brd-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(229, 184, 75, 0.35) transparent;
+}
+.brd-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.brd-scroll::-webkit-scrollbar-track { background: transparent; }
+.brd-scroll::-webkit-scrollbar-thumb {
+  background: rgba(229, 184, 75, 0.3);
+  border-radius: 999px;
+}
+.brd-scroll::-webkit-scrollbar-thumb:hover { background: rgba(229, 184, 75, 0.55); }
+
+/* Keyboard focus rings on every actionable element inside the board. */
+.brd button:focus-visible,
+.brd [role="button"]:focus-visible,
+.brd input:focus-visible {
+  outline: 2px solid #9d86ff;
+  outline-offset: 2px;
+}
+
+/* Reduced-motion guard: neutralize board animations + transitions. */
+@media (prefers-reduced-motion: reduce) {
+  .brd *, .brd *::before, .brd *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .brd-fan:hover { transform: var(--rest, none); }
+  .brd-mini[role="button"]:hover { transform: rotate(var(--rot, 0deg)); }
+}
