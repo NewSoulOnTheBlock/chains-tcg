@@ -882,29 +882,32 @@ export function ChainsBoard(props: Props) {
           </div>
           <div style={{
             display: 'flex', flexWrap: 'nowrap',
-            overflowX: 'visible',
+            overflowX: 'auto', overflowY: 'visible',
             WebkitOverflowScrolling: 'touch',
-            paddingBottom: 0,
+            paddingBottom: 4,
             justifyContent: 'center', alignItems: 'flex-end',
-            minHeight: 160,
-            perspective: 1200,
+            minHeight: 176,
+            perspective: 1400,
           }}>
             {me.hand.map((id, i) => {
               const n = me.hand.length;
-              const t = n === 1 ? 0 : (i - (n - 1) / 2) / Math.max(1, (n - 1) / 2);
-              const rot = t * 6;
-              const lift = Math.abs(t) * 8;
-              const overlap = -18;
+              const mid = (n - 1) / 2;
+              const t = n === 1 ? 0 : (i - mid) / Math.max(1, mid); // -1 (left) .. 1 (right)
+              const rot = t * 10;                                   // fan spread
+              const arc = t * t * 24;                               // edges dip below the raised center
+              const overlap = n > 7 ? -34 : n > 5 ? -26 : -18;      // tighten for larger hands
+              const rest = `translateY(${arc}px) rotate(${rot}deg)`;
               return (
                 <div key={i} style={{
-                  transform: `translateY(${lift}px) rotate(${rot}deg)`,
-                  transformOrigin: '50% 100%',
+                  transform: rest,
+                  transformOrigin: '50% 130%',
                   marginLeft: i === 0 ? 0 : overlap,
-                  transition: 'transform 0.18s ease',
-                  zIndex: selectedHand === i ? 10 : i,
+                  transition: 'transform 0.18s cubic-bezier(0.2,0.8,0.2,1)',
+                  zIndex: selectedHand === i ? 20 : i,
+                  flex: '0 0 auto',
                 }}
-                  onMouseEnter={e => { e.currentTarget.style.transform = `translateY(-14px) rotate(${rot * 0.4}deg) scale(1.08)`; }}
-                  onMouseLeave={e => { e.currentTarget.style.transform = `translateY(${lift}px) rotate(${rot}deg)`; }}
+                  onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-22px) rotate(0deg) scale(1.14)'; e.currentTarget.style.zIndex = '30'; }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = rest; e.currentTarget.style.zIndex = String(selectedHand === i ? 20 : i); }}
                 >
                   <DraggableCard
                     defId={id}
