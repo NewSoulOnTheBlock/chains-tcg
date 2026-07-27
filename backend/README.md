@@ -20,13 +20,14 @@ Both Node services consume the shared rules package
                     │ profile :8001  │   │  game :8000    │
                     │ Express REST   │   │  boardgame.io  │
                     │ profiles/decks │   │  lobby + ws    │
-                    │ matches/board  │   │  (in-memory    │
+                    │ matches/board  │   │  (pg-backed    │
                     └───┬───────┬────┘   │   matches)     │
-                        │       │        └────────────────┘
-              ┌─────────▼──┐ ┌──▼────────┐
-              │ postgres 16│ │ redis 7   │
-              │ (pgdata)   │ │ (cache)   │
-              └────────────┘ └───────────┘
+                        │       │        └───────┬────────┘
+              ┌─────────▼──┐ ┌──▼────────┐       │
+              │ postgres 16│ │ redis 7   │       │
+              │ (pgdata)   │ │ (cache)   │       │
+              └─────▲──────┘ └───────────┘       │
+                    └────────────────────────────┘
 ```
 
 Both services import `ChainsTCG` / `validateDeck` from `@chains/game-core`
@@ -127,8 +128,11 @@ the box; add extra origins via `ALLOW_ORIGIN` (comma-separated).
 
 ## Notes / v1 limitations
 
-- **Match storage is in-memory** in the game service — restarts drop live
-  matches. Add a storage adapter (e.g. `bgio-postgres`) to `Server({ db })`
-  in `services/game/src/server.ts` when durability is needed.
+- **Match storage is persistent**: the game service stores boardgame.io match
+  state in Postgres via `bgio-postgres` (a `Games` table in the shared
+  `chains` database), so matches survive game-service restarts. This is driven
+  by `DATABASE_URL` (set in docker-compose); when it is unset (bare local
+  dev without docker), the server logs a warning and falls back to the
+  default in-memory store, where restarts drop matches.
 - No auth: profiles are trusted by name, matching the current game design.
 - Redis is a pure cache; the profile API degrades gracefully if it is down.

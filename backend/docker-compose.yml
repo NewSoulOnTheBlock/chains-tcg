@@ -37,7 +37,10 @@ services:
     environment:
       PORT: "8000"
       ALLOW_ORIGIN: ${ALLOW_ORIGIN:-}
+      DATABASE_URL: postgres://chains:${POSTGRES_PASSWORD:-chains}@postgres:5432/chains
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks:

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@chains/game-core": "file:../../../packages/game-core",
+    "bgio-postgres": "^1.0.16",
     "boardgame.io": "^0.50.2",
     "tsx": "^4"
   },

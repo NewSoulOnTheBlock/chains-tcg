@@ -4,14 +4,21 @@
 // Credentials come from localStorage (stored by the lobby at join time);
 // the ?playerID=N query param is a spectator-style fallback.
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { SocketIO } from "boardgame.io/multiplayer";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GAME_SERVER } from "@/lib/config";
 import { getMatchCreds, type MatchCreds } from "@/lib/profile";
+import {
+  hasReportedMatch,
+  markMatchReported,
+  reportMatchResult,
+} from "@/lib/profileApi";
+import { opponentOf } from "@/lib/game";
 import { useBgioClient, type BgioOptions } from "@/hooks/useBgioClient";
 import { useHydrated } from "@/hooks/useHydrated";
 import { Board } from "@/components/game/Board";
@@ -42,6 +49,34 @@ export default function MatchPage() {
   }, [matchID, creds]);
 
   const view = useBgioClient(opts);
+
+  // Report the result once the game ends — winner's client only, and only when
+  // both real profile names are known. A localStorage flag keyed by matchID
+  // (chains:reported:<matchID>) guards against duplicate reports on re-renders
+  // or revisits. Solo (vs bot) games never hit this page.
+  const gameover = view?.ctx?.gameover as
+    | { winner?: string; draw?: boolean }
+    | undefined;
+  useEffect(() => {
+    if (!matchID || !view || !gameover?.winner || gameover.draw) return;
+    if (view.playerID !== gameover.winner) return; // only the winner reports
+    const nameFor = (pid: string) => {
+      const n =
+        view.matchData?.find((m) => String(m.id) === pid)?.name ||
+        view.G.players[pid]?.profileName;
+      // Treat the engine's "Player N" placeholder as unknown.
+      return n && !/^Player \d+$/.test(n) ? n : undefined;
+    };
+    const winner = nameFor(gameover.winner);
+    const loser = nameFor(opponentOf(gameover.winner));
+    if (!winner || !loser) return;
+    if (hasReportedMatch(matchID)) return;
+    markMatchReported(matchID); // set before the POST to hard-block duplicates
+    reportMatchResult(winner, loser).then((ok) => {
+      if (ok) toast.success("Result recorded");
+      else toast.error("Could not record the match result");
+    });
+  }, [matchID, view, gameover]);
 
   if (creds === null) {
     return (

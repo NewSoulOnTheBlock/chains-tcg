@@ -1,15 +1,27 @@
 // Chains TCG game service — boardgame.io Server hosting the ChainsTCG game.
 //
-// Match storage is in-memory for v1 (matches are lost on restart). To make
-// them durable later, swap in a boardgame.io storage adapter such as
-// bgio-postgres via the Server({ db }) option.
+// Match storage: when DATABASE_URL is set (docker), matches are persisted to
+// Postgres via bgio-postgres so they survive restarts. Without it (bare local
+// dev), the default in-memory store is used and matches are lost on restart.
 import { Server, Origins } from 'boardgame.io/server';
+import { PostgresStore } from 'bgio-postgres';
 import { ChainsTCG } from '@chains/game-core';
 
 const PORT = Number(process.env.PORT) || 8000;
 
+let db: PostgresStore | undefined;
+if (process.env.DATABASE_URL) {
+  db = new PostgresStore(process.env.DATABASE_URL, { logging: false });
+  console.log('[game] using Postgres match storage (bgio-postgres)');
+} else {
+  console.warn(
+    '[game] DATABASE_URL not set — using in-memory match storage; matches will be lost on restart',
+  );
+}
+
 const server = Server({
   games: [ChainsTCG],
+  db,
   origins: [
     Origins.LOCALHOST_IN_DEVELOPMENT,
     Origins.LOCALHOST,

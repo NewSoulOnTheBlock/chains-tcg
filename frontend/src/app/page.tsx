@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { COLOR_META, COLORS } from "@chains/game-core";
 import { Button } from "@/components/ui/button";
-import { Bot, Swords, LayoutGrid, Layers, UserRound } from "lucide-react";
+import { Bot, Swords, LayoutGrid, Layers, Trophy, UserRound } from "lucide-react";
 import {
   ProfileNameDialog,
   useProfileName,
@@ -73,6 +73,11 @@ export default function LandingPage() {
             </Link>
           </Button>
         </div>
+        <Button asChild variant="outline" className="h-11">
+          <Link href="/leaderboard">
+            <Trophy className="size-4" /> Leaderboard
+          </Link>
+        </Button>
       </div>
 
       {/* Profile chip */}

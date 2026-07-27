@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowLeft, Plus, RefreshCw, Swords, Users } from "lucide-react";
 import { GAME_NAME, GAME_SERVER } from "@/lib/config";
 import { getMatchCreds, setMatchCreds } from "@/lib/profile";
+import { registerProfile } from "@/lib/profileApi";
 import {
   ProfileNameDialog,
   useProfileName,
@@ -54,6 +55,11 @@ export default function LobbyPage() {
       setMatches((prev) => prev ?? []);
     }
   }, []);
+
+  // Upsert an already-stored name on lobby entry (idempotent server-side).
+  useEffect(() => {
+    if (loaded && name) registerProfile(name);
+  }, [loaded, name]);
 
   // Poll the match list every 3s (first tick immediately, asynchronously).
   useEffect(() => {

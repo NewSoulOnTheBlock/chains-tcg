@@ -16,6 +16,7 @@ import {
   setProfileName,
   subscribeProfile,
 } from "@/lib/profile";
+import { registerProfile } from "@/lib/profileApi";
 import { useHydrated } from "@/hooks/useHydrated";
 
 const serverName = () => "";
@@ -51,6 +52,7 @@ export function ProfileNameDialog({
     const n = draft.trim();
     if (!n) return;
     setProfileName(n);
+    registerProfile(n); // fire-and-forget server upsert
     onSaved?.(n);
     onOpenChange(false);
   };
