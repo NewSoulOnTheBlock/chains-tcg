@@ -15,6 +15,7 @@ import {
   PACK_PRICE_ETH, ROBINHOOD_CHAIN_ID, type RevealedCard,
 } from './pack-evm';
 import { connectRobinhoodChain, shortAddr } from './wallet';
+import { grantCards } from './collection';
 import { formatEther, type Address } from 'viem';
 import {
   ArrowLeft, Check, Copy, SoundOn, SoundOff, Diamond, DiamondOutline,
@@ -86,7 +87,6 @@ function mapMintError(e: any): ErrBox {
 
 // ── Root page ───────────────────────────────────────────────────────────────
 export function BoostersPage({ myName, onBack }: { myName: string; onBack: () => void }) {
-  void myName;
   const mobile = useIsMobile();
 
   // Wallet / network / funds — authoritative live values.
@@ -128,7 +128,7 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
         if (p?.hash) {
           setHash(p.hash); setTx('confirming');
           resumePack(p.hash)
-            .then((pulled) => { setCards(pulled); setTx('confirmed'); localStorage.removeItem(PENDING_KEY); })
+            .then((pulled) => { setCards(pulled); try { grantCards(myName, pulled.map((c) => c.id)); } catch {} setTx('confirmed'); localStorage.removeItem(PENDING_KEY); })
             .catch((e) => { setErrBox(mapMintError(e)); setTx('failed'); localStorage.removeItem(PENDING_KEY); });
         }
       }
@@ -193,6 +193,7 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
         setTx('confirming');
       });
       setCards(pulled);
+      try { grantCards(myName, pulled.map((c) => c.id)); } catch { /* non-fatal */ }
       try { localStorage.removeItem(PENDING_KEY); } catch {}
       setTx('confirmed');
     } catch (e) {

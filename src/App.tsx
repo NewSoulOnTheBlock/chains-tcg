@@ -16,6 +16,7 @@ import {
   createChallengeApi, listIncomingChallengesApi, listOutgoingChallengesApi, respondChallengeApi, type Challenge,
 } from './profiles';
 import { connectSolanaWith, connectSolana, getSolanaWallet, detectSolanaWallets, connectRobinhoodChain, detectEvmWallet, shortAddr, type ConnectedWallet, type SolanaWalletKind } from './wallet';
+import { getCollection, deckCap, validateOwnedDeck, ownershipIssues } from './collection';
 import { color as C, font as F, surface as SURF, edge as EDGE, depth as DEPTH } from './theme';
 import { Button as UIButton, goldPlate, obsidianPlate, engravedPanel } from './ui';
 import { SettingsPage, PREFS_EVENT } from './Settings';
@@ -2657,7 +2658,7 @@ function ProfilePage({ myName, onBack, onSettings }: { myName: string; onBack: (
               <DeckWorkspace myName={myName} mobile={mobile} onDecksChanged={reloadDecks} />
             )}
             {tab === 'collection' && (
-              <CollectionTab walletAddress={prof?.walletAddress ?? null} mobile={mobile} />
+              <CollectionTab myName={myName} walletAddress={prof?.walletAddress ?? null} mobile={mobile} />
             )}
             {tab === 'achievements' && (
               <AchievementsTab prof={prof} ranked={ranked} deck={favoriteCards} mobile={mobile} />
@@ -2953,11 +2954,21 @@ function hubGoldBtn(disabled: boolean): React.CSSProperties {
 }
 
 // ── Collection tab ──────────────────────────────────────────────────────────
-function CollectionTab({ walletAddress, mobile }: { walletAddress: string | null; mobile: boolean }) {
+function CollectionTab({ myName, walletAddress, mobile }: { myName: string; walletAddress: string | null; mobile: boolean }) {
   const [chain, setChain] = useState<Color | 'all'>('all');
   const [type, setType] = useState<'all' | CardType>('all');
+  const [ownedOnly, setOwnedOnly] = useState(true);
+  const [tick, setTick] = useState(0);
+  const owned = useMemo(() => getCollection(myName), [myName, tick]);
+  useEffect(() => {
+    const on = () => setTick((t) => t + 1);
+    window.addEventListener('ocva:collection-changed', on); window.addEventListener('focus', on);
+    return () => { window.removeEventListener('ocva:collection-changed', on); window.removeEventListener('focus', on); };
+  }, []);
   const cards = useMemo(() => BUILDABLE_CARDS.filter((c) =>
-    (chain === 'all' || c.color === chain) && (type === 'all' || c.type === type)), [chain, type]);
+    (chain === 'all' || c.color === chain) && (type === 'all' || c.type === type) && (!ownedOnly || (owned[c.id] ?? 0) > 0)), [chain, type, ownedOnly, owned]);
+  const totalOwned = useMemo(() => BUILDABLE_CARDS.reduce((s, c) => s + (owned[c.id] ?? 0), 0), [owned]);
+  const uniqueOwned = useMemo(() => BUILDABLE_CARDS.filter((c) => (owned[c.id] ?? 0) > 0).length, [owned]);
   const connected = !!walletAddress;
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -2965,24 +2976,27 @@ function CollectionTab({ walletAddress, mobile }: { walletAddress: string | null
         display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: connected ? HUB.cyan : HUB.muted }} />
         <span style={{ fontSize: 13, color: HUB.text }}>
-          {connected
-            ? `Card archive · every card in the set is available to build with. On-chain booster mints land in your wallet ${shortAddr(walletAddress!)}.`
-            : 'Wallet not linked. You can still browse and build with the full card archive; link a wallet from the home screen to track on-chain booster mints.'}
+          You own <b style={{ color: HUB.goldHi }}>{totalOwned}</b> cards ({uniqueOwned} unique). Every collection starts with 20 of each chain Node — open <b>Boosters</b> to unlock the rest.{connected ? ` Mints land in ${shortAddr(walletAddress!)}.` : ''}
         </span>
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <ChainChips value={chain} onChange={setChain} />
       </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <TypeChips value={type} onChange={setType} />
-        <span style={{ marginLeft: 'auto', alignSelf: 'center', fontSize: 12, color: HUB.muted }}>{cards.length} cards</span>
+        <button onClick={() => setOwnedOnly((v) => !v)} aria-pressed={ownedOnly} style={{ marginLeft: 'auto', padding: '7px 12px', borderRadius: 9,
+          background: ownedOnly ? `${HUB.violet}22` : HUB.surface, color: ownedOnly ? HUB.violet : HUB.muted, border: `1px solid ${ownedOnly ? HUB.violet : HUB.border}`,
+          cursor: 'pointer', fontSize: 11.5, fontWeight: 700 }}>{ownedOnly ? 'OWNED ONLY' : 'SHOW ALL'}</button>
+        <span style={{ alignSelf: 'center', fontSize: 12, color: HUB.muted }}>{cards.length} cards</span>
       </div>
 
       <div className="hub-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'grid',
         gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 150 : 190}px, 1fr))`, gap: 12, alignContent: 'start', paddingBottom: 8 }}>
-        {cards.map((def) => (
-          <HubCardTile key={def.id} def={def} inDeck={0} cap={isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC}
+        {cards.length === 0 ? (
+          <div style={{ gridColumn: '1 / -1', textAlign: 'center', color: HUB.muted, padding: 30 }}>No owned cards here yet — open a booster pack to start your collection.</div>
+        ) : cards.map((def) => (
+          <HubCardTile key={def.id} def={def} inDeck={0} cap={owned[def.id] ?? 0} owned={owned[def.id] ?? 0}
             deckFull={false} onAdd={undefined} showAdd={false} />
         ))}
       </div>
@@ -3057,13 +3071,14 @@ function HubChip({ label, selected, onClick, accent }: { label: string; selected
 }
 
 // ── Card tile (memoized) ────────────────────────────────────────────────────
-const HubCardTile = React.memo(function HubCardTile({ def, inDeck, cap, deckFull, onAdd, showAdd = true }: {
-  def: CardDef; inDeck: number; cap: number; deckFull: boolean; onAdd?: () => void; showAdd?: boolean;
+const HubCardTile = React.memo(function HubCardTile({ def, inDeck, cap, deckFull, onAdd, showAdd = true, owned }: {
+  def: CardDef; inDeck: number; cap: number; deckFull: boolean; onAdd?: () => void; showAdd?: boolean; owned?: number;
 }) {
   const meta = COLOR_META[def.color];
   const atCap = inDeck >= cap;
   const cost = def.cost ? Object.values(def.cost).reduce((s, n) => s + (n ?? 0), 0) : null;
-  const capLabel = cap === Infinity ? '∞' : String(cap);
+  const notOwned = owned === 0;
+  const capLabel = owned != null ? (owned === Infinity ? '∞' : String(owned)) : (cap === Infinity ? '∞' : String(cap));
   const disabled = !onAdd || atCap || deckFull;
   return (
     <CardHover defId={def.id}>
@@ -3089,6 +3104,9 @@ const HubCardTile = React.memo(function HubCardTile({ def, inDeck, cap, deckFull
             <span style={{ position: 'absolute', bottom: 6, right: 6, padding: '2px 7px', borderRadius: 6, background: 'rgba(0,0,0,0.78)', color: '#fff', fontSize: 12, fontWeight: 900 }}>{def.power}/{def.toughness}</span>
           )}
           {inDeck > 0 && <span style={{ position: 'absolute', bottom: 6, left: 6, padding: '2px 8px', borderRadius: 999, background: meta.hex, color: meta.ink, fontSize: 11, fontWeight: 900 }}>×{inDeck}</span>}
+          {notOwned && <span style={{ position: 'absolute', inset: 0, background: 'rgba(5,7,17,0.6)', display: 'grid', placeItems: 'center' }}>
+            <span style={{ padding: '3px 9px', borderRadius: 999, background: 'rgba(0,0,0,0.8)', border: `1px solid ${HUB.border}`, color: HUB.muted, fontSize: 10, fontWeight: 800, letterSpacing: '0.06em' }}>NOT OWNED</span>
+          </span>}
         </div>
         <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: HUB.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{def.name}</div>
@@ -3096,14 +3114,16 @@ const HubCardTile = React.memo(function HubCardTile({ def, inDeck, cap, deckFull
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, color: HUB.muted }}>
               <span style={{ width: 8, height: 8, borderRadius: 2, background: meta.hex }} />{meta.name}
             </span>
-            <span style={{ fontSize: 10.5, color: atCap ? HUB.gold : HUB.muted }}>{inDeck}/{capLabel}</span>
+            <span style={{ fontSize: 10.5, color: notOwned ? '#E0525E' : atCap ? HUB.gold : HUB.muted }}>
+              {owned != null ? (showAdd ? `${inDeck} / ${capLabel} owned` : `${capLabel} owned`) : `${inDeck}/${capLabel}`}
+            </span>
           </div>
           {showAdd && (
-            <button onClick={onAdd} disabled={disabled} aria-label={`Add ${def.name} to deck`} className="hub-anim"
+            <button onClick={onAdd} disabled={disabled} aria-label={notOwned ? `${def.name} — not owned` : `Add ${def.name} to deck`} className="hub-anim"
               style={{ marginTop: 2, padding: '7px 0', borderRadius: 8, cursor: disabled ? 'not-allowed' : 'pointer', fontWeight: 800, fontSize: 13,
                 color: disabled ? HUB.muted : '#fff', background: disabled ? HUB.raised : `linear-gradient(180deg, ${HUB.purple}, ${HUB.violet})`,
                 border: `1px solid ${disabled ? HUB.border : HUB.violet}` }}>
-              {deckFull ? 'DECK FULL' : atCap ? 'AT LIMIT' : '+ ADD'}
+              {notOwned ? 'LOCKED' : deckFull ? 'DECK FULL' : atCap ? 'AT LIMIT' : '+ ADD'}
             </button>
           )}
         </div>
@@ -3136,6 +3156,16 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
   const [showAdvanced, setShowAdvanced] = useState(false);
   const liveRef = useRef<HTMLDivElement>(null);
 
+  // Owned-card collection (boosters + starting Nodes). Custom decks may only use owned cards.
+  const [ownedTick, setOwnedTick] = useState(0);
+  const owned = useMemo(() => getCollection(myName), [myName, ownedTick]);
+  useEffect(() => {
+    const on = () => setOwnedTick((t) => t + 1);
+    window.addEventListener('ocva:collection-changed', on);
+    window.addEventListener('focus', on);
+    return () => { window.removeEventListener('ocva:collection-changed', on); window.removeEventListener('focus', on); };
+  }, []);
+
   const countsFrom = (cards: string[]) => { const n: Record<string, number> = {}; for (const id of cards) n[id] = (n[id] ?? 0) + 1; return n; };
 
   const loadInto = useCallback((d: DeckEntry | null) => {
@@ -3159,8 +3189,8 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
 
   const deckList = useMemo(() => { const out: string[] = []; for (const [id, n] of Object.entries(counts)) for (let i = 0; i < n; i++) out.push(id); return out; }, [counts]);
   const total = deckList.length;
-  const v60 = useMemo(() => validateDeck(deckList), [deckList]);
-  const copyIssues = useMemo(() => validateDeck(deckList, { requireSize: false }).issues, [deckList]);
+  const v60 = useMemo(() => validateOwnedDeck(myName, deckList), [myName, deckList, ownedTick]);
+  const copyIssues = useMemo(() => [...validateDeck(deckList, { requireSize: false }).issues, ...ownershipIssues(myName, deckList)], [myName, deckList, ownedTick]);
   const legality: 'EMPTY' | 'INCOMPLETE' | 'INVALID' | 'READY' =
     total === 0 ? 'EMPTY' : total < DECK_SIZE ? 'INCOMPLETE' : v60.ok ? 'READY' : 'INVALID';
   const dirty = JSON.stringify([...deckList].sort()) !== savedSnapshot;
@@ -3181,7 +3211,9 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
       const cur = prev[id] ?? 0;
       let next = cur + delta;
       if (next < 0) next = 0;
-      if (!isBasicNode(id) && next > MAX_COPIES_NONBASIC) next = MAX_COPIES_NONBASIC;
+      // Cap at what the player owns (and the format copy limit).
+      const cap = deckCap(myName, id);
+      if (next > cap) next = cap;
       if (delta > 0 && total >= DECK_SIZE) return prev;
       const out = { ...prev };
       if (next === 0) delete out[id]; else out[id] = next;
@@ -3332,14 +3364,14 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
               <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 150 : 176}px, 1fr))`, gap: 12 }}>
                 {visible.map((def) => (
                   <HubCardTile key={def.id} def={def} inDeck={counts[def.id] ?? 0}
-                    cap={isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC} deckFull={deckFull} onAdd={() => bump(def.id, +1)} />
+                    cap={deckCap(myName, def.id)} owned={owned[def.id] ?? 0} deckFull={deckFull} onAdd={() => bump(def.id, +1)} />
                 ))}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {visible.map((def) => (
                   <LibraryRow key={def.id} def={def} inDeck={counts[def.id] ?? 0}
-                    cap={isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC} deckFull={deckFull} onAdd={() => bump(def.id, +1)} />
+                    cap={deckCap(myName, def.id)} owned={owned[def.id] ?? 0} deckFull={deckFull} onAdd={() => bump(def.id, +1)} />
                 ))}
               </div>
             )}
@@ -3372,11 +3404,13 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
   );
 }
 
-function LibraryRow({ def, inDeck, cap, deckFull, onAdd }: { def: CardDef; inDeck: number; cap: number; deckFull: boolean; onAdd: () => void }) {
+function LibraryRow({ def, inDeck, cap, deckFull, onAdd, owned }: { def: CardDef; inDeck: number; cap: number; deckFull: boolean; onAdd: () => void; owned?: number }) {
   const meta = COLOR_META[def.color];
   const cost = def.cost ? Object.values(def.cost).reduce((s, n) => s + (n ?? 0), 0) : null;
   const atCap = inDeck >= cap;
+  const notOwned = owned === 0;
   const disabled = atCap || deckFull;
+  const ownLabel = owned != null ? (owned === Infinity ? '∞' : String(owned)) : (cap === Infinity ? '∞' : String(cap));
   return (
     <CardHover defId={def.id}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, background: HUB.surface,
@@ -3387,8 +3421,9 @@ function LibraryRow({ def, inDeck, cap, deckFull, onAdd }: { def: CardDef; inDec
         {cost != null && <span style={{ minWidth: 22, height: 22, borderRadius: 6, background: HUB.raised, border: `1px solid ${HUB.border}`, display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 800, flex: 'none' }}>{cost}</span>}
         <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{def.name}</span>
         <span style={{ fontSize: 10.5, color: HUB.muted, display: 'inline-flex', gap: 5, alignItems: 'center' }}><span style={{ width: 8, height: 8, borderRadius: 2, background: meta.hex }} />{def.type}</span>
-        <span style={{ fontSize: 11, color: atCap ? HUB.gold : HUB.muted, width: 40, textAlign: 'right' }}>{inDeck}/{cap === Infinity ? '∞' : cap}</span>
-        <button onClick={onAdd} disabled={disabled} aria-label={`Add ${def.name}`} style={{ width: 30, height: 30, borderRadius: 8, flex: 'none',
+        {notOwned && <span style={{ fontSize: 9.5, fontWeight: 800, color: '#E0525E' }}>LOCKED</span>}
+        <span style={{ fontSize: 11, color: notOwned ? '#E0525E' : atCap ? HUB.gold : HUB.muted, width: 60, textAlign: 'right' }}>{inDeck} / {ownLabel}</span>
+        <button onClick={onAdd} disabled={disabled} aria-label={notOwned ? `${def.name} — not owned` : `Add ${def.name}`} style={{ width: 30, height: 30, borderRadius: 8, flex: 'none',
           background: disabled ? HUB.raised : `linear-gradient(180deg, ${HUB.purple}, ${HUB.violet})`, color: disabled ? HUB.muted : '#fff',
           border: `1px solid ${disabled ? HUB.border : HUB.violet}`, cursor: disabled ? 'not-allowed' : 'pointer', fontWeight: 900 }}>+</button>
       </div>
@@ -5040,6 +5075,8 @@ function Lobby({
   }, [myDecks, joinSelectedDeckId]);
 
   const myDeckOk = useMemo(() => validateDeck(myDeck).ok, [myDeck]);
+  // Ranked requires a custom deck built only from owned (booster) cards.
+  const myDeckOwnedOk = useMemo(() => validateOwnedDeck(myName, myDeck).ok, [myName, myDeck]);
 
   const refresh = useCallback(async () => {
     setLoading(true); setError('');
@@ -5472,7 +5509,7 @@ function Lobby({
                 selectedDeckId={mySelectedDeckId}
                 setSelectedDeckId={setMySelectedDeckId}
                 selectedDeckCards={myDeck}
-                deckOk={myDeckOk}
+                deckOk={myDeckOwnedOk}
                 onJoined={onJoined}
                 setError={setError}
               />
@@ -7163,6 +7200,9 @@ function SoloSetupModal({
         const list = await listDecksApi(myName);
         if (cancelled) return;
         setDecks(list);
+        // Single-player requires an owned custom deck — default to the first valid one.
+        const firstOwned = list.find(d => validateOwnedDeck(myName, d.cards).ok);
+        setSelectedDeckId(firstOwned ? firstOwned.id : null);
       } catch {
         if (!cancelled) setDecks([]);
       } finally {
@@ -7173,7 +7213,9 @@ function SoloSetupModal({
   }, [myName]);
 
   const chosenCustom = selectedDeckId == null ? null : decks.find(d => d.id === selectedDeckId) ?? null;
-  const customInvalid = chosenCustom ? !validateDeck(chosenCustom.cards).ok : false;
+  // Single-player requires a custom deck built only from owned (booster) cards.
+  const chosenOwnedOk = chosenCustom ? validateOwnedDeck(myName, chosenCustom.cards).ok : false;
+  const canStart = selectedDeckId != null && chosenOwnedOk;
 
   const btn = (active: boolean, accent: string): React.CSSProperties => ({
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
@@ -7240,70 +7282,39 @@ function SoloSetupModal({
         </div>
 
         <div>
-          <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, letterSpacing: 1 }}>YOUR DECK</div>
+          <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, letterSpacing: 1 }}>YOUR DECK · CUSTOM ONLY</div>
 
-          {/* Starter vs. custom deck picker. Custom decks come from the library. */}
+          {/* Single-player requires a custom deck built only from owned cards. */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-            <button
-              onClick={() => setSelectedDeckId(null)}
-              style={{
-                background: selectedDeckId == null ? '#6c4bd8' : '#1a1730',
-                color: selectedDeckId == null ? '#fff' : '#ccc',
-                border: `2px solid ${selectedDeckId == null ? '#6c4bd8' : '#3a3050'}`,
-                borderRadius: 8, padding: '8px 12px',
-                fontWeight: 700, cursor: 'pointer', fontSize: 12,
-              }}
-            >STARTER</button>
             {decksLoading && (
               <div style={{ fontSize: 11, opacity: 0.6, alignSelf: 'center' }}>loading decks…</div>
             )}
             {!decksLoading && decks.map(d => {
               const active = selectedDeckId === d.id;
-              const ok = validateDeck(d.cards).ok;
+              const ok = validateOwnedDeck(myName, d.cards).ok;
               return (
-                <button key={d.id} onClick={() => setSelectedDeckId(d.id)} style={{
+                <button key={d.id} onClick={() => ok && setSelectedDeckId(d.id)} disabled={!ok} style={{
                   background: active ? '#3aa66a' : '#1a1730',
                   color: active ? '#fff' : ok ? '#ccc' : '#c8455d',
                   border: `2px solid ${active ? '#3aa66a' : '#3a3050'}`,
                   borderRadius: 8, padding: '8px 12px',
-                  fontWeight: 700, cursor: 'pointer', fontSize: 12,
-                  opacity: ok ? 1 : 0.7, display: 'inline-flex', alignItems: 'center',
-                }} title={ok ? d.name : `${d.name} (invalid — fix in Deck Library)`}>
+                  fontWeight: 700, cursor: ok ? 'pointer' : 'not-allowed', fontSize: 12,
+                  opacity: ok ? 1 : 0.6, display: 'inline-flex', alignItems: 'center',
+                }} title={ok ? d.name : `${d.name} — needs 60 cards you own (build in Profile › Decks)`}>
                   {d.name}{!ok ? <Warning size={12} style={{ marginLeft: 5 }} /> : null}
                 </button>
               );
             })}
             {!decksLoading && decks.length === 0 && (
-              <div style={{ fontSize: 11, opacity: 0.6, alignSelf: 'center' }}>
-                No saved decks yet — build one in the Deck Library.
+              <div style={{ fontSize: 11, opacity: 0.7, alignSelf: 'center' }}>
+                No decks yet — build one from your collection in Profile › Decks.
               </div>
             )}
           </div>
 
-          {/* Starter color picker — only meaningful when no custom deck is chosen. */}
-          {selectedDeckId == null ? (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {(['bnb', 'sol', 'eth', 'robinhood', 'base'] as Color[]).map(c => {
-                const meta = COLOR_META[c];
-                const active = color === c;
-                return (
-                  <button key={c} onClick={() => setColor(c)} style={{
-                    background: active ? meta.hex : '#1a1730',
-                    color: active ? meta.ink : '#ccc',
-                    border: `2px solid ${active ? meta.hex : '#3a3050'}`,
-                    borderRadius: 8, padding: '10px 12px',
-                    fontWeight: 700, cursor: 'pointer', fontSize: 12,
-                    textTransform: 'uppercase',
-                  }}>{c}</button>
-                );
-              })}
-            </div>
-          ) : (
-            <div style={{ fontSize: 11, opacity: 0.65 }}>
-              Using saved deck: <b>{chosenCustom?.name ?? '—'}</b>
-              {customInvalid && <span style={{ color: '#c8455d' }}> (invalid — fix in Deck Library)</span>}
-            </div>
-          )}
+          <div style={{ fontSize: 11, opacity: 0.7 }}>
+            Single-player uses a custom deck built only from cards you own — booster pulls plus your 20 starter Nodes of each chain.
+          </div>
         </div>
 
         {best && (
@@ -7318,18 +7329,23 @@ function SoloSetupModal({
           </div>
         )}
 
+        {!canStart && (
+          <div style={{ fontSize: 11, color: '#ffb84d', opacity: 0.9 }}>
+            Build a valid 60-card deck from your collection to play single-player.
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
           <button
-            disabled={customInvalid}
-            onClick={() => onLaunch({
+            disabled={!canStart}
+            onClick={() => canStart && onLaunch({
               difficulty, mode, color,
-              customDeck: chosenCustom ? chosenCustom.cards : null,
+              customDeck: chosenCustom!.cards,
             })}
             style={{
-              flex: 1, background: customInvalid ? '#3a2a4a' : '#6c4bd8', color: '#fff',
+              flex: 1, background: !canStart ? '#3a2a4a' : '#6c4bd8', color: '#fff',
               border: 'none', borderRadius: 8, padding: '12px 16px',
-              fontWeight: 800, cursor: customInvalid ? 'not-allowed' : 'pointer', fontSize: 14, letterSpacing: 1,
-              opacity: customInvalid ? 0.6 : 1,
+              fontWeight: 800, cursor: !canStart ? 'not-allowed' : 'pointer', fontSize: 14, letterSpacing: 1,
+              opacity: !canStart ? 0.6 : 1,
             }}><ShinyButtonLabel text="START MATCH" /></button>
           <button onClick={onClose} style={{
             background: 'transparent', color: '#aaa',
@@ -7697,7 +7713,7 @@ function RankedQueuePanel({
   }, [queued, myName, onJoined, setError]);
 
   async function joinQueue() {
-    if (!deckOk) { setError('Pick a valid 60-card deck before entering the ranked queue.'); return; }
+    if (!deckOk) { setError('Ranked needs a 60-card custom deck built only from cards you own. Open Boosters to unlock more.'); return; }
     setBusy(true); setError('');
     try {
       const deckPayload = selectedDeckCards.length > 0 ? JSON.stringify(selectedDeckCards) : undefined;
@@ -7759,7 +7775,7 @@ function RankedQueuePanel({
                 style={{ flex: 1, minWidth: 0, padding: '10px', minHeight: 44, background: '#14121f', color: '#eee', border: '1px solid #3a3550', borderRadius: 8, fontSize: 13 }}
               >
                 {decks.map(d => {
-                  const valid = validateDeck(d.cards).ok;
+                  const valid = validateOwnedDeck(myName, d.cards).ok;
                   return (
                     <option key={d.id} value={d.id}>
                       {d.name} ({d.cards.length}) {d.isActive ? '\u2605' : ''} {valid ? '' : '\u26a0'}
@@ -7787,7 +7803,9 @@ function RankedQueuePanel({
           ><Trophy size={16} /> ENTER RANKED QUEUE</button>
           {!deckOk && (
             <div style={{ marginTop: 8, fontSize: 11, color: '#f99', fontStyle: 'italic' }}>
-              Pick a valid 60-card deck above to queue.
+              {decks.length === 0
+                ? 'Build a 60-card deck from your collection (Profile › Decks) to queue ranked.'
+                : 'This deck needs 60 cards you own — open Boosters to unlock more, then rebuild it.'}
             </div>
           )}
         </>
