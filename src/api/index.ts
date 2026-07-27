@@ -19,6 +19,7 @@ export * as collection from './collection.js';
 export * as decks from './decks.js';
 export * as lobby from './lobby.js';
 export * as profiles from './profiles.js';
+export * as ranked from './ranked.js';
 export * as wager from './wager.js';
 export * as session from './session.js';
 
@@ -75,4 +76,26 @@ export type {
   ProfilePatch,
   PublicProfile,
 } from './profiles.js';
+export type {
+  OwnRankedProfile,
+  QueueLeft,
+  QueuePairing,
+  QueueStatus,
+  QueueTicket,
+  RankedEndReason,
+  RankedLeaderboard,
+  RankedLeaderboardEntry,
+  RankedMatchEntry,
+  RankedOutcome,
+  RankedPlacement,
+  RankedProfile,
+  RankedRank,
+  RankedRecord,
+  RankedRegion,
+  RankedSeason,
+  RankedTier,
+  SeasonInfo,
+  SeasonRewards,
+  SeasonTierReward,
+} from './ranked.js';
 export type { DepositResult, Escrow, EscrowStatus, StakeTier, Stakes } from './wager.js';

@@ -13,7 +13,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { getMyProfileApi, type Profile } from './profiles';
-import { RANKED_UNAVAILABLE_MESSAGE } from './ranked-client';
+import { QUEUE_REGION } from './ranked-client';
 import { color as C, font as F, surface as SURF, edge as EDGE, depth as DEPTH } from './theme';
 import { engravedPanel } from './ui';
 import { hapticsSupported, HAPTICS_KEY, Haptics } from './haptics';
@@ -537,13 +537,16 @@ export function SettingsPage({
         {/* ── Gameplay ──────────────────────────────────────────────────── */}
         <SectionHead icon={<Swords size={15} />} label="Gameplay" />
         <Section>
-          {/* The queue-mode and region preferences configured `/api/ranked/*`,
-              which does not exist on this backend. Rather than keep dead
-              switches that quietly do nothing, say what is actually true. */}
+          {/* There is deliberately NO region picker here.
+              The pairer only pairs players WITHIN a region, so a setting that
+              moved one player to `eu` while the population sits on `global`
+              would not be a preference — it would be a way to never get a
+              match. The queue always sends `global`. Stating that is honest;
+              offering a switch would not be. */}
           <Row
-            title="Ranked ladder"
-            hint={RANKED_UNAVAILABLE_MESSAGE}
-            control={<span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1, color: S.muted }}>COMING SOON</span>}
+            title="Ranked queue region"
+            hint={`Ranked matchmaking always uses the ${QUEUE_REGION} pool. The server only pairs players inside a region, so a smaller pool would just mean a longer wait — there is nothing useful to choose here.`}
+            control={<span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1, color: S.muted }}>{QUEUE_REGION.toUpperCase()}</span>}
           />
 
           <Row

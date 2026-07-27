@@ -154,8 +154,11 @@ safe on a logged-out landing page.
 | `profiles.getLeaderboard()` | **public** | top 50, no `limit` param, no addresses |
 | `profiles.getPublicProfile(name)` | **public** | no address, no id, no chain |
 | `profiles.getMatches(name)` | **public** | the only source of match history |
+| `ranked.getSeason()` | **public** | season window, reward copy, the tier list |
+| `ranked.getLeaderboard()` | **public** | season ladder; **empty is a valid answer** |
+| `ranked.getProfile(name)` | **public** | anyone's standing; `rank` is `null` in placements |
 | `auth.requestNonce()` / `verifySignature()` / `refresh()` | **public** | the sign-in endpoints themselves |
-| everything else | **auth** | `profiles.getMe`, all of `decks`, `lobby`, `wager` |
+| everything else | **auth** | `profiles.getMe`, all of `decks`, `lobby`, `ranked.*`, `wager` |
 
 `profiles.getMe()` is the only route that returns a wallet address, and only to
 its owner.
@@ -345,6 +348,44 @@ await wager.createEscrow({ matchId, tier: 0 });   // index — there is no `amou
 
 Sending `amountBase` is a 400. Never hardcode a tier index; the list is
 positional and operator-configurable.
+
+---
+
+## 8b. Ranked — the ladder is live
+
+`src/api/ranked.ts` wraps `/games/ranked/*`: seasons, placements, LP, the season
+leaderboard, per-match LP deltas and the matchmaking queue. The presentation
+half (tier colours, rank labels, the placement gate, the queue state machine)
+lives in `src/ranked-client.ts`, which used to be nothing but a
+`RANKED_AVAILABLE = false` gate. **That gate is gone — do not reintroduce a
+check for it.**
+
+Four things that are easy to get wrong:
+
+1. **`profile.rank` is `null` while `placement.inPlacements` is true.** Show
+   progress ("3 of 10 placement matches") and no tier. Do **not** invent a
+   provisional rank — `standingOf()` encodes the gate and checks `inPlacements`
+   *before* it looks at `rank`.
+2. **Render `rank.label`, not `tier` + `division`.** The server pre-renders it
+   ("Gold II", "Mythic"). Mythic has no meaningful division — it still sends
+   `division: 1` — and the server already knows that.
+3. **An empty leaderboard is correct, not broken.** Players in placements are
+   excluded server-side, so a fresh season's ladder is genuinely empty. Give it
+   a real empty state.
+4. **Never send a region.** `POST /games/ranked/queue` takes `{region?}` and
+   defaults to `global`; the pairer only pairs *within* a region, so exposing a
+   picker means one player on `eu` never matches anyone. There is deliberately
+   no region UI.
+
+The queue's pairing response carries **no credentials** by design. Take
+`match.matchID` to the existing `lobby.getSeat()` — the same call the lobby join
+path makes. That read is idempotent, which is what makes refreshing mid-queue
+land the player back in their match rather than losing it.
+
+Poll `GET /games/ranked/queue` at `QUEUE_POLL_MS` (2.5s) against a budget of
+180 requests per 60s per profile; stop while the tab is hidden and on unmount.
+A **failed poll must never move the queue state machine** — a GET that did not
+arrive says nothing about the server-side queue entry.
 
 ---
 

@@ -24,10 +24,20 @@
 // screen at all. See `WAGERS_AVAILABLE` in App.tsx for the second half of that
 // story.
 //
-// ─── RANKED MATCHES ARE NOT THE RANKED LADDER ───────────────────────────────
-// A ranked MATCH is a match tagged `ranked` whose decks are ownership-checked —
-// that works today. The ranked LADDER (rating, seasons, a queue) does not exist
-// server-side; see `src/ranked-client.ts`. Do not let one imply the other.
+// ─── A RANKED MATCH IS STILL NOT THE LADDER QUEUE ───────────────────────────
+// The ladder now exists — rating, seasons, placements and a queue, all live on
+// `/games/ranked/*` (see `src/api/ranked.ts` and `src/ranked-client.ts`). But
+// the two entry points remain different things and the UI must keep them apart:
+//
+//   `POST /games/create {mode:'ranked'}`  opens a SEAT in the lobby that anyone
+//                                         may join. Ownership-checked. This is
+//                                         what `OFFERED_MODES` below is about.
+//   `POST /games/ranked/queue`            joins the LADDER QUEUE, and the
+//                                         server pairs you by rating. There is
+//                                         no seat to open and no lobby row.
+//
+// `evaluateRankedDeck()` serves both: the same ownership check gates both
+// paths, so the same advisory is shown before either button is pressed.
 
 import { CARDS, isBasicNode } from './cards';
 

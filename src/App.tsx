@@ -1,7 +1,7 @@
 // src/App.tsx
 // Online lobby + multiplayer client for Chains TCG.
 // Flow: Login -> Lobby (create/join match) -> Waiting room -> Game.
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Client } from 'boardgame.io/react';
 import { SocketIO } from 'boardgame.io/multiplayer';
 import { Plaza } from './Plaza';
@@ -20,8 +20,23 @@ import {
   type AuthChain, type LobbyEntry, type MatchMode, type OwnProfile, type SeatInfo,
 } from './api';
 import { errorText, errorHeadline, errorIssues, isDeckBlocked, isHostDeckUnowned } from './error-text';
-import { RANKED_AVAILABLE, RANKED_UNAVAILABLE_MESSAGE } from './ranked-client';
+// The competitive ladder is LIVE on `/games/ranked/*`. `ranked-client.ts` is a
+// real typed client again — the transport lives in `src/api/ranked.ts` and the
+// pure bits (tier colours, LP labels, the placement gate, the season countdown
+// and the queue state machine) live alongside it. There is no availability gate
+// any more; nothing here should be checking for one.
+import {
+  IDLE_QUEUE, LEADERBOARD_EMPTY_BODY, LEADERBOARD_EMPTY_TITLE, RankedAPI,
+  classifyQueueError, formatEndReason, formatLp, formatLpDelta, formatRankLabel,
+  formatRankedRecord, formatWait, leaderboardIsEmpty, placementBlurb, placementLabel,
+  queueDepthLabel, queueElapsedMs, queuePollDelayMs, queueReducer, rankedWinRate,
+  seasonProgressPct, seasonRemaining, standingOf, tierIndex, tierStyle,
+  type OwnRankedProfile, type QueueState, type RankedLeaderboard, type RankedMatchEntry,
+  type RankedStanding, type SeasonInfo,
+} from './ranked-client';
 import { connectRobinhoodChain, detectEvmWallet, shortAddr, ROBINHOOD_CHAIN } from './wallet';
+// Blockscout's host, so the token link is never a hardcoded URL.
+import { ROBINHOOD_EXPLORER_URL } from './pack-evm';
 // Card ownership is SERVER state now (`src/api/collection.ts`). `useCollection`
 // is a subscription to the cached snapshot; `ownershipIssues` mirrors the
 // server's ranked/wager seating check. Ownership is shown in the deck builder,
@@ -38,10 +53,10 @@ import { Button as UIButton, goldPlate, obsidianPlate, engravedPanel } from './u
 import { SettingsPage, PREFS_EVENT } from './Settings';
 import {
   ArrowRight, ArrowLeft, ArrowUp, ArrowUpRight, ArrowDown, ChevronRight, ChevronDown,
-  Close, Check, Plus, Refresh, Play, Search, Copy, Edit as EditIcon,
+  Close, Check, Plus, Refresh, Play, Search, Copy, External, Edit as EditIcon,
   Trash, Save, Folder, Swords, Shield, ShieldCheck, Skull, Heart, Bolt, Fire, Robot,
   Wizard, Ghost, Cards, Deck as DeckIcon, Target, Gamepad, Trophy, Star,
-  StarOutline, Crown, Gem, Coins, Chart, Castle, Temple, Book, Books, Globe, Moon, Orb,
+  StarOutline, Crown, Gem, Coins, Chart, Castle, Temple, Book, Books, Globe, Moon, Orb, Medal,
   Link as LinkIcon, Chain, Warning, Info, Lock, User, Settings, Tools,
   Mobile, Fox, Backpack, Diamond, DiamondOutline, Dot, SoundOn, SoundOff, Music,
   Hourglass, EnterKey, Lizard, GridView, ListView, MedalFirst,
@@ -88,6 +103,26 @@ function useIsMobile(breakpoint = 720) {
     };
   }, [breakpoint]);
   return m;
+}
+
+/**
+ * `true` once the ownership snapshot has finished its FIRST read.
+ *
+ * `useCollection()` hydrates synchronously from the cached snapshot, so while
+ * the opening `GET /wager/collection` is in flight a player whose cards are
+ * about to arrive still reads as "we have never looked". That is a real state,
+ * but it is not one we know yet — and rendering it flashes "collection not
+ * scanned" at somebody whose collection is fine.
+ *
+ * Latching on the first settle fixes that. A LATER chain scan does not
+ * un-latch it: by then the advisory is already showing its own "Scanning…"
+ * and blanking the panel would just make it jump.
+ */
+function useCollectionSettled(collection: { loading: boolean }): boolean {
+  const settled = useRef(false);
+  // A latch, so writing it during render is idempotent and safe.
+  if (!collection.loading) settled.current = true;
+  return settled.current;
 }
 
 // ── Persistence helpers (sessionStorage so each tab can be a different player) ─
@@ -1830,8 +1865,14 @@ function fmtCountdown(ms: number) {
 type QueueMode = 'ranked' | 'casual';
 
 function Landing({
-  myName, profile, onPlay, onMasterquest, onBoosters, onProfile, onRules, onSettings,
-}: { myName: string; profile: Profile; onPlay: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onSettings: () => void }) {
+  myName, profile, queue, onPlay, onLadder, onMasterquest, onBoosters, onProfile, onRules, onSettings,
+}: {
+  myName: string; profile: Profile;
+  /** The ranked queue, owned by the app root so it survives a view change. */
+  queue: RankedQueue;
+  onPlay: () => void; onLadder: () => void; onMasterquest: () => void; onBoosters: () => void;
+  onProfile: () => void; onRules: () => void; onSettings: () => void;
+}) {
   const mobile = useIsMobile(767);
   const tablet = useIsMobile(1279);
   // The signed-in player's own profile is already loaded by the root — it is
@@ -1840,6 +1881,8 @@ function Landing({
   const prof = profile;
   const [players, setPlayers] = useState<number | null>(null);
   const [activeDeck, setActiveDeck] = useState<DeckEntry | null>(null);
+  const [ranked, setRanked] = useState<OwnRankedProfile | null>(null);
+  const [season, setSeason] = useState<SeasonInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [muted, setMuted] = useState<boolean>(() => { try { return localStorage.getItem('ocva.muted') === '1'; } catch { return false; } });
   const [copied, setCopied] = useState(false);
@@ -1849,15 +1892,21 @@ function Landing({
     let alive = true;
     (async () => {
       setLoading(true);
-      // No ranked profile and no season: neither endpoint exists any more. See
-      // src/ranked-client.ts for what would have to be built to bring them back.
-      const [all, decks] = await Promise.all([
+      // The ladder is live, so the hub reads it: the season window drives the
+      // ranked card's countdown and the caller's own standing drives the badge.
+      // Both are allowed to fail independently — a ladder outage must not stop
+      // a player getting to a casual match.
+      const [all, decks, me, seasonInfo] = await Promise.all([
         listProfilesApi().catch(() => [] as Profile[]),
         listDecksApi().catch(() => [] as DeckEntry[]),
+        RankedAPI.getMe().catch(() => null),
+        RankedAPI.getSeason().catch(() => null),
       ]);
       if (!alive) return;
       setPlayers(all.length);
       setActiveDeck(decks.find((d) => d.isActive) ?? decks[0] ?? null);
+      setRanked(me);
+      setSeason(seasonInfo);
       setLoading(false);
     })();
     return () => { alive = false; };
@@ -1879,8 +1928,29 @@ function Landing({
 
   const deckCards = activeDeck?.cards ?? [];
   const deckValid = activeDeck ? validateDeck(deckCards) : null;
-  const deckState: 'missing' | 'invalid' | 'valid' = !activeDeck ? 'missing' : deckValid!.ok ? 'valid' : 'invalid';
+  // `loading` is a FOURTH state, not a flavour of `missing`. Before the deck
+  // list answers, every player looks deckless; saying so would flash
+  // "CHOOSE A DECK" at somebody who has one.
+  const deckState: 'loading' | 'missing' | 'invalid' | 'valid' =
+    loading ? 'loading' : !activeDeck ? 'missing' : deckValid!.ok ? 'valid' : 'invalid';
   const deckFaction = deriveFavoriteFaction(deckCards);
+
+  // Ownership for the ranked advisory, on the same "do not answer until we
+  // know" rule as the lobby's copy of this.
+  const collection = useCollection();
+  const collectionSettled = useCollectionSettled(collection);
+  const [scanning, setScanning] = useState(false);
+  const scanChain = useCallback(async () => {
+    setScanning(true);
+    try { await syncCollection(); } finally { setScanning(false); }
+  }, []);
+  const rankedDeck: RankedEligibility | null = useMemo(
+    () => (!loading && collectionSettled
+      ? evaluateRankedDeck(activeDeck?.cards, { known: ownershipKnown(), ownedCount })
+      : null),
+    [activeDeck, collection, loading, collectionSettled],
+  );
+  const standing = standingOf(ranked);
 
   const copyAddr = async () => {
     if (!prof?.walletAddress) return;
@@ -1920,15 +1990,27 @@ function Landing({
           <MatchmakingPanel deckState={deckState} deckName={activeDeck?.name ?? null}
             deckCount={deckCards.length} deckFaction={deckFaction} deckIssue={deckValid?.issues?.[0]?.message ?? null}
             players={players} onPlay={play} onChangeDeck={() => { try { window.location.hash = 'decks'; } catch {} onProfile(); }}
-            loading={loading} mobile={mobile} />
+            loading={loading} mobile={mobile}
+            queue={queue} season={season} standing={standing} rankedDeck={rankedDeck}
+            scanning={scanning || collection.loading} onScanChain={() => { void scanChain(); }}
+            onBoosters={onBoosters} onLadder={onLadder}
+            onDeckScreen={() => { try { window.location.hash = 'decks'; } catch {} onProfile(); }} />
         </div>
 
-        <div style={mobile ? {} : { position: 'absolute', right: tablet ? 20 : 'clamp(24px, 4vw, 64px)', bottom: mobile ? undefined : 108, width: 'min(340px, 40vw)' }}>
-          <ActivityPanel onViewEvent={onMasterquest} mobile={mobile} />
+        {/* The right-hand column: the token announcement sits ON TOP of the
+            card stack, and the two share the column's spacing so they read as
+            one thing rather than two unrelated additions. */}
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: 12,
+          ...(mobile ? {} : { position: 'absolute', right: tablet ? 20 : 'clamp(24px, 4vw, 64px)', bottom: 108, width: 'min(340px, 40vw)' }),
+        }}>
+          <TokenAnnouncement mobile={mobile} />
+          <ActivityPanel onViewEvent={onMasterquest} onLadder={onLadder}
+            season={season} standing={standing} loading={loading} mobile={mobile} />
         </div>
       </div>
 
-      <NavDock onCollection={goCollection} onBoosters={onBoosters} onMasters={onMasterquest} onProfile={onProfile} onRules={onRules} onSettings={onSettings} mobile={mobile} />
+      <NavDock onCollection={goCollection} onBoosters={onBoosters} onLadder={onLadder} onMasters={onMasterquest} onProfile={onProfile} onRules={onRules} onSettings={onSettings} mobile={mobile} />
 
       <img src="/built-on-robinhood.png?v=2" alt="Built on Robinhood" draggable={false}
         style={{ position: mobile ? 'static' : 'absolute', zIndex: 2, left: '50%', bottom: mobile ? undefined : 70,
@@ -1945,7 +2027,10 @@ function PlayerHUD({ name, avatarUrl, level, xpInto, xpRange, walletAddress, cop
   walletAddress: string | null; copied: boolean; onCopy: () => void; muted: boolean; onToggleMute: () => void; onSettings: () => void; loading: boolean; mobile: boolean;
 }) {
   const [notifOpen, setNotifOpen] = useState(false);
-  // Placement notifications came from the ranked service, which is gone.
+  // Still empty, but for a different reason than it used to be: the ladder is
+  // back, and there is simply no notification FEED on the backend to read —
+  // no route delivers "you were promoted" or "your placements finished". The
+  // ladder screen and the hub card carry that news instead.
   const notifs: string[] = [];
   const xpPct = Math.max(0, Math.min(100, Math.round((xpInto / xpRange) * 100)));
   const connected = !!walletAddress;
@@ -2007,14 +2092,50 @@ function hudBtn(): React.CSSProperties {
     background: 'rgba(20,22,44,0.7)', border: `1px solid ${MENU.border}`, color: MENU.text, cursor: 'pointer' };
 }
 
-function MatchmakingPanel({ deckState, deckName, deckCount, deckFaction, deckIssue, players, onPlay, onChangeDeck, loading, mobile }: {
-  deckState: 'missing' | 'invalid' | 'valid';
+/**
+ * The hub's front door: CASUAL or RANKED, the active deck, and one button.
+ *
+ * ─── THE TWO BUTTONS DO DIFFERENT THINGS ───────────────────────────────────
+ * CASUAL opens the lobby, where create / join / challenge live. RANKED does
+ * NOT: it joins the ladder queue (`POST /games/ranked/queue`) and the server
+ * pairs you, so there is no seat to open and no lobby to browse. Conflating
+ * them would put a player in an open casual match while they believed they
+ * were climbing.
+ *
+ * ─── THE DECK ADVISORY IS ADVISORY ─────────────────────────────────────────
+ * `evaluateRankedDeck` mirrors the server's ownership check so a player is told
+ * BEFORE they queue rather than by a 400 afterwards. It never disables the
+ * button: the snapshot can lag a pack minted seconds ago, and the server is the
+ * authority. Its three states are genuinely different — in particular "never
+ * synced" prompts a chain scan and must never claim the deck is illegal.
+ */
+function MatchmakingPanel({
+  deckState, deckName, deckCount, deckFaction, deckIssue, players, onPlay, onChangeDeck, loading, mobile,
+  queue, season, standing, rankedDeck, scanning, onScanChain, onBoosters, onDeckScreen, onLadder,
+}: {
+  deckState: 'loading' | 'missing' | 'invalid' | 'valid';
   deckName: string | null; deckCount: number; deckFaction: { name: string; color: string } | null; deckIssue: string | null;
   players: number | null; onPlay: () => void; onChangeDeck: () => void; loading: boolean; mobile: boolean;
+  queue: RankedQueue;
+  season: SeasonInfo | null;
+  /** `null` while the caller's ranked profile is loading or unavailable. */
+  standing: RankedStanding | null;
+  /** `null` until the deck list AND the ownership snapshot have answered. */
+  rankedDeck: RankedEligibility | null;
+  scanning: boolean; onScanChain: () => void;
+  onBoosters: () => void; onDeckScreen: () => void; onLadder: () => void;
 }) {
+  const [mode, setMode] = useState<OfferedMode>('casual');
+  const q = queue.state;
+  // Once the player is in the queue the panel IS the queue — flipping back to
+  // casual underneath a live ticket would be a lie about what the app is doing.
+  const queueBusy = q.status !== 'idle';
+  const shown: OfferedMode = queueBusy ? 'ranked' : mode;
+
   // The button always opens the lobby (create / join / challenge live there);
   // the label reflects the ACTIVE deck, which is what the server will seat you
-  // with — there is no per-match deck choice any more.
+  // with — there is no per-match deck choice any more. `loading` keeps the
+  // neutral label rather than claiming a deck the player may well have.
   const playLabel = deckState === 'missing' ? 'CHOOSE A DECK' : deckState === 'invalid' ? 'FIX DECK & PLAY' : 'PLAY';
   const canPlay = true;
   return (
@@ -2022,10 +2143,46 @@ function MatchmakingPanel({ deckState, deckName, deckCount, deckFaction, deckIss
       <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.18em', color: MENU.gold }}>MATCHMAKING</div>
       <h2 style={{ margin: '4px 0 14px', fontFamily: MENU_SERIF, fontWeight: 700, fontSize: mobile ? 26 : 30, color: MENU.text }}>ENTER THE ARENA</h2>
 
-      {/* The ranked / casual toggle is gone: `POST /games/create` accepts a
-          `ranked` mode but nothing rates, seeds or seasons those matches, so
-          the choice would have been cosmetic. See src/ranked-client.ts. */}
-      <div style={{ fontSize: 12.5, color: MENU.text2, margin: '10px 2px 12px' }}>Casual play · no rank at stake</div>
+      {/* CASUAL / RANKED. A radio group, not a tab strip: it is a property of
+          the match you are about to play, not navigation. */}
+      <div role="radiogroup" aria-label="Match mode" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        {(['casual', 'ranked'] as const).map((m) => {
+          const active = shown === m;
+          const gold = m === 'casual';
+          return (
+            <button key={m} type="button" role="radio" aria-checked={active}
+              onClick={() => { if (!queueBusy) setMode(m); }} disabled={queueBusy && !active}
+              style={{
+                padding: '10px 8px', minHeight: 44, borderRadius: 11,
+                cursor: queueBusy ? 'default' : 'pointer',
+                fontFamily: F.body, fontWeight: 800, fontSize: 12.5, letterSpacing: 1,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                background: active
+                  ? (gold ? `linear-gradient(180deg, ${MENU.goldHi}, ${MENU.gold})` : 'rgba(139,92,246,0.24)')
+                  : 'rgba(8,8,22,0.55)',
+                color: active ? (gold ? '#20170a' : '#e6d4ff') : MENU.text2,
+                border: `1px solid ${active ? (gold ? '#8a6d24' : 'rgba(139,92,246,0.65)') : MENU.border}`,
+                boxShadow: active ? (gold ? '0 6px 18px -6px rgba(230,196,92,0.55)' : '0 0 20px rgba(139,92,246,0.35)') : 'none',
+                transition: 'all .15s ease', opacity: queueBusy && !active ? 0.45 : 1,
+              }}>
+              {gold ? <Swords size={15} /> : <Trophy size={15} />} {gold ? 'CASUAL' : 'RANKED'}
+            </button>
+          );
+        })}
+      </div>
+
+      {shown === 'casual' ? (
+        <div style={{ fontSize: 12.5, color: MENU.text2, margin: '10px 2px 12px' }}>Casual play · no rank at stake</div>
+      ) : (
+        <div style={{ margin: '10px 2px 12px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <RankBadge standing={standing} loading={loading} compact />
+          <button onClick={onLadder} style={{
+            background: 'none', border: 'none', color: MENU.violet, cursor: 'pointer',
+            fontWeight: 800, fontSize: 11, letterSpacing: '0.06em', padding: 0,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+          }}>{season ? season.season.name.toUpperCase() : 'THE LADDER'} <ArrowRight size={12} /></button>
+        </div>
+      )}
 
       {/* Selected deck */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 12, background: 'rgba(8,8,22,0.55)', border: `1px solid ${MENU.border}` }}>
@@ -2043,18 +2200,31 @@ function MatchmakingPanel({ deckState, deckName, deckCount, deckFaction, deckIss
         </div>
         <button onClick={onChangeDeck} style={{ background: 'none', border: 'none', color: MENU.violet, cursor: 'pointer', fontWeight: 800, fontSize: 11, letterSpacing: '0.06em' }}>CHANGE DECK</button>
       </div>
-      {deckState === 'invalid' && deckIssue && <div style={{ fontSize: 11.5, color: '#FF616F', margin: '8px 2px 0' }}>⚠ {deckIssue}</div>}
+      {deckState === 'invalid' && deckIssue && (
+        <div style={{ fontSize: 11.5, color: '#FF616F', margin: '8px 2px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Warning size={12} /> {deckIssue}
+        </div>
+      )}
 
-      <button onClick={onPlay} disabled={!canPlay} aria-disabled={!canPlay} className="menu-anim"
-        style={{ width: '100%', marginTop: 14, padding: '15px', borderRadius: 12, cursor: canPlay ? 'pointer' : 'not-allowed',
-          fontFamily: MENU_SERIF, fontWeight: 800, fontSize: 17, letterSpacing: '0.06em', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-          color: canPlay ? '#20170a' : '#efe6c9aa', background: canPlay ? `linear-gradient(180deg, ${MENU.goldHi}, ${MENU.gold} 55%, #b8912f)` : 'linear-gradient(180deg,#4a4028,#332b18)',
-          border: `1px solid ${canPlay ? '#8a6d24' : '#5a4c30'}`, boxShadow: canPlay ? `0 8px 26px rgba(230,196,92,0.4)` : 'none', transition: 'transform .15s ease, box-shadow .2s ease' }}
-        onMouseDown={(e) => { if (canPlay) e.currentTarget.style.transform = 'translateY(1px)'; }}
-        onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; }} onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; }}>
-        {canPlay && mIco(<><path d="m14.5 17.5 5-5" /><path d="M3 21l6-6" /><path d="M14 3l7 7-4 4-7-7z" /></>, 18)}
-        {playLabel}
-      </button>
+      {shown === 'ranked' && (
+        <HubRankedDeckNote ranked={rankedDeck} scanning={scanning}
+          onScanChain={onScanChain} onDeckScreen={onDeckScreen} onBoosters={onBoosters} />
+      )}
+
+      {shown === 'casual' ? (
+        <button onClick={onPlay} disabled={!canPlay} aria-disabled={!canPlay} className="menu-anim"
+          style={{ width: '100%', marginTop: 14, padding: '15px', borderRadius: 12, cursor: canPlay ? 'pointer' : 'not-allowed',
+            fontFamily: MENU_SERIF, fontWeight: 800, fontSize: 17, letterSpacing: '0.06em', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            color: canPlay ? '#20170a' : '#efe6c9aa', background: canPlay ? `linear-gradient(180deg, ${MENU.goldHi}, ${MENU.gold} 55%, #b8912f)` : 'linear-gradient(180deg,#4a4028,#332b18)',
+            border: `1px solid ${canPlay ? '#8a6d24' : '#5a4c30'}`, boxShadow: canPlay ? `0 8px 26px rgba(230,196,92,0.4)` : 'none', transition: 'transform .15s ease, box-shadow .2s ease' }}
+          onMouseDown={(e) => { if (canPlay) e.currentTarget.style.transform = 'translateY(1px)'; }}
+          onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; }} onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; }}>
+          {canPlay && mIco(<><path d="m14.5 17.5 5-5" /><path d="M3 21l6-6" /><path d="M14 3l7 7-4 4-7-7z" /></>, 18)}
+          {playLabel}
+        </button>
+      ) : (
+        <RankedQueueControl queue={queue} onDeckScreen={onDeckScreen} onBoosters={onBoosters} />
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 12, fontSize: 12, color: MENU.text2 }}>
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: MENU.success, boxShadow: `0 0 6px ${MENU.success}` }} />
@@ -2064,8 +2234,62 @@ function MatchmakingPanel({ deckState, deckName, deckCount, deckFaction, deckIss
   );
 }
 
-function ActivityPanel({ onViewEvent, mobile }: {
-  onViewEvent: () => void; mobile: boolean;
+/**
+ * The hub's compact version of the lobby's `RankedDeckNote`.
+ *
+ * Same three states, same rule — it NEVER disables the queue button, because
+ * the server is the authority and this snapshot can lag a pack minted seconds
+ * ago. A verified deck says nothing at all: silence is the reward for being
+ * ready, and the panel stays short.
+ */
+function HubRankedDeckNote({ ranked, scanning, onScanChain, onDeckScreen, onBoosters }: {
+  ranked: RankedEligibility | null; scanning: boolean;
+  onScanChain: () => void; onDeckScreen: () => void; onBoosters: () => void;
+}) {
+  // Not known yet, or nothing to say.
+  if (ranked === null || ranked.status === 'ready') return null;
+
+  const link = (label: string, onClick: () => void, key: string) => (
+    <button key={key} onClick={onClick} style={{
+      background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+      color: MENU.goldHi, fontWeight: 800, fontSize: 11, letterSpacing: '0.05em',
+    }}>{label}</button>
+  );
+
+  const body =
+    ranked.status === 'no-deck'
+      ? 'Activate a deck and we will check it against the cards you own before you queue.'
+      // NEVER "your deck is illegal" here. Nobody has looked yet.
+      : ranked.status === 'unknown'
+        ? 'Your cards have not been read from the chain yet, so we cannot tell whether this deck qualifies. Basic Nodes are free either way.'
+        : `Ranked decks use cards you have minted, so the free starter decks stay casual — that is the design, not a fault. You are short ${ranked.missingCopies} cop${ranked.missingCopies === 1 ? 'y' : 'ies'} across ${ranked.missingCards} card${ranked.missingCards === 1 ? '' : 's'}.`;
+
+  return (
+    <div style={{
+      marginTop: 12, padding: '10px 12px', borderRadius: 10,
+      background: 'rgba(230,196,92,0.07)', border: `1px solid ${MENU.border}`,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5, fontWeight: 800, letterSpacing: 1.3, color: MENU.gold }}>
+        <Warning size={13} /> {
+          ranked.status === 'no-deck' ? 'RANKED · NO ACTIVE DECK'
+          : ranked.status === 'unknown' ? 'RANKED · COLLECTION NOT SCANNED'
+          : 'RANKED · CARDS YOU DO NOT OWN YET'
+        }
+      </div>
+      <div style={{ fontSize: 11.5, color: MENU.text2, marginTop: 5, lineHeight: 1.55 }}>{body}</div>
+      <div style={{ display: 'flex', gap: 14, marginTop: 8, flexWrap: 'wrap' }}>
+        {ranked.status === 'no-deck' && link('BUILD A DECK', onDeckScreen, 'deck')}
+        {ranked.status === 'short' && link('OPEN BOOSTERS', onBoosters, 'boosters')}
+        {ranked.status === 'short' && link('EDIT DECK', onDeckScreen, 'edit')}
+        {ranked.status !== 'no-deck' && link(scanning ? 'SCANNING…' : 'SCAN CHAIN', onScanChain, 'scan')}
+      </div>
+    </div>
+  );
+}
+
+function ActivityPanel({ onViewEvent, onLadder, season, standing, loading, mobile }: {
+  onViewEvent: () => void; onLadder: () => void;
+  season: SeasonInfo | null; standing: RankedStanding | null; loading: boolean; mobile: boolean;
 }) {
   const now = useNow(1000);
   const eventMs = nextUtcMidnight() - now;
@@ -2080,11 +2304,23 @@ function ActivityPanel({ onViewEvent, mobile }: {
 
   return (
     <aside aria-label="Activity" style={{ display: 'flex', flexDirection: mobile ? 'row' : 'column', gap: 12, overflowX: mobile ? 'auto' : 'visible' }}>
-      {/* Seasons, LP and placement all came from `/api/ranked/*`, which is a
-          404 on the new backend. Say so rather than render a made-up rank. */}
+      {/* The real ladder: the caller's own standing and the season window,
+          both straight from `/games/ranked/*`. Placements show progress and NO
+          rank, because the server sends none until they are finished. */}
       <ActCard title="RANKED LADDER" mobile={mobile}>
-        <div style={{ fontFamily: MENU_SERIF, fontWeight: 700, fontSize: 16, color: MENU.goldHi }}>COMING SOON</div>
-        <div style={{ fontSize: 12, color: MENU.text2, marginTop: 6, lineHeight: 1.55 }}>{RANKED_UNAVAILABLE_MESSAGE}</div>
+        <RankBadge standing={standing} loading={loading} />
+        {standing?.state === 'placements' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0 2px' }}>
+            <Bar pct={standing.progressPct} />
+            <span style={{ fontSize: 11, color: MENU.text2, whiteSpace: 'nowrap' }}>{standing.played} / {standing.total}</span>
+          </div>
+        )}
+        <div style={{ fontSize: 11.5, color: MENU.text2, marginTop: 6, lineHeight: 1.55 }}>
+          {season ? `${season.season.name} · ${seasonRemaining(season.season.endsAt).text}` : 'Season unavailable right now.'}
+        </div>
+        <button onClick={onLadder} style={{ marginTop: 8, background: 'none', border: 'none', color: MENU.violet, cursor: 'pointer', fontWeight: 800, fontSize: 11.5, letterSpacing: '0.06em', padding: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          VIEW LADDER <ArrowRight size={12} />
+        </button>
       </ActCard>
 
       <ActCard title="DAILY QUEST" mobile={mobile}>
@@ -2121,12 +2357,16 @@ function Bar({ pct }: { pct: number }) {
   </div>;
 }
 
-function NavDock({ onCollection, onBoosters, onMasters, onProfile, onRules, onSettings, mobile }: {
-  onCollection: () => void; onBoosters: () => void; onMasters: () => void; onProfile: () => void; onRules: () => void; onSettings: () => void; mobile: boolean;
+function NavDock({ onCollection, onBoosters, onLadder, onMasters, onProfile, onRules, onSettings, mobile }: {
+  onCollection: () => void; onBoosters: () => void; onLadder: () => void; onMasters: () => void; onProfile: () => void; onRules: () => void; onSettings: () => void; mobile: boolean;
 }) {
   const primary = [
     { label: 'Collection', icon: mIco(<><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z" /><path d="m3 8 9 5 9-5" /><path d="M12 13v8" /></>, 20), onClick: onCollection },
     { label: 'Boosters', icon: mIco(<><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M4 9h16" /><path d="M12 3v18" /></>, 20), onClick: onBoosters },
+    // The ladder is a first-class destination now that there is a service
+    // behind it. The dock already scrolls horizontally, so a sixth primary
+    // item does not change the layout on a narrow screen.
+    { label: 'Ladder', icon: mIco(<><path d="M7 4h10v5a5 5 0 0 1-10 0z" /><path d="M7 5.5H4.5A2.5 2.5 0 0 0 7 10M17 5.5h2.5A2.5 2.5 0 0 1 17 10" /><path d="M12 14v3M8.5 20h7M9.5 20l.5-3h4l.5 3" /></>, 20), onClick: onLadder },
     { label: 'Masters', icon: mIco(<><path d="M6 9a6 6 0 0 0 12 0V4H6Z" /><path d="M6 5H3v2a3 3 0 0 0 3 3" /><path d="M18 5h3v2a3 3 0 0 1-3 3" /><path d="M12 15v4" /><path d="M8 21h8" /></>, 20), onClick: onMasters },
     { label: 'Profile', icon: mIco(<><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>, 20), onClick: onProfile },
   ];
@@ -2166,46 +2406,163 @@ function NavDock({ onCollection, onBoosters, onMasters, onProfile, onRules, onSe
  * EVM-only (its stake token is an ERC-20 read from `wager.getStakes()`), and
  * there is no Solana money path in this backend at all.
  */
-const MASTER_TOKEN_ADDRESS = 'DpPowzjETiU6421ReuwBB8XmDB7sMyB2JGzFLssYpump';
+/**
+ * ── OCVA, the game's token, on Robinhood Chain ──────────────────────────────
+ *
+ * Verified on chain (EIP-155 4663): `name()` is "On Chain Virtual Arena",
+ * `symbol()` is OCVA, `decimals()` is 18. It does NOT exist on Sepolia, which
+ * is why the strip names the network — pasting this into a wallet pointed at
+ * the wrong chain finds nothing.
+ *
+ * This replaces `ContractAddressFooter` and its `MASTER_TOKEN_ADDRESS`
+ * constant, which was a SOLANA address left over from before the project moved
+ * to EVM. That component was rendered nowhere, so it was invisible rather than
+ * wrong — but a stale address sitting one JSX line away from being shown is a
+ * hazard, not dead code, so it is deleted rather than repurposed.
+ */
+const OCVA_TOKEN_ADDRESS = '0x22f147eEf54Be28B0dc162309e6c202D4240B3F0';
+const OCVA_SYMBOL = 'OCVA';
+const OCVA_CHAIN_NAME = 'Robinhood Chain';
+/**
+ * The Dexscreener chart.
+ *
+ * THE ADDRESS IN THIS URL IS THE LIQUIDITY PAIR, NOT THE TOKEN — its `token1()`
+ * is `OCVA_TOKEN_ADDRESS` above. It is a chart link and nothing else; it must
+ * never be presented as an address to copy into a wallet.
+ */
+const OCVA_CHART_URL = 'https://dexscreener.com/robinhood/0xc4D9B15Cf9FFa807A78545c972d07D925Ad5eEe0';
 
-function ContractAddressFooter() {
-  const mobile = useIsMobile();
-  const [copied, setCopied] = useState(false);
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(MASTER_TOKEN_ADDRESS);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    } catch {}
+/** Middle-truncate an address for display. The full value is still copied. */
+function shortenAddress(addr: string, lead = 8, tail = 4): string {
+  return addr.length <= lead + tail + 1 ? addr : `${addr.slice(0, lead)}\u2026${addr.slice(-tail)}`;
+}
+
+/**
+ * Copy text, with a fallback for the places `navigator.clipboard` does not
+ * exist: insecure origins and several in-app browsers. Returns whether it
+ * actually worked, so the caller can say so rather than pretend.
+ */
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* fall through to the legacy path */ }
+  try {
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', '');
+    el.style.position = 'fixed';
+    el.style.opacity = '0';
+    document.body.appendChild(el);
+    el.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(el);
+    return ok;
+  } catch {
+    return false;
   }
+}
+
+/**
+ * The token announcement strip, above the hub's right-hand card stack.
+ *
+ * Deliberately carries NO price, market cap, holder count or supply figure.
+ * Nothing here fetches them, and a hardcoded number would be wrong within the
+ * hour — which is the same "render data we do not have" failure that got the
+ * previous ranked UI deleted.
+ */
+function TokenAnnouncement({ mobile }: { mobile: boolean }) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const explorerUrl = `${ROBINHOOD_EXPLORER_URL}/token/${OCVA_TOKEN_ADDRESS}`;
+
+  async function copy() {
+    const ok = await copyToClipboard(OCVA_TOKEN_ADDRESS);
+    setCopyState(ok ? 'copied' : 'failed');
+    // A failure stays on screen: it comes with the full address to select by
+    // hand, and yanking that away after a second would be worse than useless.
+    if (ok) setTimeout(() => setCopyState('idle'), 1800);
+  }
+
+  const linkStyle: React.CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    fontSize: 11, fontWeight: 800, letterSpacing: '0.06em',
+    color: MENU.violet, textDecoration: 'none',
+  };
+
   return (
-    <div style={{
-      position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 3,
-      padding: mobile ? '6px 10px' : '8px 18px',
-      background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.85) 60%)',
-      display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10,
-      flexWrap: 'wrap',
+    <section aria-label={`${OCVA_SYMBOL} token`} style={{
+      padding: mobile ? 13 : 14, borderRadius: 14,
+      background: `linear-gradient(160deg, rgba(230,196,92,0.13), ${MENU.panel} 62%)`,
+      border: `1px solid ${MENU.borderStrong}`, backdropFilter: 'blur(10px)',
     }}>
-      <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, color: '#ffb347', textShadow: '0 1px 4px #000' }}>
-        $MASTER CA:
-      </span>
-      <button
-        onClick={copy}
-        title="Click to copy"
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.14em', color: MENU.gold }}>TOKEN LIVE</span>
+        <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: MENU.success, boxShadow: `0 0 6px ${MENU.success}` }} />
+        <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em', color: MENU.text2 }}>
+          {OCVA_CHAIN_NAME.toUpperCase()}
+        </span>
+      </div>
+
+      <div style={{ fontFamily: MENU_SERIF, fontWeight: 700, fontSize: 20, color: MENU.text, margin: '5px 0 2px' }}>
+        ${OCVA_SYMBOL}
+      </div>
+      <div style={{ fontSize: 11.5, color: MENU.text2, lineHeight: 1.5 }}>
+        On Chain Virtual Arena — add it to a wallet on {OCVA_CHAIN_NAME}.
+      </div>
+
+      {/* The visible address is middle-truncated so 42 hex characters cannot
+          overflow a phone. The button copies the WHOLE value, and its
+          accessible name spells the whole value out. */}
+      <button onClick={() => { void copy(); }} title={OCVA_TOKEN_ADDRESS}
+        aria-label={`Copy the full ${OCVA_SYMBOL} contract address, ${OCVA_TOKEN_ADDRESS}`}
         style={{
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-          fontSize: mobile ? 10 : 12, color: '#fff', fontWeight: 600,
-          background: 'rgba(20,20,20,0.7)',
-          border: '1px solid rgba(255,179,71,0.45)', borderRadius: 4,
-          padding: mobile ? '3px 6px' : '4px 8px',
-          cursor: 'pointer', letterSpacing: 0.4,
-          maxWidth: '92vw', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}
-      >{MASTER_TOKEN_ADDRESS}</button>
-      <span style={{ fontSize: 11, color: copied ? '#7fffa0' : '#888', minWidth: 50 }}>
-        {copied ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Check size={12} /> copied</span> : '(click to copy)'}
-      </span>
-    </div>
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%', marginTop: 10,
+          padding: '9px 11px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+          background: 'rgba(8,8,22,0.6)',
+          border: `1px solid ${copyState === 'copied' ? MENU.success : copyState === 'failed' ? '#FF616F' : MENU.border}`,
+          color: MENU.text, transition: 'border-color .2s ease',
+        }}>
+        <span aria-hidden style={{
+          flex: 1, minWidth: 0, fontFamily: F.mono, fontSize: mobile ? 12 : 12.5,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{shortenAddress(OCVA_TOKEN_ADDRESS)}</span>
+        <span aria-hidden style={{
+          flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 5,
+          fontSize: 10.5, fontWeight: 800, letterSpacing: '0.06em',
+          color: copyState === 'copied' ? MENU.success : copyState === 'failed' ? '#FF616F' : MENU.text2,
+        }}>
+          {copyState === 'copied' ? <><Check size={13} /> COPIED</>
+            : copyState === 'failed' ? <><Warning size={13} /> FAILED</>
+            : <><Copy size={13} /> COPY</>}
+        </span>
+      </button>
+
+      {/* Copy is not available on insecure origins or in some in-app browsers.
+          Say so, and hand over the full address to select by hand. */}
+      {copyState === 'failed' && (
+        <div role="alert" style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 11, color: '#FF616F', lineHeight: 1.5 }}>
+            This browser would not let us copy. Select the address and copy it by hand:
+          </div>
+          <div style={{
+            marginTop: 5, padding: '7px 9px', borderRadius: 8, userSelect: 'all',
+            fontFamily: F.mono, fontSize: 11, wordBreak: 'break-all', lineHeight: 1.5,
+            background: 'rgba(8,8,22,0.7)', border: `1px solid ${MENU.border}`, color: MENU.text,
+          }}>{OCVA_TOKEN_ADDRESS}</div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 16, marginTop: 10, flexWrap: 'wrap' }}>
+        <a href={OCVA_CHART_URL} target="_blank" rel="noopener noreferrer" style={linkStyle}>
+          <Chart size={13} /> CHART <External size={11} />
+        </a>
+        <a href={explorerUrl} target="_blank" rel="noopener noreferrer" style={linkStyle}>
+          <LinkIcon size={13} /> EXPLORER <External size={11} />
+        </a>
+      </div>
+    </section>
   );
 }
 
@@ -2287,7 +2644,9 @@ function useDebounced<T>(value: T, ms: number): T {
 function ProfilePage({ myName, onBack, onSettings }: { myName: string; onBack: () => void; onSettings: () => void }) {
   const mobile = useIsMobile(920);
   const [prof, setProf] = useState<Profile | null>(null);
-  const [ranked, setRanked] = useState<any | null>(null);
+  // The caller's own ladder standing. This used to be a permanently-null `any`
+  // left over from the ranked service being deleted; it is real again.
+  const [ranked, setRanked] = useState<OwnRankedProfile | null>(null);
   const [decks, setDecks] = useState<DeckEntry[]>([]);
   const [loading, setLoading] = useState(true);
   // Settings -> Account -> "Edit profile" sets this one-shot flag and navigates
@@ -2319,6 +2678,8 @@ function ProfilePage({ myName, onBack, onSettings }: { myName: string; onBack: (
       try {
         await reload();
         await reloadDecks();
+        // A ladder outage must not stop the profile hub from rendering.
+        setRanked(await RankedAPI.getMe().catch(() => null));
       } finally { setLoading(false); }
     })();
   }, [myName, reload, reloadDecks]);
@@ -2377,8 +2738,8 @@ function ProfilePage({ myName, onBack, onSettings }: { myName: string; onBack: (
           gap: 12, padding: mobile ? '12px 12px 32px' : '14px 22px 18px', maxWidth: 1680, width: '100%', margin: '0 auto' }}>
           <IdentityBar
             name={prof?.name ?? myName} avatarUrl={prof?.avatarUrl ?? null}
-            placement={ranked?.placementMatchesRemaining ?? 0}
-            rankLabel={ranked ? formatRankLabel(ranked) : 'Unranked'}
+            placement={ranked?.placement.inPlacements ? ranked.placement.remaining : 0}
+            rankLabel={formatRankLabel(ranked?.rank ?? null)}
             level={level} xpPct={xpPct} xpInto={games - xpPrev} xpRange={xpNext - xpPrev}
             wins={prof?.wins ?? 0} losses={prof?.losses ?? 0} winPct={winPct} games={games}
             favoriteDeckName={activeDeck?.name ?? null} favoriteFaction={deriveFavoriteFaction(favoriteCards)}
@@ -2599,11 +2960,10 @@ function IdentityBar(props: {
 
 // ── Overview tab ────────────────────────────────────────────────────────────
 function OverviewTab({ prof, ranked, winPct, games, favoriteDeck, favoriteFaction, onBuildDeck, mobile }: {
-  prof: Profile | null; ranked: any | null; winPct: number; games: number; level: number; xpPct: number;
+  prof: Profile | null; ranked: OwnRankedProfile | null; winPct: number; games: number; level: number; xpPct: number;
   favoriteDeck: DeckEntry | null; favoriteFaction: { name: string; color: string } | null; onBuildDeck: () => void; mobile: boolean;
 }) {
-  const placementLeft = ranked?.placementMatchesRemaining ?? 0;
-  const placementDone = Math.max(0, 10 - placementLeft);
+  const standing = standingOf(ranked);
   const career = [
     { label: 'Wins', value: prof?.wins ?? 0 }, { label: 'Losses', value: prof?.losses ?? 0 },
     { label: 'Draws', value: prof?.draws ?? 0 }, { label: 'Games', value: games },
@@ -2623,12 +2983,33 @@ function OverviewTab({ prof, ranked, winPct, games, favoriteDeck, favoriteFactio
         </div>
       </HubCard>
 
-      {/* Placement, LP and rank all came from `/api/ranked/*`, which no longer
-          exists. Rendering "Unranked · play ranked matches to earn a rank"
-          would be a promise the backend cannot keep. */}
+      {/* Real rank, real placements. While `placement.inPlacements` is true the
+          server sends NO rank, so neither does this card — it shows how far
+          through placements the player is and nothing else. */}
       <HubCard title="RANKED LADDER">
-        <div style={{ fontSize: 18, fontWeight: 800, color: HUB.goldHi }}>Coming soon</div>
-        <div style={{ fontSize: 12, color: HUB.muted, marginTop: 6, lineHeight: 1.55 }}>{RANKED_UNAVAILABLE_MESSAGE}</div>
+        <RankBadge standing={standing} loading={!ranked && !prof} />
+        {standing?.state === 'placements' && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, margin: '10px 0 6px' }}>
+              <div style={{ flex: 1, height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.10)', overflow: 'hidden' }}>
+                <div style={{ width: `${standing.progressPct}%`, height: '100%', background: `linear-gradient(90deg, ${HUB.gold}, ${HUB.purple})` }} />
+              </div>
+              <span style={{ fontSize: 11, color: HUB.muted, whiteSpace: 'nowrap' }}>{standing.played} / {standing.total}</span>
+            </div>
+            <div style={{ fontSize: 12, color: HUB.muted, lineHeight: 1.55 }}>{placementBlurb(standing)}</div>
+          </>
+        )}
+        {standing?.state === 'ranked' && (
+          <div style={{ fontSize: 12, color: HUB.muted, marginTop: 8, lineHeight: 1.55 }}>
+            {formatRankedRecord(ranked!.record)} this season
+            {standing.leaderboardRank !== null ? ` · #${standing.leaderboardRank} on the ladder` : ''}
+          </div>
+        )}
+        {!standing && (
+          <div style={{ fontSize: 12, color: HUB.muted, marginTop: 8, lineHeight: 1.55 }}>
+            Your ladder standing could not be read just now.
+          </div>
+        )}
       </HubCard>
 
       <HubCard title="FAVORITE DECK">
@@ -2771,7 +3152,7 @@ function CollectionTab({ walletAddress, mobile }: { walletAddress: string | null
 }
 
 // ── Achievements tab ────────────────────────────────────────────────────────
-function AchievementsTab({ prof, ranked, deck, mobile }: { prof: Profile | null; ranked: any | null; deck: string[]; mobile: boolean }) {
+function AchievementsTab({ prof, ranked, deck, mobile }: { prof: Profile | null; ranked: OwnRankedProfile | null; deck: string[]; mobile: boolean }) {
   const achievements = useMemo(() => computeAchievements({ prof, deck, ranked }), [prof, deck, ranked]);
   const earned = achievements.filter((a) => a.earned).length;
   return (
@@ -3562,19 +3943,11 @@ const PROFILE_TOKENS = {
   text:      '#e9eef7',
 };
 
-function formatRankLabel(r: { visibleRank: string; division: number; rankedPoints: number; placementMatchesRemaining?: number }) {
-  if ((r.placementMatchesRemaining ?? 0) > 0) return `Placement (${r.placementMatchesRemaining} left)`;
-  const roman = ['', 'I', 'II', 'III', 'IV'][r.division] ?? '';
-  if (r.visibleRank === 'Mythic') return `Mythic · ${r.rankedPoints} LP`;
-  return `${r.visibleRank} ${roman} · ${r.rankedPoints} LP`;
-}
-function rankGlow(t: string) {
-  return ({
-    Bronze: '#a86a32', Silver: '#c2c2c2', Gold: '#ffd86a',
-    Platinum: '#7debf6', Diamond: '#a3c8ff', Master: '#c084fc',
-    Grandmaster: '#ff5757', Mythic: '#ffaa55',
-  } as Record<string, string>)[t] ?? '#7c5cff';
-}
+// The old local `formatRankLabel` and `rankGlow` are gone. Both encoded a rank
+// shape the server no longer sends (`visibleRank` / `rankedPoints`) and both
+// reassembled a label the server now renders itself — including the Mythic
+// special case, which it knows about and we should not have to. Use
+// `formatRankLabel` and `tierStyle` from `ranked-client.ts`.
 
 function deriveFavoriteFaction(deck: string[]): { name: string; color: string; ink: string; count: number } | null {
   if (!deck.length) return null;
@@ -3855,7 +4228,7 @@ function SectionShell({ title, eyebrow, accent, children }: { title: string; eye
 // ── ACHIEVEMENTS ───────────────────────────────────────────────────────────
 type Achievement = { id: string; icon: IconKey; title: string; description: string; earned: boolean };
 
-function computeAchievements({ prof, deck, ranked }: { prof: Profile | null; deck: string[]; ranked: any | null }): Achievement[] {
+function computeAchievements({ prof, deck, ranked }: { prof: Profile | null; deck: string[]; ranked: OwnRankedProfile | null }): Achievement[] {
   const wins = prof?.wins ?? 0;
   const games = (prof?.wins ?? 0) + (prof?.losses ?? 0) + (prof?.draws ?? 0);
   const deckSize = deck.length;
@@ -3867,9 +4240,11 @@ function computeAchievements({ prof, deck, ranked }: { prof: Profile | null; dec
     { id: 'meme-lord',     icon: 'frog', title: 'Meme Lord',      description: 'Win 25 matches.',         earned: wins >= 25 },
     { id: 'deckbuilder',   icon: 'tools', title: 'Deckbuilder',    description: 'Build a 60-card deck.',  earned: deckSize >= 60 },
     { id: 'nft-collector', icon: 'gem', title: 'NFT Collector', description: 'Link a Solana wallet.',   earned: !!prof?.walletAddress && !prof.walletAddress.startsWith('0x') },
-    { id: 'placed',        icon: 'medal', title: 'Placed',         description: 'Finish placement matches.', earned: !!ranked && (ranked.placementMatchesRemaining ?? 10) === 0 },
-    { id: 'gold-tier',     icon: 'crown', title: 'Gold Tier',      description: 'Reach Gold or higher.',   earned: !!ranked && ['Gold','Platinum','Diamond','Master','Grandmaster','Mythic'].includes(ranked.visibleRank) },
-    { id: 'mythic',        icon: 'orb', title: 'Mythic',         description: 'Climb to Mythic rank.',  earned: ranked?.visibleRank === 'Mythic' },
+    // Read off the live ladder shape: `placement.inPlacements` is the gate and
+    // `rank` is null until it clears, so an unplaced player earns none of these.
+    { id: 'placed',        icon: 'medal', title: 'Placed',         description: 'Finish placement matches.', earned: !!ranked && !ranked.placement.inPlacements },
+    { id: 'gold-tier',     icon: 'crown', title: 'Gold Tier',      description: 'Reach Gold or higher.',   earned: tierIndex(ranked?.rank?.tier) >= tierIndex('Gold') && tierIndex(ranked?.rank?.tier) >= 0 },
+    { id: 'mythic',        icon: 'orb', title: 'Mythic',         description: 'Climb to Mythic rank.',  earned: ranked?.rank?.tier === 'Mythic' },
   ];
 }
 
@@ -4336,7 +4711,7 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
 
 // ── Lobby screen ────────────────────────────────────────────────────────────
 function Lobby({
-  myName, onJoined, onBack, onViewProfile, onSolo, onDeckScreen, onBoosters,
+  myName, onJoined, onBack, onViewProfile, onSolo, onDeckScreen, onBoosters, onLadder,
   linkProblem, onDismissLinkProblem,
 }: {
   myName: string;
@@ -4344,6 +4719,8 @@ function Lobby({
   onBack: () => void;
   onViewProfile: (name: string) => void;
   onSolo: () => void;
+  /** Open the ranked ladder — a real screen again, not a "coming soon" card. */
+  onLadder: () => void;
   /** Send the player to the deck builder — the only fix for `no_active_deck`. */
   onDeckScreen: () => void;
   /**
@@ -4387,6 +4764,22 @@ function Lobby({
 
   const [myProfile, setMyProfile] = useState<Profile | null>(null);
   const [myDecks, setMyDecks] = useState<DeckEntry[]>([]);
+  /**
+   * `false` until `listDecksApi()` has ANSWERED.
+   *
+   * Without this, `myDecks` is `[]` for the frame or two after mount and
+   * `activeDeck` is therefore `null` — which is indistinguishable from "this
+   * player genuinely has no active deck". That one ambiguity is what made the
+   * FREE STARTER DECKS panel appear and then vanish on every visit, and it
+   * would do the same to the ranked deck advisory: a player with a perfectly
+   * good ranked deck would be told for a moment that they have none.
+   *
+   * So: `null`/`[]` no longer carries two meanings. Everything derived from the
+   * deck list gates on this flag and renders NOTHING rather than a verdict it
+   * is about to contradict. A failed load still sets it — an error is an
+   * answer, and leaving the UI in "loading" forever is worse.
+   */
+  const [decksLoaded, setDecksLoaded] = useState(false);
   const activeDeck = useMemo(() => myDecks.find(d => d.isActive) ?? null, [myDecks]);
 
   // Ownership for the ranked advisory. The lobby reads the cheap
@@ -4394,11 +4787,19 @@ function Lobby({
   // explicit button, because it is rate limited to 6 per 5 minutes.
   const collection = useCollection();
   useEffect(() => { void refreshCollection(); }, []);
-  const rankedDeck: RankedEligibility = useMemo(
-    () => evaluateRankedDeck(activeDeck?.cards, { known: ownershipKnown(), ownedCount }),
+  const collectionSettled = useCollectionSettled(collection);
+  /**
+   * `null` means WE DO NOT KNOW YET — the deck list or the ownership snapshot
+   * has not answered. It is deliberately not `{status:'no-deck'}`, which is a
+   * verdict, and a verdict we would have to take back a moment later.
+   */
+  const rankedDeck: RankedEligibility | null = useMemo(
+    () => (decksLoaded && collectionSettled
+      ? evaluateRankedDeck(activeDeck?.cards, { known: ownershipKnown(), ownedCount })
+      : null),
     // `collection` is the subscription that makes this recompute after a sync;
     // the values themselves come from the module's confirmed snapshot.
-    [activeDeck, collection],
+    [activeDeck, collection, decksLoaded, collectionSettled],
   );
   const [scanning, setScanning] = useState(false);
   const scanChain = useCallback(async () => {
@@ -4444,7 +4845,9 @@ function Lobby({
   }, [report]);
 
   const reloadDecks = useCallback(async () => {
-    try { setMyDecks(await listDecksApi()); } catch { /* the deck panel says so */ }
+    try { setMyDecks(await listDecksApi()); }
+    catch { /* the deck panel says so */ }
+    finally { setDecksLoaded(true); }
   }, []);
   useEffect(() => { void reloadDecks(); }, [reloadDecks]);
 
@@ -4554,7 +4957,9 @@ function Lobby({
       // actually pass the server's ownership check — otherwise "find a match"
       // would be a button that can only 400. Our own matches are in this list
       // too; joining one is a `self_challenge`.
-      const candidate = pickQuickMatch(open, myName, rankedDeck.status === 'ready');
+      // `null` (not loaded yet) is treated exactly like "not ready": Quick Match
+      // must never hand a seat to a deck it has not checked.
+      const candidate = pickQuickMatch(open, myName, rankedDeck?.status === 'ready');
       if (candidate) {
         const joined = await lobbyApi.join(candidate.matchID);
         onJoined({
@@ -4737,14 +5142,19 @@ function Lobby({
               })}
             </div>
 
-            <ActiveDeckStrip deck={activeDeck} deckCount={myDecks.length} onOpenDecks={onDeckScreen} />
+            <ActiveDeckStrip deck={activeDeck} deckCount={myDecks.length} loaded={decksLoaded} onOpenDecks={onDeckScreen} />
 
             {/* No active deck? The 5 free starter decks are one click away.
                 They are ordinary 60-card decks, so they go through exactly the
                 same save + activate path as a custom deck — verified against
                 production. This is what makes CASUAL playable without owning
-                a single booster card. */}
-            {!activeDeck && (
+                a single booster card.
+
+                GATED ON `decksLoaded`, not merely on `!activeDeck`: before the
+                deck list answers, every player looks deckless, and this panel
+                would appear and then vanish on every visit. "We do not know
+                yet" renders nothing. */}
+            {decksLoaded && !activeDeck && (
               <StarterDeckPicker
                 busy={busy === 'starter'}
                 onPick={(color) => { void useStarterDeck(color); }}
@@ -4752,7 +5162,7 @@ function Lobby({
             )}
 
             {centerTab === 'quick' && (
-              <QuickMatchPanel busy={busy === 'quick'} onQuickMatch={() => { void quickMatch(); }} />
+              <QuickMatchPanel busy={busy === 'quick'} onQuickMatch={() => { void quickMatch(); }} onLadder={onLadder} />
             )}
             {centerTab === 'create' && (
               <CreateMatchPanel
@@ -4844,10 +5254,29 @@ function ProblemBanner({ problem, onFix, actionLabel, onDismiss }: {
  * `/join` take no deck and attach the caller's ACTIVE one — so the lobby's job
  * is to make it obvious which deck that is before the match starts.
  */
-function ActiveDeckStrip({ deck, deckCount, onOpenDecks }: {
-  deck: DeckEntry | null; deckCount: number; onOpenDecks: () => void;
+function ActiveDeckStrip({ deck, deckCount, loaded, onOpenDecks }: {
+  deck: DeckEntry | null; deckCount: number;
+  /** `false` until the deck list has answered — see `decksLoaded` in `Lobby`. */
+  loaded: boolean;
+  onOpenDecks: () => void;
 }) {
-  const ok = deck !== null && deck.cards.length === DECK_SIZE;
+  const ok = loaded && deck !== null && deck.cards.length === DECK_SIZE;
+  // While the list is loading this strip keeps its shape but makes no claim
+  // about the player's decks, so nothing has to be taken back a frame later.
+  if (!loaded) {
+    return (
+      <div style={{ ...LOBBY_GLASS, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span aria-hidden style={{
+          width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center', flex: 'none',
+          background: 'rgba(159,170,191,0.10)', border: `1px solid ${LOBBY_TOKENS.border}`, color: LOBBY_TOKENS.muted,
+        }}><DeckIcon size={15} /></span>
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <div style={{ fontSize: 10, letterSpacing: 2, color: LOBBY_TOKENS.gold, fontWeight: 800 }}>ACTIVE DECK</div>
+          <div style={{ fontSize: 13, color: LOBBY_TOKENS.muted, marginTop: 4 }}>Loading your decks…</div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{
       ...LOBBY_GLASS, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
@@ -4920,7 +5349,7 @@ function StarterDeckPicker({ busy, onPick }: { busy: boolean; onPick: (c: Color)
 }
 
 /** Join the first match with a free seat, or open one if the lobby is empty. */
-function QuickMatchPanel({ busy, onQuickMatch }: { busy: boolean; onQuickMatch: () => void }) {
+function QuickMatchPanel({ busy, onQuickMatch, onLadder }: { busy: boolean; onQuickMatch: () => void; onLadder: () => void }) {
   return (
     <div style={{ ...LOBBY_GLASS, padding: 18 }}>
       <div style={{
@@ -4937,22 +5366,26 @@ function QuickMatchPanel({ busy, onQuickMatch }: { busy: boolean; onQuickMatch: 
         <Swords size={16} /> {busy ? 'FINDING A MATCH…' : 'FIND A MATCH'}
       </button>
 
-      {/* Ranked has no service behind it — say so instead of offering a queue
-          that would 404. See src/ranked-client.ts for what is missing. */}
-      {!RANKED_AVAILABLE && (
+      {/* Quick Match takes a SEAT in the lobby. The ladder is a QUEUE the
+          server pairs, with LP and a season behind it — a different thing,
+          reached from its own screen rather than mixed into this button. */}
+      <div style={{
+        marginTop: 14, padding: '12px 14px', borderRadius: 10,
+        background: 'rgba(143,92,255,0.08)', border: '1px solid rgba(143,92,255,0.45)',
+      }}>
         <div style={{
-          marginTop: 14, padding: '12px 14px', borderRadius: 10,
-          background: 'rgba(143,92,255,0.08)', border: '1px dashed rgba(143,92,255,0.45)',
-        }}>
-          <div style={{
-            fontSize: 11, fontWeight: 800, letterSpacing: 1.6, color: '#c8a3ff',
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}><Trophy size={14} /> RANKED LADDER · COMING SOON</div>
-          <div style={{ fontSize: 12, color: LOBBY_TOKENS.muted, marginTop: 6, lineHeight: 1.6 }}>
-            {RANKED_UNAVAILABLE_MESSAGE}
-          </div>
+          fontSize: 11, fontWeight: 800, letterSpacing: 1.6, color: '#c8a3ff',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}><Trophy size={14} /> RANKED LADDER</div>
+        <div style={{ fontSize: 12, color: LOBBY_TOKENS.muted, marginTop: 6, lineHeight: 1.6 }}>
+          Climbing is a separate queue: the server pairs you by rating, results
+          move your LP, and the season leaderboard lists everyone who has
+          finished their placement matches.
         </div>
-      )}
+        <button onClick={onLadder} style={{ ...LOBBY_GHOST_BTN, marginTop: 10, padding: '9px 13px', fontSize: 12 }}>
+          <Trophy size={13} /> Open the ladder
+        </button>
+      </div>
     </div>
   );
 }
@@ -5253,9 +5686,27 @@ function MatchModePicker({ mode, setMode }: { mode: OfferedMode; setMode: (m: Of
  * be right, `unowned_cards` comes back and `ProblemBanner` names every card.
  */
 function RankedDeckNote({ ranked, scanning, onScanChain, onDeckScreen, onBoosters }: {
-  ranked: RankedEligibility; scanning: boolean;
+  /** `null` while the deck list or the ownership snapshot is still loading. */
+  ranked: RankedEligibility | null; scanning: boolean;
   onScanChain: () => void; onDeckScreen: () => void; onBoosters: () => void;
 }) {
+  // Not known yet is not a verdict. Hold the panel's shape and say only that.
+  if (ranked === null) {
+    return (
+      <div style={{
+        marginBottom: 12, padding: '12px 14px', borderRadius: 10,
+        background: 'rgba(159,170,191,0.06)', border: `1px solid ${LOBBY_TOKENS.border}`,
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: LOBBY_TOKENS.muted,
+        }}><Hourglass size={14} /> RANKED · CHECKING YOUR DECK</div>
+        <div style={{ fontSize: 12, color: LOBBY_TOKENS.muted, marginTop: 6, lineHeight: 1.6 }}>
+          Reading your active deck and the cards you own.
+        </div>
+      </div>
+    );
+  }
   const ok = ranked.status === 'ready';
   const accent = ok ? LOBBY_TOKENS.green : LOBBY_TOKENS.gold;
   const heading =
@@ -5366,7 +5817,7 @@ function CreateMatchPanel({
 }: {
   unlisted: boolean; setUnlisted: (v: boolean) => void;
   mode: OfferedMode; setMode: (m: OfferedMode) => void;
-  ranked: RankedEligibility; scanning: boolean;
+  ranked: RankedEligibility | null; scanning: boolean;
   onScanChain: () => void; onDeckScreen: () => void; onBoosters: () => void;
   busy: boolean; onCreate: () => void;
 }) {
@@ -5431,7 +5882,7 @@ function ChallengePanel({
 }: {
   target: string; setTarget: (s: string) => void;
   mode: OfferedMode; setMode: (m: OfferedMode) => void;
-  ranked: RankedEligibility; scanning: boolean;
+  ranked: RankedEligibility | null; scanning: boolean;
   onScanChain: () => void; onDeckScreen: () => void; onBoosters: () => void;
   busy: boolean; onSend: () => void;
 }) {
@@ -6811,6 +7262,30 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchLink, signedIn, name, seat, seatChecked]);
 
+  /**
+   * The ranked queue lives at the ROOT, not inside a panel.
+   *
+   * Two reasons, both of which the ladder gets wrong if it lives lower down:
+   *
+   *  1. REFRESH MID-QUEUE. On mount the hook reads `GET /games/ranked/queue`
+   *     once. Because that read is idempotent, a player who reloaded while
+   *     queued is still queued, and a player who was PAIRED while the page was
+   *     reloading gets their pairing back and is seated — whichever view the
+   *     session restored them to. Owning it here is what makes that true for
+   *     the hub, the lobby and the ladder screen alike.
+   *  2. It survives navigation. Queueing from the hub and then opening the
+   *     ladder must not silently drop the ticket.
+   *
+   * Disabled while already seated in a match: there is nothing to queue for,
+   * and the seat handoff would fight the match that is already on screen.
+   */
+  const enterMatchFromQueue = useCallback((s: Seat) => { sess.set('seat', s); setSeat(s); }, []);
+  const rankedQueue = useRankedQueue({
+    enabled: signedIn && profile !== null && seat === null,
+    playerName: profile?.name ?? '',
+    onEnterMatch: enterMatchFromQueue,
+  });
+
   async function logout() {
     sess.del('seat'); sess.del('view');
     // `auth.logout()` revokes the family server-side and always clears locally,
@@ -6892,9 +7367,17 @@ export default function App() {
               ? <MasterquestPage myName={name} onBack={() => goto('landing')} />
             : view === 'view-profile' && viewedProfile
               ? <PublicProfile name={viewedProfile} onBack={() => goto('lobby')} />
-              : view === 'lobby' || view === 'ranked'
-                  // `ranked` is kept only so old deep-links resolve; there is no
-                  // ranked service to route to, so both land in the lobby.
+              // The `ranked` deep-link resolves to the real ladder again.
+              : view === 'ranked'
+                ? <RankedPage
+                    myName={name}
+                    queue={rankedQueue}
+                    onBack={() => goto('landing')}
+                    onDeckScreen={() => { try { window.location.hash = 'decks'; } catch {} goto('profile'); }}
+                    onBoosters={() => goto('boosters')}
+                    onViewProfile={n => { setViewedProfile(n); goto('view-profile'); }}
+                  />
+              : view === 'lobby'
                   ? <Lobby
                       myName={name}
                       onJoined={joinedSeat}
@@ -6903,27 +7386,779 @@ export default function App() {
                       onSolo={() => setSoloSetup(true)}
                       onDeckScreen={() => { try { window.location.hash = 'decks'; } catch {} goto('profile'); }}
                       onBoosters={() => goto('boosters')}
+                      onLadder={() => goto('ranked')}
                       linkProblem={linkProblem}
                       onDismissLinkProblem={() => setLinkProblem(null)}
                     />
-                  : <Landing myName={name} profile={profile} onPlay={() => goto('lobby')} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onSettings={() => goto('settings')} />}
+                  : <Landing myName={name} profile={profile} queue={rankedQueue} onPlay={() => goto('lobby')} onLadder={() => goto('ranked')} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onSettings={() => goto('settings')} />}
     </>
   );
 }
 
-// ── Ranked ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// RANKED
+// ═══════════════════════════════════════════════════════════════════════════
 //
-// `RankedQueuePanel`, `RankBadge` and `RankedHub` lived here. All three read
-// `/api/ranked/*` — profile, season, leaderboard, queue join/leave/status —
-// and every one of those routes is a 404 on the new backend (verified against
-// production). `RankedHub` was already unreachable before this migration; the
-// queue panel was the lobby's "Quick Match" tab.
-//
-// They are deleted rather than stubbed: a rank badge with nothing to render,
-// or a queue button with nothing to queue against, is worse than an honest
-// absence. `QuickMatchPanel` (above) took the tab, and `src/ranked-client.ts`
-// documents exactly what would have to be built server-side to bring the
-// ladder back.
+// The ladder is live on `/games/ranked/*`. Everything below renders what the
+// server actually sends and nothing else: no hidden MMR, no win streak, no
+// queue ETA, and no rank at all for a player still in placements.
+
+/**
+ * Tier + division + LP, or placement progress, or an honest absence.
+ *
+ * The label is the SERVER'S ("Gold II", "Mythic") — never reassembled here,
+ * because Mythic has no division and the server already knows that.
+ */
+function RankBadge({ standing, loading, compact }: {
+  standing: RankedStanding | null;
+  /** The ranked profile is still being read. Say nothing rather than "Unranked". */
+  loading?: boolean;
+  compact?: boolean;
+}) {
+  const pad = compact ? '5px 10px' : '7px 12px';
+  const fontSize = compact ? 12 : 14;
+
+  const shell = (style: TierStyleLike, children: React.ReactNode, icon: React.ReactNode) => (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 8, padding: pad, borderRadius: 999,
+      background: style.fill, border: `1px solid ${style.border}`, color: style.color,
+      fontWeight: 800, fontSize, letterSpacing: '0.04em', lineHeight: 1.2,
+    }}>
+      <span aria-hidden style={{ display: 'inline-flex' }}>{icon}</span>
+      {children}
+    </span>
+  );
+
+  // "We have not looked yet" is not "you have no rank". Both are real; only one
+  // of them is true right now, and rendering the wrong one flashes a lie.
+  if (loading && !standing) {
+    return shell(tierStyle(null), 'LOADING…', <Hourglass size={compact ? 13 : 15} />);
+  }
+  if (!standing) {
+    return shell(tierStyle(null), 'RANK UNAVAILABLE', <Warning size={compact ? 13 : 15} />);
+  }
+  if (standing.state === 'placements') {
+    return shell(tierStyle(null), placementLabel(standing).toUpperCase(), <Hourglass size={compact ? 13 : 15} />);
+  }
+  if (standing.state === 'unranked') {
+    return shell(tierStyle(null), 'UNRANKED', <Shield size={compact ? 13 : 15} />);
+  }
+
+  const { rank } = standing;
+  const st = tierStyle(rank.tier);
+  const icon = rank.tier === 'Mythic' || rank.tier === 'Grandmaster'
+    ? <Crown size={compact ? 13 : 15} />
+    : <Shield size={compact ? 13 : 15} />;
+  return shell(st, (
+    <>
+      {formatRankLabel(rank).toUpperCase()}
+      <span style={{ opacity: 0.75, fontWeight: 700 }}>{formatLp(rank.lp)}</span>
+      {standing.leaderboardRank !== null && (
+        <span style={{ opacity: 0.75, fontWeight: 700 }}>#{standing.leaderboardRank}</span>
+      )}
+    </>
+  ), icon);
+}
+
+/** Structural shape of `tierStyle()`'s result, so `RankBadge` need not import it. */
+type TierStyleLike = { color: string; fill: string; border: string };
+
+// ── The queue ───────────────────────────────────────────────────────────────
+
+/** What `useRankedQueue` hands to the UI. */
+interface RankedQueue {
+  state: QueueState;
+  /** A poll failed. Advisory: a failed GET does not dequeue anybody. */
+  pollError: string;
+  /** The seat handoff failed and is being retried. */
+  handoffError: string;
+  join: () => void;
+  leave: () => void;
+  dismiss: () => void;
+}
+
+/**
+ * Join the ladder queue, watch it, leave it — and hand off to the match.
+ *
+ * ─── THE HANDOFF ───────────────────────────────────────────────────────────
+ * `GET /games/ranked/queue` returns a `match` with your seat but NO
+ * credentials. Those come from the EXISTING `GET /games/:id/seat`, which is the
+ * same call the lobby's join path makes, so there is exactly one way into a
+ * match in this app and this is not a second one.
+ *
+ * That read is a plain database lookup, which makes it idempotent — and that is
+ * what makes REFRESHING MID-QUEUE work. On mount this hook reads the queue
+ * once; a player who was queued is still queued, and a player who was paired
+ * while the page was reloading gets their pairing back and lands in the match
+ * rather than losing it.
+ *
+ * ─── THE POLL ──────────────────────────────────────────────────────────────
+ * The budget is 180 requests per 60s per profile. This polls on a CHAINED
+ * TIMEOUT (never an interval, which would stack requests if one hung) at
+ * `QUEUE_POLL_MS`, makes no request at all while the tab is hidden, stops on
+ * unmount, and backs off to `QUEUE_BACKOFF_MS` on a 429.
+ *
+ * A FAILED POLL NEVER MOVES THE STATE MACHINE. The server-side queue entry is
+ * unaffected by a GET that did not arrive, so a dropped connection must not
+ * tell a queued player they are not queued.
+ */
+function useRankedQueue({ enabled, playerName, onEnterMatch }: {
+  enabled: boolean;
+  playerName: string;
+  onEnterMatch: (seat: Seat) => void;
+}): RankedQueue {
+  const [state, dispatch] = useReducer(queueReducer, IDLE_QUEUE);
+  const [pollError, setPollError] = useState('');
+  const [handoffError, setHandoffError] = useState('');
+
+  // Refs so the loops below do not have to list every changing value as a
+  // dependency and restart themselves on each render.
+  const stateRef = useRef(state); stateRef.current = state;
+  const enterRef = useRef(onEnterMatch); enterRef.current = onEnterMatch;
+  const nameRef = useRef(playerName); nameRef.current = playerName;
+  const retryAfterRef = useRef<number | null>(null);
+
+  /** The resume read. Also the reconnect path — see the note above. */
+  const resume = useCallback(async () => {
+    try {
+      const status = await RankedAPI.getQueueStatusOrIdle();
+      setPollError('');
+      dispatch({ type: 'status', status });
+    } catch (e) {
+      // Best effort. Failing this must never claim the player is not queued.
+      setPollError(errorText(e));
+    }
+  }, []);
+
+  useEffect(() => { if (enabled) void resume(); }, [enabled, resume]);
+
+  const status = state.status;
+  useEffect(() => {
+    if (!enabled) return;
+    if (status !== 'queued' && status !== 'matched') return;
+
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const schedule = () => {
+      if (!alive) return;
+      const delay = queuePollDelayMs(stateRef.current, retryAfterRef.current);
+      if (delay === null) return;
+      timer = setTimeout(() => { void tick(); }, delay);
+    };
+
+    async function tick() {
+      if (!alive) return;
+      // A hidden tab spends none of the rate-limit budget. The timer keeps
+      // running so the queue resumes promptly, but no request goes out.
+      if (typeof document !== 'undefined' && document.hidden) { schedule(); return; }
+      try {
+        const next = await RankedAPI.getQueueStatus();
+        if (!alive) return;
+        retryAfterRef.current = null;
+        setPollError('');
+        dispatch({ type: 'status', status: next });
+      } catch (e) {
+        if (!alive) return;
+        retryAfterRef.current = e instanceof ApiError && e.isRateLimited ? (e.retryAfter ?? 30) : null;
+        setPollError(errorText(e));
+      }
+      schedule();
+    }
+
+    // Coming back to a visible tab should not wait out a full interval.
+    const onVisible = () => {
+      if (typeof document === 'undefined' || document.hidden) return;
+      if (timer) { clearTimeout(timer); timer = null; }
+      void tick();
+    };
+
+    schedule();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [enabled, status]);
+
+  // ── The seat handoff ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (state.status !== 'matched') return;
+    const { matchID } = state.match;
+
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function attempt() {
+      try {
+        const info = await lobbyApi.getSeat(matchID);
+        if (!alive) return;
+        // The queue read is idempotent, so it can keep offering a pairing for a
+        // match that has since ended. Do not throw the player back into one.
+        if (info.status === 'finished' || info.status === 'void') {
+          dispatch({ type: 'reset' });
+          return;
+        }
+        setHandoffError('');
+        enterRef.current(seatFrom(info, nameRef.current));
+        // The machine's work is done; the app owns the seat from here.
+        dispatch({ type: 'reset' });
+      } catch (e) {
+        if (!alive) return;
+        setHandoffError(errorText(e));
+        // Bounded retry — one attempt every few seconds, never a spin.
+        timer = setTimeout(() => { void attempt(); }, 3000);
+      }
+    }
+
+    void attempt();
+    return () => { alive = false; if (timer) clearTimeout(timer); };
+  }, [state]);
+
+  const join = useCallback(() => {
+    const s = stateRef.current.status;
+    if (s === 'joining' || s === 'queued' || s === 'matched' || s === 'leaving') return;
+    setPollError(''); setHandoffError('');
+    dispatch({ type: 'join' });
+    void (async () => {
+      try {
+        // No region. `global` is the default and the only sane choice: the
+        // pairer only pairs WITHIN a region.
+        const ticket = await RankedAPI.joinQueue();
+        dispatch({ type: 'joined', ticket });
+      } catch (e) {
+        dispatch({ type: 'error', error: e });
+      }
+    })();
+  }, []);
+
+  const leave = useCallback(() => {
+    const s = stateRef.current.status;
+    if (s !== 'queued' && s !== 'joining') return;
+    dispatch({ type: 'leave' });
+    void (async () => {
+      try {
+        // `wasQueued: false` is a success — it is what a double-click looks like.
+        await RankedAPI.leaveQueue();
+        dispatch({ type: 'left' });
+      } catch (e) {
+        dispatch({ type: 'error', error: e });
+      }
+    })();
+  }, []);
+
+  const dismiss = useCallback(() => {
+    dispatch({ type: 'reset' });
+    // We may have failed while still queued server-side. Re-read; do not guess.
+    void resume();
+  }, [resume]);
+
+  return { state, pollError, handoffError, join, leave, dismiss };
+}
+
+/**
+ * The queue's one control, in whatever panel is hosting it.
+ *
+ * Every state answers the same question — what is happening, and what can I do
+ * about it — with real numbers only. `queueDepth` and the elapsed wait are
+ * server facts; there is deliberately no estimated wait, because the server
+ * does not send one and inventing one is how a queue starts lying.
+ */
+function RankedQueueControl({ queue, onDeckScreen, onBoosters }: {
+  queue: RankedQueue; onDeckScreen: () => void; onBoosters: () => void;
+}) {
+  const now = useNow(1000);
+  const q = queue.state;
+
+  const plate = (label: string, onClick: (() => void) | null, tone: 'gold' | 'quiet', icon: React.ReactNode) => (
+    <button onClick={onClick ?? undefined} disabled={onClick === null} className="menu-anim"
+      style={{
+        width: '100%', marginTop: 14, padding: '15px', borderRadius: 12,
+        cursor: onClick ? 'pointer' : 'default',
+        fontFamily: MENU_SERIF, fontWeight: 800, fontSize: 16, letterSpacing: '0.06em',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+        color: tone === 'gold' ? '#20170a' : MENU.text,
+        background: tone === 'gold'
+          ? `linear-gradient(180deg, ${MENU.goldHi}, ${MENU.gold} 55%, #b8912f)`
+          : 'rgba(8,8,22,0.6)',
+        border: `1px solid ${tone === 'gold' ? '#8a6d24' : MENU.border}`,
+        boxShadow: tone === 'gold' ? '0 8px 26px rgba(230,196,92,0.4)' : 'none',
+        transition: 'transform .15s ease, box-shadow .2s ease',
+      }}>
+      <span aria-hidden style={{ display: 'inline-flex' }}>{icon}</span>{label}
+    </button>
+  );
+
+  if (q.status === 'matched') {
+    return (
+      <div aria-live="polite" style={{
+        marginTop: 14, padding: '14px 16px', borderRadius: 12,
+        background: 'rgba(57,230,176,0.10)', border: '1px solid rgba(57,230,176,0.5)',
+      }}>
+        <div style={{ fontFamily: MENU_SERIF, fontWeight: 800, fontSize: 16, color: MENU.success }}>
+          OPPONENT FOUND
+        </div>
+        <div style={{ fontSize: 12.5, color: MENU.text2, marginTop: 5, lineHeight: 1.55 }}>
+          {q.match.opponentDisplayName
+            ? <>Paired with <b style={{ color: MENU.text }}>{q.match.opponentDisplayName}</b>. Taking your seat…</>
+            : <>Taking your seat…</>}
+        </div>
+        {queue.handoffError && (
+          <div style={{ fontSize: 11.5, color: '#FFC46B', marginTop: 7, lineHeight: 1.5 }}>
+            {queue.handoffError} Retrying — your match is safe, it is waiting for you.
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (q.status === 'failed') {
+    const b = q.block;
+    return (
+      <div role="alert" style={{
+        marginTop: 14, padding: '14px 16px', borderRadius: 12,
+        background: 'rgba(230,196,92,0.10)', border: `1px solid ${MENU.borderStrong}`,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: MENU.gold }}>
+          <Warning size={14} /> COULD NOT QUEUE
+        </div>
+        <div style={{ fontSize: 12.5, color: MENU.text, marginTop: 6, lineHeight: 1.55 }}>{b.message}</div>
+        {b.issues.length > 0 && (
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 11.5, color: MENU.text2, lineHeight: 1.6 }}>
+            {b.issues.slice(0, 4).map((t, i) => <li key={i}>{t}</li>)}
+          </ul>
+        )}
+        <div style={{ display: 'flex', gap: 14, marginTop: 10, flexWrap: 'wrap' }}>
+          {(b.kind === 'no-deck' || b.kind === 'invalid-deck') && (
+            <button onClick={onDeckScreen} style={queueLinkStyle}>OPEN DECKS</button>
+          )}
+          {b.kind === 'unowned-cards' && (
+            <>
+              <button onClick={onBoosters} style={queueLinkStyle}>OPEN BOOSTERS</button>
+              <button onClick={onDeckScreen} style={queueLinkStyle}>EDIT DECK</button>
+            </>
+          )}
+          <button onClick={queue.dismiss} style={queueLinkStyle}>
+            {b.kind === 'rate-limited' || b.kind === 'network' ? 'TRY AGAIN' : 'DISMISS'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (q.status === 'queued' || q.status === 'leaving') {
+    const elapsed = queueElapsedMs(q, now);
+    return (
+      <div style={{
+        marginTop: 14, padding: '14px 16px', borderRadius: 12,
+        background: 'rgba(139,92,246,0.10)', border: '1px solid rgba(139,92,246,0.45)',
+      }}>
+        <div aria-live="polite" style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.5, color: '#c8a3ff' }}>SEARCHING FOR AN OPPONENT</span>
+          <span style={{ fontFamily: F.mono, fontSize: 20, fontWeight: 700, color: MENU.text }}>{formatWait(elapsed)}</span>
+        </div>
+        <div style={{ fontSize: 12, color: MENU.text2, marginTop: 6, lineHeight: 1.55 }}>
+          {q.status === 'queued' ? queueDepthLabel(q.queueDepth) : 'Leaving the queue…'}
+          {/* The server's own number, shown as its own number. It is not framed
+              as "±N around your rating" — that would be an interpretation of a
+              field the API only names, and the search widens over time anyway. */}
+          {q.status === 'queued' && q.mmrWindow !== null && ` · rating window ${q.mmrWindow}`}
+        </div>
+        {queue.pollError && (
+          <div style={{ fontSize: 11.5, color: '#FFC46B', marginTop: 6, lineHeight: 1.5 }}>
+            {queue.pollError} You are still in the queue — this is just the status check.
+          </div>
+        )}
+        {plate(q.status === 'leaving' ? 'LEAVING…' : 'LEAVE QUEUE', q.status === 'leaving' ? null : queue.leave, 'quiet', <Close size={16} />)}
+      </div>
+    );
+  }
+
+  if (q.status === 'joining') {
+    return plate('JOINING QUEUE…', null, 'gold', <Hourglass size={17} />);
+  }
+
+  return plate('FIND RANKED MATCH', queue.join, 'gold', <Trophy size={17} />);
+}
+
+const queueLinkStyle: React.CSSProperties = {
+  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+  color: MENU.goldHi, fontWeight: 800, fontSize: 11.5, letterSpacing: '0.05em',
+};
+
+// ── The ladder screen ───────────────────────────────────────────────────────
+
+function LadderCard({ title, icon, children, right }: {
+  title: string; icon: React.ReactNode; children: React.ReactNode; right?: React.ReactNode;
+}) {
+  return (
+    <section style={{ ...LOBBY_GLASS, padding: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
+        <h2 style={{
+          margin: 0, fontFamily: '"Cinzel", serif', fontSize: 15, fontWeight: 800, letterSpacing: 1.2,
+          color: LOBBY_TOKENS.gold, display: 'flex', alignItems: 'center', gap: 10,
+        }}><span aria-hidden style={{ display: 'inline-flex' }}>{icon}</span>{title}</h2>
+        {right}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * The season: its window, and the reward COPY exactly as the server words it.
+ *
+ * `season.rewards` is rendered verbatim. It is titles and cardback identifiers
+ * — there is no payout path behind any of it, so nothing here promises one and
+ * nothing counts down to money.
+ */
+function SeasonPanel({ info, standing }: { info: SeasonInfo | null; standing: RankedStanding | null }) {
+  if (!info) {
+    return (
+      <LadderCard title="SEASON" icon={<Castle size={16} />}>
+        <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.muted, lineHeight: 1.6 }}>
+          The season could not be read just now. The ladder itself is unaffected.
+        </div>
+      </LadderCard>
+    );
+  }
+  const { season } = info;
+  const countdown = seasonRemaining(season.endsAt);
+  const pct = seasonProgressPct(season.startedAt, season.endsAt);
+  // The reward for the tier the player is ACTUALLY in. Nothing is shown for a
+  // player in placements: they have no tier, so they have no tier reward.
+  const myTier = standing?.state === 'ranked' ? standing.rank.tier : null;
+  const myReward = myTier ? season.rewards.tiers[myTier] : undefined;
+
+  return (
+    <LadderCard title="SEASON" icon={<Castle size={16} />}
+      right={<span style={{ fontSize: 11.5, fontWeight: 800, color: countdown.ended ? LOBBY_TOKENS.muted : LOBBY_TOKENS.gold }}>{countdown.text}</span>}>
+      <div style={{ fontFamily: '"Cinzel", serif', fontSize: 20, fontWeight: 700, color: '#fff' }}>{season.name}</div>
+      <div style={{ fontSize: 11.5, color: LOBBY_TOKENS.muted, marginTop: 3 }}>
+        {new Date(season.startedAt).toLocaleDateString()} — {new Date(season.endsAt).toLocaleDateString()}
+        {season.balancePatch ? ` · patch ${season.balancePatch}` : ''}
+      </div>
+      <div style={{ height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.10)', overflow: 'hidden', margin: '10px 0 14px' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: `linear-gradient(90deg, ${LOBBY_TOKENS.gold}, ${LOBBY_TOKENS.purple})` }} />
+      </div>
+
+      <div style={{ display: 'grid', gap: 10 }}>
+        {myReward && (
+          <RewardRow icon={<Medal size={15} />} eyebrow={`${myTier} REWARD`}
+            title={myReward.title} body={`Cardback: ${myReward.cardback}`} />
+        )}
+        <RewardRow icon={<Crown size={15} />} eyebrow="CHAMPION"
+          title={season.rewards.champion.title} body={season.rewards.champion.description} />
+      </div>
+
+      <div style={{ fontSize: 11.5, color: LOBBY_TOKENS.muted, marginTop: 12, lineHeight: 1.6 }}>
+        {info.placementMatches} placement matches, then {info.tiers.length} tiers from {info.tiers[0]} to {info.tiers[info.tiers.length - 1]}.
+        Next season starts you back toward the middle (soft reset {season.softResetFactor}).
+      </div>
+    </LadderCard>
+  );
+}
+
+function RewardRow({ icon, eyebrow, title, body }: {
+  icon: React.ReactNode; eyebrow: string; title: string; body: string;
+}) {
+  return (
+    <div style={{
+      display: 'flex', gap: 11, padding: '10px 12px', borderRadius: 10,
+      background: 'rgba(0,0,0,0.28)', border: `1px solid ${LOBBY_TOKENS.border}`,
+    }}>
+      <span aria-hidden style={{ color: LOBBY_TOKENS.gold, display: 'inline-flex', flex: 'none', marginTop: 2 }}>{icon}</span>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1.4, color: LOBBY_TOKENS.gold }}>{eyebrow}</div>
+        <div style={{ fontSize: 13.5, fontWeight: 800, color: '#fff', marginTop: 3 }}>{title}</div>
+        <div style={{ fontSize: 11.5, color: LOBBY_TOKENS.muted, marginTop: 2, lineHeight: 1.55 }}>{body}</div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The season ladder.
+ *
+ * AN EMPTY LIST IS THE CORRECT ANSWER for a season nobody has finished
+ * placements in — which is exactly where the live season is today. It gets a
+ * deliberate empty state, not a table with no rows in it and not an error.
+ */
+function LeaderboardPanel({ board, loading, error, myName, onViewProfile }: {
+  board: RankedLeaderboard | null; loading: boolean; error: string;
+  myName: string; onViewProfile: (name: string) => void;
+}) {
+  return (
+    <LadderCard title="SEASON LEADERBOARD" icon={<Chart size={16} />}
+      right={board && board.entries.length > 0
+        ? <span style={{ fontSize: 11.5, color: LOBBY_TOKENS.muted }}>Top {board.entries.length}</span>
+        : undefined}>
+      {loading ? (
+        <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.muted }}>Reading the ladder…</div>
+      ) : error ? (
+        <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.danger, lineHeight: 1.6 }}>{error}</div>
+      ) : leaderboardIsEmpty(board) ? (
+        <div style={{
+          padding: '22px 18px', borderRadius: 12, textAlign: 'center',
+          background: 'rgba(0,0,0,0.28)', border: `1px dashed ${LOBBY_TOKENS.border}`,
+        }}>
+          <div aria-hidden style={{ color: LOBBY_TOKENS.gold, display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+            <Trophy size={26} />
+          </div>
+          <div style={{ fontFamily: '"Cinzel", serif', fontSize: 16, fontWeight: 700, color: '#fff' }}>
+            {LEADERBOARD_EMPTY_TITLE}
+          </div>
+          <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.muted, marginTop: 7, lineHeight: 1.65, maxWidth: 420, marginInline: 'auto' }}>
+            {LEADERBOARD_EMPTY_BODY}
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {board!.entries.map((e) => {
+            const st = tierStyle(e.tier);
+            const mine = e.displayName === myName;
+            return (
+              <button key={e.profileId} onClick={() => onViewProfile(e.displayName)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 11, width: '100%', textAlign: 'left',
+                  padding: '9px 11px', borderRadius: 10, cursor: 'pointer',
+                  background: mine ? 'rgba(217,184,95,0.12)' : 'rgba(0,0,0,0.26)',
+                  border: `1px solid ${mine ? LOBBY_TOKENS.borderHi : LOBBY_TOKENS.border}`,
+                  color: LOBBY_TOKENS.text, fontFamily: PROFILE_FONT,
+                }}>
+                <span style={{
+                  minWidth: 30, textAlign: 'right', fontFamily: F.mono, fontSize: 13, fontWeight: 800,
+                  color: e.rank <= 3 ? LOBBY_TOKENS.gold : LOBBY_TOKENS.muted,
+                }}>{e.rank}</span>
+                <span aria-hidden style={{ color: st.color, display: 'inline-flex', flex: 'none' }}>
+                  {e.rank === 1 ? <MedalFirst size={16} /> : <Shield size={15} />}
+                </span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 13.5, fontWeight: 800, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {e.displayName}{mine ? ' · you' : ''}
+                  </span>
+                  <span style={{ display: 'block', fontSize: 11, color: LOBBY_TOKENS.muted, marginTop: 2 }}>
+                    {formatRankedRecord(e.record)}
+                  </span>
+                </span>
+                <span style={{ textAlign: 'right', flex: 'none' }}>
+                  {/* The server's own label — Mythic has no division and it knows. */}
+                  <span style={{ display: 'block', fontSize: 12, fontWeight: 800, color: st.color }}>{e.label}</span>
+                  <span style={{ display: 'block', fontSize: 11, color: LOBBY_TOKENS.muted, marginTop: 2 }}>{formatLp(e.lp)}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </LadderCard>
+  );
+}
+
+/** Ranked match history, with the LP delta the generic history does not carry. */
+function RankedHistoryPanel({ matches, loading, error }: {
+  matches: RankedMatchEntry[] | null; loading: boolean; error: string;
+}) {
+  return (
+    <LadderCard title="RANKED HISTORY" icon={<Swords size={16} />}>
+      {loading ? (
+        <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.muted }}>Reading your matches…</div>
+      ) : error ? (
+        <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.danger, lineHeight: 1.6 }}>{error}</div>
+      ) : !matches || matches.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.muted, lineHeight: 1.65 }}>
+          No ranked matches yet. Your first one starts your placements.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {matches.map((m) => {
+            const accent = m.outcome === 'win' ? LOBBY_TOKENS.green
+              : m.outcome === 'loss' ? LOBBY_TOKENS.danger : LOBBY_TOKENS.muted;
+            return (
+              <div key={m.matchID} style={{
+                display: 'flex', alignItems: 'center', gap: 11, padding: '9px 11px', borderRadius: 10,
+                background: 'rgba(0,0,0,0.26)', border: `1px solid ${LOBBY_TOKENS.border}`,
+              }}>
+                <span style={{
+                  width: 34, flex: 'none', textAlign: 'center', fontSize: 11, fontWeight: 800,
+                  letterSpacing: 0.5, color: accent,
+                }}>{m.outcome.toUpperCase()}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {m.opponentDisplayName ?? 'Unknown opponent'}
+                  </span>
+                  <span style={{ display: 'block', fontSize: 11, color: LOBBY_TOKENS.muted, marginTop: 2 }}>
+                    {formatEndReason(m.reason)} · {new Date(m.finishedAt).toLocaleDateString()}
+                  </span>
+                </span>
+                {/* A draw is 0 and is shown as 0 — never "+0", which reads as a gain. */}
+                <span style={{
+                  flex: 'none', fontFamily: F.mono, fontSize: 13, fontWeight: 800,
+                  color: m.lpDelta > 0 ? LOBBY_TOKENS.green : m.lpDelta < 0 ? LOBBY_TOKENS.danger : LOBBY_TOKENS.muted,
+                }}>{formatLpDelta(m.lpDelta)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </LadderCard>
+  );
+}
+
+/** The caller's own standing: rank or placements, record, and the queue. */
+function MyStandingPanel({ me, standing, loading, queue, onDeckScreen, onBoosters }: {
+  me: OwnRankedProfile | null; standing: RankedStanding | null; loading: boolean;
+  queue: RankedQueue; onDeckScreen: () => void; onBoosters: () => void;
+}) {
+  const winPct = me ? rankedWinRate(me.record) : null;
+  return (
+    <LadderCard title="YOUR STANDING" icon={<Trophy size={16} />}>
+      <RankBadge standing={standing} loading={loading} />
+
+      {standing?.state === 'placements' && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, margin: '11px 0 6px' }}>
+            <div style={{ flex: 1, height: 7, borderRadius: 999, background: 'rgba(255,255,255,0.10)', overflow: 'hidden' }}>
+              <div style={{ width: `${standing.progressPct}%`, height: '100%', background: `linear-gradient(90deg, ${LOBBY_TOKENS.gold}, ${LOBBY_TOKENS.purple})` }} />
+            </div>
+            <span style={{ fontSize: 11.5, color: LOBBY_TOKENS.muted, whiteSpace: 'nowrap' }}>
+              {standing.played} / {standing.total}
+            </span>
+          </div>
+          {/* No provisional tier. The server sends no rank here and neither do we. */}
+          <div style={{ fontSize: 12, color: LOBBY_TOKENS.muted, lineHeight: 1.6 }}>{placementBlurb(standing)}</div>
+        </>
+      )}
+
+      {me && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(78px, 1fr))', gap: 8, marginTop: 13 }}>
+          {[
+            { label: 'Wins', value: me.record.wins },
+            { label: 'Losses', value: me.record.losses },
+            { label: 'Draws', value: me.record.draws },
+            { label: 'Win rate', value: winPct === null ? '—' : `${winPct}%` },
+          ].map((s) => (
+            <div key={s.label} style={{ padding: '10px 8px', borderRadius: 10, background: 'rgba(0,0,0,0.28)', border: `1px solid ${LOBBY_TOKENS.border}`, textAlign: 'center' }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: '#fff' }}>{s.value}</div>
+              <div style={{ fontSize: 10, color: LOBBY_TOKENS.muted, letterSpacing: 0.6, marginTop: 3 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {!me && !loading && (
+        <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.muted, marginTop: 10, lineHeight: 1.6 }}>
+          Your ranked profile could not be read just now.
+        </div>
+      )}
+
+      <RankedQueueControl queue={queue} onDeckScreen={onDeckScreen} onBoosters={onBoosters} />
+    </LadderCard>
+  );
+}
+
+/**
+ * The ladder screen.
+ *
+ * Reachable from the hub dock, the matchmaking panel and the lobby — and it is
+ * where the `ranked` deep-link finally resolves to something again.
+ */
+function RankedPage({ myName, queue, onBack, onDeckScreen, onBoosters, onViewProfile }: {
+  myName: string; queue: RankedQueue; onBack: () => void;
+  onDeckScreen: () => void; onBoosters: () => void; onViewProfile: (name: string) => void;
+}) {
+  const mobile = useIsMobile(1000);
+  const [season, setSeason] = useState<SeasonInfo | null>(null);
+  const [me, setMe] = useState<OwnRankedProfile | null>(null);
+  const [board, setBoard] = useState<RankedLeaderboard | null>(null);
+  const [matches, setMatches] = useState<RankedMatchEntry[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [boardError, setBoardError] = useState('');
+  const [historyError, setHistoryError] = useState('');
+
+  // Four independent reads. Each is allowed to fail on its own — a leaderboard
+  // outage must not blank the season panel or the queue button.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      const [s, m, b, h] = await Promise.all([
+        RankedAPI.getSeason().catch(() => null),
+        RankedAPI.getMe().catch(() => null),
+        RankedAPI.getLeaderboard({ limit: 100 }).then(
+          (r) => ({ ok: true as const, r }),
+          (e) => ({ ok: false as const, e }),
+        ),
+        RankedAPI.getMyMatches({ limit: 20 }).then(
+          (r) => ({ ok: true as const, r }),
+          (e) => ({ ok: false as const, e }),
+        ),
+      ]);
+      if (!alive) return;
+      setSeason(s);
+      setMe(m);
+      if (b.ok) { setBoard(b.r); setBoardError(''); } else { setBoard(null); setBoardError(errorText(b.e)); }
+      if (h.ok) { setMatches(h.r); setHistoryError(''); } else { setMatches(null); setHistoryError(errorText(h.e)); }
+      setLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [myName]);
+
+  // The queue is what changes a standing, so re-read it when the player stops
+  // queueing rather than leaving a stale rank on screen.
+  const queueStatus = queue.state.status;
+  useEffect(() => {
+    if (queueStatus !== 'idle') return;
+    let alive = true;
+    RankedAPI.getMe().then((m) => { if (alive) setMe(m); }).catch(() => {});
+    return () => { alive = false; };
+  }, [queueStatus]);
+
+  const standing = standingOf(me);
+
+  return (
+    <div style={{
+      position: 'relative', minHeight: '100vh', color: LOBBY_TOKENS.text, fontFamily: PROFILE_FONT,
+      backgroundImage: 'url(/lobby-bg.png?v=2)', backgroundSize: 'cover',
+      backgroundPosition: 'center', backgroundAttachment: 'fixed',
+    }}>
+      <div aria-hidden style={{
+        position: 'fixed', inset: 0, zIndex: 0,
+        background: 'linear-gradient(180deg, rgba(7,9,15,0.80) 0%, rgba(7,9,15,0.60) 50%, rgba(7,9,15,0.90) 100%)',
+      }} />
+      <div style={{ position: 'relative', zIndex: 1 }}>
+        <header style={{
+          display: 'flex', alignItems: 'center', gap: 12, padding: mobile ? '14px 14px' : '18px 22px',
+          borderBottom: `1px solid ${LOBBY_TOKENS.border}`,
+        }}>
+          <button onClick={onBack} style={LOBBY_GHOST_BTN}><ArrowLeft size={13} /> Back</button>
+          <h1 style={{
+            margin: 0, flex: 1, fontFamily: '"Cinzel", serif', fontSize: mobile ? 19 : 24,
+            fontWeight: 700, letterSpacing: '0.06em', color: LOBBY_TOKENS.gold,
+          }}>RANKED LADDER</h1>
+        </header>
+
+        <div style={{
+          maxWidth: 1240, margin: '0 auto', padding: mobile ? '14px 14px 40px' : '20px 22px 60px',
+          display: 'grid', gap: mobile ? 14 : 18,
+          gridTemplateColumns: mobile ? '1fr' : 'minmax(300px, 380px) minmax(0, 1fr)',
+          alignItems: 'start',
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: mobile ? 14 : 18, minWidth: 0 }}>
+            <MyStandingPanel me={me} standing={standing} loading={loading} queue={queue}
+              onDeckScreen={onDeckScreen} onBoosters={onBoosters} />
+            <SeasonPanel info={season} standing={standing} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: mobile ? 14 : 18, minWidth: 0 }}>
+            <LeaderboardPanel board={board} loading={loading} error={boardError}
+              myName={myName} onViewProfile={onViewProfile} />
+            <RankedHistoryPanel matches={matches} loading={loading} error={historyError} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 
 function Screen({ title, right, children, fullBleed }: { title: string; right?: React.ReactNode; children: React.ReactNode; fullBleed?: boolean }) {
