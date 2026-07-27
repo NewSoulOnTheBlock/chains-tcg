@@ -56,8 +56,15 @@ export async function initDb() {
     ssl: DATABASE_URL.includes('render.com') || DATABASE_URL.includes('supabase') || process.env.PGSSL === '1'
       ? { rejectUnauthorized: false }
       : undefined,
+    // Isolate all game tables in a dedicated `ocva` schema. The database may be
+    // shared with other apps (their tables live in `public`); pinning the
+    // search_path to `ocva` only means our unqualified DDL/queries never collide
+    // with or mutate anything in `public`.
+    options: '-c search_path=ocva',
   });
   try {
+  // Must exist before any unqualified CREATE TABLE resolves against it.
+  await pool.query(`CREATE SCHEMA IF NOT EXISTS ocva`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS profiles (
       name_key   TEXT PRIMARY KEY,
