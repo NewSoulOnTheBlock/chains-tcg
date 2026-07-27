@@ -1347,60 +1347,47 @@ function ExampleTurn({ highlight }: { highlight: (s: string) => React.ReactNode 
 function Landing({
   myName, onPlay, onMasterquest, onBoosters, onProfile, onRules, onLogout,
 }: { myName: string; onPlay: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
-  const mobile = useIsMobile();
+  const [notice, setNotice] = useState('');
+  void myName;
+  // Left-menu hotspots overlaid on the painted menu, positioned as % of the
+  // 1683x935 artwork so they stay glued to the buttons at any window size.
+  const items: { label: string; top: number; onClick: () => void }[] = [
+    { label: 'Play · Ranked',   top: 57.8, onClick: onPlay },
+    { label: 'Play · Unranked', top: 61.4, onClick: onPlay },
+    { label: 'Collection',      top: 65.0, onClick: onBoosters },
+    { label: 'Masters',         top: 68.6, onClick: onMasterquest },
+    { label: 'Profile',         top: 72.2, onClick: onProfile },
+    { label: 'Rules',           top: 75.8, onClick: onRules },
+    { label: 'Settings',        top: 79.4, onClick: () => setNotice('Settings — coming soon.') },
+    { label: 'Exit',            top: 83.0, onClick: onLogout },
+  ];
   return (
-    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: C.bg0, color: C.textHi, fontFamily: F.body }}>
-      <img
-        src="/intro.png"
-        alt="On-Chain Virtual Arena splash art"
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 0, imageRendering: 'pixelated' }}
-      />
-      {/* Cinematic overlay: fade to the page surface + a soft violet ambient glow. */}
-      <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 1,
-        background: `radial-gradient(60% 50% at 18% 78%, rgba(124,92,255,0.22), transparent 70%),
-          linear-gradient(180deg, rgba(10,10,20,0.35) 0%, rgba(10,10,20,0.15) 45%, ${C.bg0} 100%)` }} />
-
-      {/* Top bar */}
-      <div style={{
-        position: 'relative', zIndex: 2,
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: mobile ? '12px 14px' : '16px 24px',
-        gap: 8, flexWrap: 'wrap',
-      }}>
-        <div style={{ fontWeight: 800, fontSize: mobile ? 13 : 16, letterSpacing: 1.5, textShadow: '0 2px 12px rgba(0,0,0,0.7)' }}>
-          <ShinyBrand text="ON-CHAIN VIRTUAL ARENA" />
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{
-            fontSize: 12, color: C.textMid, background: 'rgba(18,18,31,0.6)',
-            border: `1px solid ${C.border}`, borderRadius: 999, padding: '5px 12px',
+    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#07060f', display: 'grid', placeItems: 'center', fontFamily: F.body, color: C.textHi }}>
+      <div style={{ position: 'relative', width: 'min(100vw, calc(100dvh * 1683 / 935))', aspectRatio: '1683 / 935', maxHeight: '100dvh' }}>
+        <img
+          src="/hub-splash.png"
+          alt="On-Chain Virtual Arena — main menu"
+          draggable={false}
+          style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain', userSelect: 'none' }}
+        />
+        {items.map(it => (
+          <button
+            key={it.label}
+            className="ova-hot"
+            title={it.label}
+            onClick={it.onClick}
+            style={{ left: '3.3%', top: `${it.top}%`, width: '8.4%', height: '3.4%', borderRadius: 8 }}
+          />
+        ))}
+        {notice && (
+          <div style={{
+            position: 'absolute', left: '3.3%', top: '87%', zIndex: 5,
+            fontSize: 12, color: '#c9a94a', background: 'rgba(14,12,30,0.92)',
+            border: '1px solid rgba(150,120,255,0.35)', borderRadius: 8, padding: '6px 10px',
             backdropFilter: 'blur(8px)',
-          }}>Signed in as <b style={{ color: C.textHi }}>{myName}</b></span>
-          <UIButton variant="ghost" onClick={onLogout}>Sign out</UIButton>
-        </div>
+          }}>{notice}</div>
+        )}
       </div>
-
-      {/* Action menu */}
-      <div style={{
-        position: 'absolute',
-        left: mobile ? '50%' : '7vw',
-        transform: mobile ? 'translateX(-50%)' : undefined,
-        bottom: mobile ? '5vh' : '8vh',
-        zIndex: 2,
-        display: 'flex', flexDirection: 'column', gap: 10,
-        width: mobile ? 'calc(100vw - 28px)' : 320,
-        maxWidth: 360,
-      }}>
-        <MenuRow primary icon={MENU_ICONS.play} label="Play · Ranked" desc="Queue a live match" onClick={onPlay} />
-        <MenuRow icon={MENU_ICONS.map}  label="Masterquest"  desc="Campaign vs. the 5 chains" onClick={onMasterquest} />
-        <MenuRow icon={MENU_ICONS.box}  label="Boosters"     desc="Open packs, mint cards"   onClick={onBoosters} />
-        <MenuRow icon={MENU_ICONS.user} label="Profile"      desc="Decks, record, wallet"    onClick={onProfile} />
-        <MenuRow icon={MENU_ICONS.book} label="Rules"        desc="How the arena works"      onClick={onRules} />
-        <MenuRow icon={MENU_ICONS.news} label="News"         desc="Latest on X"              onClick={() => window.open('https://x.com/MemeticMasters', '_blank', 'noopener')} />
-      </div>
-
-      {/* $MASTER contract address footer */}
-      <ContractAddressFooter />
     </div>
   );
 }

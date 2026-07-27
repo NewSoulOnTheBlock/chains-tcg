@@ -51,6 +51,13 @@ const CSS = `
 }
 .ocva-input::placeholder { color: ${color.textLo}; }
 .ocva-input:focus { border-color: ${color.accent}; box-shadow: 0 0 0 3px ${color.accentDim}; }
+
+/* Transparent clickable hotspot overlaid on splash artwork (login + hub). */
+.ova-hot { position:absolute; background:transparent; border:2px solid transparent; border-radius:14px;
+  cursor:pointer; padding:0; transition: background ${motion.fast}, border-color ${motion.fast}, box-shadow ${motion.fast}; }
+.ova-hot:hover:not([disabled]) { background: rgba(160,120,255,0.14); border-color: rgba(160,120,255,0.6); box-shadow: 0 0 26px rgba(124,92,255,0.45); }
+.ova-hot:focus-visible { outline:2px solid ${color.accentHi}; outline-offset:2px; }
+.ova-hot[disabled] { cursor: wait; }
 `;
 
 if (typeof document !== 'undefined' && !document.getElementById('ocva-theme')) {
