@@ -15,7 +15,7 @@ import {
   listDecksApi, createDeckApi, updateDeckApi, deleteDeckApi, activateDeckApi, type DeckEntry,
   createChallengeApi, listIncomingChallengesApi, listOutgoingChallengesApi, respondChallengeApi, type Challenge,
 } from './profiles';
-import { connectSolanaWith, connectSolana, getSolanaWallet, detectSolanaWallets, shortAddr, type ConnectedWallet, type SolanaWalletKind } from './wallet';
+import { connectSolanaWith, connectSolana, getSolanaWallet, detectSolanaWallets, connectRobinhoodChain, detectEvmWallet, shortAddr, type ConnectedWallet, type SolanaWalletKind } from './wallet';
 import { CardHover, CardPreview } from './CardPreview';
 import { RankedAPI, tierColors, rankLabel, type PublicRankedProfile, type LeaderboardEntry } from './ranked-client';
 import { Connection } from '@solana/web3.js';
@@ -197,7 +197,7 @@ function Login({ onLogin, onFirstTime }: {
 }) {
   const [name, setName] = useState(local.get<string>('lastName', '') || sess.get<string>('lastName', ''));
   const [err, setErr] = useState('');
-  const [busy, setBusy] = useState<SolanaWalletKind | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [mode, setMode] = useState<'wallet' | 'email' | 'guest'>('wallet');
   const [notice, setNotice] = useState('');
 
@@ -205,6 +205,19 @@ function Login({ onLogin, onFirstTime }: {
     setErr(''); setBusy(kind);
     try {
       const w = await connectSolanaWith(kind);
+      const existing = await getProfileByWalletApi(w.address);
+      if (existing) onLogin(existing.name);
+      else onFirstTime(w);
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
+    } finally { setBusy(null); }
+  }
+
+  // Sign in with MetaMask on Robinhood Chain (EVM).
+  async function doConnectRobinhood() {
+    setErr(''); setBusy('robinhood');
+    try {
+      const w = await connectRobinhoodChain();
       const existing = await getProfileByWalletApi(w.address);
       if (existing) onLogin(existing.name);
       else onFirstTime(w);
@@ -510,43 +523,36 @@ function Login({ onLogin, onFirstTime }: {
 
           {/* Mode-specific content */}
           <div style={{ marginTop: 18 }}>
-            {mode === 'wallet' && (
-              <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
-                {([
-                  { kind: 'phantom',  label: 'Phantom',  gradient: 'linear-gradient(135deg, #AB9FF2 0%, #6E5BD9 100%)', install: 'https://phantom.app/' },
-                  { kind: 'solflare', label: 'Solflare', gradient: 'linear-gradient(135deg, #FFC517 0%, #FC9E37 100%)', install: 'https://solflare.com/' },
-                  { kind: 'backpack', label: 'Backpack', gradient: 'linear-gradient(135deg, #E33E3F 0%, #B8323C 100%)', install: 'https://backpack.app/' },
-                  { kind: 'jupiter',  label: 'Jupiter',  gradient: 'linear-gradient(135deg, #C7F284 0%, #6BCBA2 100%)', install: 'https://jup.ag/mobile' },
-                ] as Array<{ kind: SolanaWalletKind; label: string; gradient: string; install: string }>).map(w => {
-                  const detected = detectSolanaWallets().find(d => d.kind === w.kind)?.installed;
-                  return (
-                    <button
-                      key={w.kind}
-                      className="login-walletcard"
-                      onClick={() => detected ? doConnect(w.kind) : window.open(w.install, '_blank', 'noopener')}
-                      disabled={!!busy}
-                      style={{
-                        background: w.gradient, color: '#0a0a18',
-                        border: 'none', borderRadius: 12,
-                        padding: '14px 14px', cursor: busy ? 'not-allowed' : 'pointer',
-                        textAlign: 'left', fontFamily: 'inherit',
-                        boxShadow: '0 10px 26px rgba(138,43,226,0.32), inset 0 1px 0 rgba(255,255,255,0.25)',
-                        opacity: busy && busy !== w.kind ? 0.45 : 1,
-                        filter: detected ? 'none' : 'grayscale(0.4)',
-                      }}
-                    >
-                      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 3, opacity: 0.85 }}>⚡ SOLANA</div>
-                      <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: 1, marginTop: 4 }}>
-                        {busy === w.kind ? 'Connecting…' : w.label}
-                      </div>
-                      <div style={{ marginTop: 8, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>
-                        {busy === w.kind ? '…' : (detected ? '→ Connect Wallet' : '↗ Install First')}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            {mode === 'wallet' && (() => {
+              const evm = detectEvmWallet();
+              const connecting = busy === 'robinhood';
+              return (
+                <button
+                  className="login-walletcard"
+                  onClick={() => evm.installed ? doConnectRobinhood() : window.open('https://metamask.io/download/', '_blank', 'noopener')}
+                  disabled={!!busy}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 14,
+                    background: 'linear-gradient(135deg, #F6851B 0%, #E2761B 100%)', color: '#1a1408',
+                    border: 'none', borderRadius: 12, padding: '16px 18px',
+                    cursor: busy ? 'not-allowed' : 'pointer', textAlign: 'left', fontFamily: 'inherit',
+                    boxShadow: '0 10px 26px rgba(226,118,27,0.35), inset 0 1px 0 rgba(255,255,255,0.3)',
+                    opacity: busy && !connecting ? 0.5 : 1,
+                  }}
+                >
+                  <span style={{ fontSize: 26 }}>🦊</span>
+                  <span style={{ flex: 1 }}>
+                    <span style={{ display: 'block', fontSize: 11, fontWeight: 800, letterSpacing: 3, opacity: 0.8 }}>◆ ROBINHOOD CHAIN · EVM</span>
+                    <span style={{ display: 'block', fontSize: 18, fontWeight: 800, letterSpacing: 0.5, marginTop: 3 }}>
+                      {connecting ? 'Connecting…' : (evm.installed ? `Sign in with ${evm.label}` : 'Install MetaMask')}
+                    </span>
+                    <span style={{ display: 'block', marginTop: 6, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>
+                      {connecting ? 'Approve in wallet…' : (evm.installed ? '→ Connect on chain 4663' : '↗ Get the extension')}
+                    </span>
+                  </span>
+                </button>
+              );
+            })()}
 
             {mode === 'guest' && (
               <div>

@@ -171,6 +171,66 @@ export async function connectEvm(): Promise<ConnectedWallet> {
   return { chain: 'evm', address };
 }
 
+// ─── Robinhood Chain (EVM L2, Arbitrum Orbit) ──────────────────────────────
+// Chain ID 4663 (0x1237), ETH for gas. Docs: https://docs.robinhood.com/chain
+export const ROBINHOOD_CHAIN = {
+  chainId: 4663,
+  chainIdHex: '0x1237',
+  params: {
+    chainId: '0x1237',
+    chainName: 'Robinhood Chain',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    rpcUrls: [
+      (import.meta as any).env?.VITE_ROBINHOOD_RPC ||
+        'https://robinhood-mainnet.g.alchemy.com/v2/h7y2nsAnaBKL98b6RHAsM',
+    ],
+  },
+};
+
+/** Is an injected EVM wallet (MetaMask etc.) present? */
+export function detectEvmWallet(): { installed: boolean; label: string } {
+  const eth = (typeof window !== 'undefined' ? window.ethereum : undefined) as any;
+  return {
+    installed: !!eth,
+    label: eth?.isMetaMask ? 'MetaMask' : eth ? 'Browser Wallet' : 'MetaMask',
+  };
+}
+
+/**
+ * Connect MetaMask (or any injected EVM wallet) and ensure it is on Robinhood
+ * Chain, adding the network to the wallet if it isn't already there.
+ */
+export async function connectRobinhoodChain(): Promise<ConnectedWallet> {
+  const eth = window.ethereum;
+  if (!eth) throw new Error('No EVM wallet detected. Install MetaMask to sign in on Robinhood Chain.');
+
+  const accounts: string[] = await eth.request({ method: 'eth_requestAccounts' });
+  const address = accounts?.[0] || '';
+  if (!address) throw new Error('MetaMask returned no account.');
+
+  // Make sure the wallet is pointed at Robinhood Chain.
+  try {
+    await eth.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: ROBINHOOD_CHAIN.chainIdHex }],
+    });
+  } catch (e: any) {
+    // 4902 = chain not added to the wallet yet → add it, which also switches.
+    if (e?.code === 4902 || /Unrecognized chain|not been added/i.test(String(e?.message ?? ''))) {
+      await eth.request({
+        method: 'wallet_addEthereumChain',
+        params: [ROBINHOOD_CHAIN.params],
+      });
+    } else if (e?.code === 4001) {
+      throw new Error('Network switch rejected. Approve the Robinhood Chain switch in MetaMask.');
+    } else {
+      throw e;
+    }
+  }
+
+  return { chain: 'evm', address };
+}
+
 export async function connectSolana(): Promise<ConnectedWallet> {
   // Try Phantom first, then Solflare, then Backpack, then Jupiter.
   for (const kind of ['phantom', 'solflare', 'backpack', 'jupiter'] as SolanaWalletKind[]) {
