@@ -281,6 +281,7 @@ function Login({ onLogin, onFirstTime }: {
   const GOLD = '#D4AF37';
   const PURPLE = '#8A2BE2';
   const CYAN = '#4FD1C5';
+  const mobile = useIsMobile();
 
   return (
     <div style={{
@@ -315,7 +316,9 @@ function Login({ onLogin, onFirstTime }: {
 
       {/* Splash art locked to its 1717:916 aspect ratio; every hotspot is a % of
           this box, so the transparent buttons stay glued to the painted ones. */}
-      <div style={{
+      <div style={mobile ? {
+        position: 'relative', display: 'inline-block', lineHeight: 0, maxWidth: '100vw', maxHeight: '100dvh',
+      } : {
         position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
         width: 'max(100vw, calc(100dvh * 1717 / 916))',
         height: 'max(100dvh, calc(100vw * 916 / 1717))',
@@ -325,7 +328,9 @@ function Login({ onLogin, onFirstTime }: {
           src="/login-splash.png"
           alt="On-Chain Virtual Arena — sign in"
           draggable={false}
-          style={{ display: 'block', width: '100%', height: '100%', userSelect: 'none' }}
+          style={mobile
+            ? { display: 'block', maxWidth: '100vw', maxHeight: '100dvh', width: 'auto', height: 'auto', userSelect: 'none' }
+            : { display: 'block', width: '100%', height: '100%', userSelect: 'none' }}
         />
 
         {/* Connect Wallet -> MetaMask on Robinhood Chain */}
@@ -1354,6 +1359,7 @@ function Landing({
 }: { myName: string; onPlay: () => void; onMasterquest: () => void; onBoosters: () => void; onProfile: () => void; onRules: () => void; onLogout: () => void }) {
   const [notice, setNotice] = useState('');
   void myName;
+  const mobile = useIsMobile();
   const ico = (p: React.ReactNode) => (
     <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>{p}</svg>
@@ -1383,13 +1389,17 @@ function Landing({
         alt="Built on Robinhood"
         draggable={false}
         style={{
-          position: 'absolute', zIndex: 2, left: '50%', top: '53%', transform: 'translate(-50%,-50%)',
-          width: 'clamp(150px, 17vw, 260px)', height: 'auto', pointerEvents: 'none', userSelect: 'none',
+          position: 'absolute', zIndex: 2, left: '50%', top: mobile ? '30%' : '53%', transform: 'translate(-50%,-50%)',
+          width: mobile ? 'clamp(130px, 40vw, 200px)' : 'clamp(150px, 17vw, 260px)',
+          height: 'auto', pointerEvents: 'none', userSelect: 'none',
           filter: 'drop-shadow(0 2px 10px rgba(0,0,0,0.5))',
         }}
       />
-      {/* Real menu column overlaid on the left. */}
-      <nav style={{
+      {/* Menu — left column on desktop, full-width bottom stack on mobile. */}
+      <nav style={mobile ? {
+        position: 'absolute', zIndex: 3, left: 0, right: 0, bottom: 'calc(2vh + env(safe-area-inset-bottom))',
+        display: 'flex', flexDirection: 'column', gap: 7, padding: '0 12px', maxHeight: '64vh', overflowY: 'auto',
+      } : {
         position: 'absolute', zIndex: 3,
         left: 'clamp(16px, 4vw, 72px)', top: '50%', transform: 'translateY(-34%)',
         display: 'flex', flexDirection: 'column', gap: 8, width: 236, maxWidth: 'calc(100vw - 32px)',
