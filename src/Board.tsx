@@ -1333,7 +1333,7 @@ function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: str
 
   const siteUrl = (typeof window !== 'undefined' ? window.location.origin : 'https://www.masterstcg.com');
   const imgUrl = `${siteUrl}/share-win.jpg`;
-  const tweetText = `I just won in Memetic Masters TCG! ⚔️\n\nPlay the 5-chain meme card game at ${siteUrl}`;
+  const tweetText = `I just won in On-Chain Virtual Arena! ⚔️\n\nPlay the 5-chain onchain card game at ${siteUrl}`;
   const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
 
   async function downloadImage() {
@@ -1377,7 +1377,7 @@ function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: str
           fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 14,
         }}>Share your win</div>
 
-        <img src={imgUrl} alt="I just won in Memetic Masters"
+        <img src={imgUrl} alt="I just won in On-Chain Virtual Arena"
           style={{
             display: 'block', width: '100%', height: 'auto',
             borderRadius: 6, border: '1px solid rgba(240,179,42,0.4)',

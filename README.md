@@ -1,16 +1,16 @@
-# Memetic Masters TCG
+# On-Chain Virtual Arena
 
-A Magic-the-Gathering-inspired turn-based card game built on **boardgame.io**, themed around 5 blockchains.
+A Robinhood app — a Magic-the-Gathering-inspired turn-based card game built on **boardgame.io**, themed around 5 blockchains and running on Robinhood Chain.
 
 ## The Five Chains
 
 | Chain | Color | Slot |
 |---|---|---|
-| BnB | orange/gold | fast cheap memes, ramp |
-| Solana | purple | burst, draw, removal |
-| Avalanche / AVAX | red | big bodies, lifelink |
-| Ethereum | white | control, removal, finishers |
-| XRP | black | sneaky bodies, hard removal |
+| BnB | gold | aggro-ramp, go-wide |
+| Solana | purple | tempo, burn, bounce |
+| Ethereum | silver | control, removal, finishers |
+| Robinhood | green | lifegain midrange, big bodies |
+| Base | blue | card-advantage aggro, cheap swarm |
 
 ## Rules summary
 

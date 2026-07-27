@@ -94,7 +94,7 @@ function newUid(prefix = 'i'): string {
 }
 
 function emptyGas(): Record<Color, number> {
-  return { bnb: 0, sol: 0, avax: 0, eth: 0, xrp: 0 };
+  return { bnb: 0, sol: 0, eth: 0, robinhood: 0, base: 0 };
 }
 
 function mkInstance(defId: string, opts: Partial<Instance> = {}): Instance {

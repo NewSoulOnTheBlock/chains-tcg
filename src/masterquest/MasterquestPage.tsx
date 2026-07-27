@@ -29,19 +29,19 @@ import {
 
 // ── Chain → colour palette (matches the rest of the game) ──────────────────
 const CHAIN_HEX: Record<Color, string> = {
-  bnb:  '#f3ba2f', // yellow
-  sol:  '#9945ff', // violet
-  avax: '#2bd6a3', // green (Iron Order = Hyperliquid green in this campaign)
-  eth:  '#e8eaf6', // white-ish
-  xrp:  '#1f1f1f', // black
+  bnb:       '#f3ba2f', // yellow
+  sol:       '#9945ff', // violet
+  eth:       '#e8eaf6', // white-ish
+  robinhood: '#00C805', // green
+  base:      '#0052FF', // blue
 };
 
 const CHAIN_LABEL: Record<Color, string> = {
-  bnb:  'Yellow Court',
-  sol:  'Violet Conclave',
-  avax: 'Iron Order',
-  eth:  'Pale Senate',
-  xrp:  'Black Ledger',
+  bnb:       'Yellow Court',
+  sol:       'Violet Conclave',
+  eth:       'Pale Senate',
+  robinhood: 'Green Exchange',
+  base:      'Blue Vanguard',
 };
 
 const ACT_LABEL: Record<keyof typeof ACTS, string> = {

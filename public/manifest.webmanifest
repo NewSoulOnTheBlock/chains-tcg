@@ -1,7 +1,7 @@
 {
-  "name": "Memetic Masters TCG",
-  "short_name": "Memetic Masters",
-  "description": "5-chain MTG-style trading card game built on boardgame.io.",
+  "name": "On-Chain Virtual Arena",
+  "short_name": "OCVA",
+  "description": "A Robinhood app — the 5-chain onchain card arena on Robinhood Chain.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

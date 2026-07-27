@@ -1,16 +1,16 @@
 // src/cards.ts
 // Card catalogue + starter decks for Chains TCG.
 
-export type Color = 'bnb' | 'sol' | 'avax' | 'eth' | 'xrp';
+export type Color = 'bnb' | 'sol' | 'eth' | 'robinhood' | 'base';
 
-export const COLORS: Color[] = ['bnb', 'sol', 'avax', 'eth', 'xrp'];
+export const COLORS: Color[] = ['bnb', 'sol', 'eth', 'robinhood', 'base'];
 
 export const COLOR_META: Record<Color, { name: string; hex: string; ink: string; template?: string; glyph?: string }> = {
-  bnb: { name: 'BnB',         hex: '#f3ba2f', ink: '#000', template: '/template-bnb.jpg', glyph: 'BNB' },
-  sol: { name: 'Solana',      hex: '#9945ff', ink: '#fff', template: '/template-sol.png', glyph: 'SOL' },
-  avax: { name: 'Avalanche',   hex: '#e84142', ink: '#fff', template: '/template-avax.svg', glyph: 'AVAX' },
-  eth: { name: 'Ethereum',    hex: '#f5f5f5', ink: '#222', template: '/template-eth.png', glyph: 'ETH' },
-  xrp: { name: 'XRP',         hex: '#1a1a1a', ink: '#fff', template: '/template-xrp.png', glyph: 'XRP' },
+  bnb:       { name: 'BnB',       hex: '#f3ba2f', ink: '#000', template: '/template-bnb.jpg', glyph: 'BNB' },
+  sol:       { name: 'Solana',    hex: '#9945ff', ink: '#fff', template: '/template-sol.png', glyph: 'SOL' },
+  eth:       { name: 'Ethereum',  hex: '#f5f5f5', ink: '#222', template: '/template-eth.png', glyph: 'ETH' },
+  robinhood: { name: 'Robinhood', hex: '#00C805', ink: '#000', glyph: 'HOOD' },
+  base:      { name: 'Base',      hex: '#0052FF', ink: '#fff', glyph: 'BASE' },
 };
 
 export type CardType = 'node' | 'meme' | 'machine' | 'aura' | 'move';
@@ -79,9 +79,7 @@ const IMAGES: Record<string, string> = {
   // Chain nodes — larger, more artistic official logos hosted locally.
   node_bnb: '/nodes/bnb.png',
   node_sol: '/nodes/sol.png',
-  node_avax: '/nodes/avax.svg',
   node_eth: '/nodes/eth.png',
-  node_xrp: '/nodes/xrp.png',
 
   // BnB memes
   bnb_babydoge: '/cards/babydoge.png?v=1',
@@ -103,15 +101,15 @@ const IMAGES: Record<string, string> = {
   sol_fartcoin: '/cards/fartcoin.png?v=1',
   sol_goat:     cmc(33440),
 
-  // Avalanche memes
-  avax_coq:     '/cards/coq.png?v=1', // armored warrior rooster (COQ Inu)
-  avax_kimbo:   emo('1f415'), // dog (KIMBO)
-  avax_nochill: emo('1f976'), // cold face (NOCHILL)
-  avax_husky:   emo('1f43a'), // wolf face (HUSKY)
-  avax_tech:    emo('1f4bb'), // laptop (TECH)
-  avax_gec:     emo('1f98e'), // lizard (Gecko)
-  avax_meat:    emo('1f969'), // cut of meat (MEAT)
-  avax_ket:     emo('1f408'), // cat (Yellow Ket)
+  // Robinhood memes (meme-stocks — emoji glyph art)
+  robinhood_hood:    emo('1f3f9'), // bow and arrow (Robinhood)
+  robinhood_gme:     emo('1f3ae'), // game controller (GameStop)
+  robinhood_amc:     emo('1f3ac'), // clapper board (AMC)
+  robinhood_kitty:   emo('1f981'), // lion (Roaring Kitty)
+  robinhood_tendies: emo('1f357'), // poultry leg (tendies)
+  robinhood_moon:    emo('1f680'), // rocket (to the moon)
+  robinhood_yolo:    emo('1f3b0'), // slot machine (YOLO)
+  robinhood_ape:     emo('1f98d'), // gorilla (apes)
 
   // Ethereum memes
   eth_andy:     '/cards/andy.png?v=1',
@@ -120,18 +118,17 @@ const IMAGES: Record<string, string> = {
   eth_turbo:    '/cards/turbo.png?v=1',
   eth_mog:      '/cards/mog.png?v=2',
   eth_shib:     '/cards/shib.png?v=1',
-  eth_brett:    '/cards/brett.png?v=1',
   eth_pepe:     '/cards/pepe.png?v=1',
 
-  // XRP memes
-  xrp_phnix:    '/cards/phnix.png?v=1',
-  xrp_fuzzy:    '/cards/fuzzy.png?v=1',
-  xrp_bert:     cmc(34121),
-  xrp_xpm:      cmc(34030),
-  xrp_xpunks:   '/cards/xpunks.png?v=1',
-  xrp_oze:      cmc(34221),
-  xrp_army:     cmc(33966),
-  xrp_xmen:     '/cards/xmen.png?v=1',
+  // Base memes (BRETT keeps its painted art, rest emoji glyph)
+  base_brett:   '/cards/brett.png?v=1',
+  base_degen:   emo('1f3a9'), // top hat (DEGEN)
+  base_toshi:   emo('1f431'), // cat face (TOSHI)
+  base_miggles: emo('1f408'), // cat (MIGGLES)
+  base_keycat:  emo('1f511'), // key (KEYCAT)
+  base_normie:  emo('1f9d1'), // person (NORMIE)
+  base_doginme: emo('1f415'), // dog (DOGINME)
+  base_based:   emo('1f535'), // blue circle (BASED)
 
   // ── BnB machines/moves ──
   bnb_farm:     '/cards/volume_bot.png?v=1',
@@ -151,14 +148,15 @@ const IMAGES: Record<string, string> = {
   sol_bounce:   emo('1f3c3'), // 🏃 runner (Frontrun)
   sol_tgpump:   emo('1f4e2'), // 📢 loudspeaker (Telegram Pump)
 
-  // ── Avalanche machines/moves ──
-  avax_subnet:   emo('1f3d4'), // mountain (Subnet Factory)
-  avax_staking:  emo('2744'),  // snowflake (Validator Set)
-  avax_teleport: emo('1f309'), // bridge (Teleporter Bridge)
-  avax_router:   emo('1f9ed'), // compass (Trader Joe Router)
-  avax_snowball: emo('26c4'),  // snowman (Snowball)
-  avax_rush:     emo('1f3c2'), // snowboarder (Avalanche Rush)
-  avax_finality: emo('2705'),  // check mark (Finality)
+  // ── Robinhood machines/moves/aura ──
+  robinhood_dividend:   emo('1f4b5'), // dollar banknote
+  robinhood_options:    emo('1f4c8'), // chart up
+  robinhood_fractional: emo('1f967'), // pie (fractional slice)
+  robinhood_margin:     emo('1f4b3'), // credit card
+  robinhood_buydip:     emo('1f4c9'), // chart down (buy the dip)
+  robinhood_gamma:      emo('26a1'),  // high voltage (gamma squeeze)
+  robinhood_pfof:       emo('1f9fe'), // receipt (order flow)
+  robinhood_diamond:    emo('1f48e'), // gem (diamond hands)
 
   // ── Ethereum machines/moves ──
   eth_eip1559:  '/cards/smart_contract_suite.png?v=1',
@@ -169,19 +167,19 @@ const IMAGES: Record<string, string> = {
   eth_heal:     '/cards/dca_in.png?v=1',
   eth_exploit:  '/cards/exploit_disclosure.png?v=1',
 
-  // ── XRP machines/moves ──
-  xrp_ledger:   emo('1f4d2'), // 📒 ledger (Indexer Daemon)
-  xrp_lifelink: emo('1f30a'), // 🌊 wave (AMM Pool)
-  xrp_arb:      emo('26a1'),  // ⚡ high voltage (Arbitrage Bot)
-  xrp_algo:     emo('1f9ee'), // 🧮 abacus (Trading Algorithm)
-  xrp_assassin: emo('1f50d'), // 🔍 magnifying glass (Doxx)
-  xrp_strike:   emo('1f40b'), // 🐋 whale (Whale Dump)
+  // ── Base machines/moves/aura ──
+  base_summer:    emo('2600'),  // sun (Onchain Summer)
+  base_frames:    emo('1f5bc'), // framed picture (Farcaster Frames)
+  base_wallet:    emo('1f45b'), // purse (Smart Wallet)
+  base_onramp:    emo('1f6e3'), // motorway (Coinbase Onramp)
+  base_tip:       emo('1fa99'), // coin (Tip DEGEN)
+  base_bridge:    emo('1f309'), // bridge at night (Base Bridge)
+  base_airdrop:   emo('1fa82'), // parachute (Airdrop Szn)
+  base_staybased: emo('1f4aa'), // flexed biceps (Stay Based)
   // ── Auras (Genesis set) — emoji-art for now ──
-  bnb_liquidity:  emo('1f4a7'),   // 💧 droplet (Liquidity Injection)
-  sol_validator:  emo('26a1'),    // ⚡ high voltage (Validator Boost)
-  avax_icebound:  emo('1f512'),   // 🔒 lock (Icebound Stake)
-  eth_shield:     emo('1f6e1'),   // 🛡 shield (Smart Contract Shield)
-  xrp_edge:       emo('2694'),    // ⚔ swords (Validator Edge)
+  bnb_liquidity:  emo('1f4a7'),   // droplet (Liquidity Injection)
+  sol_validator:  emo('26a1'),    // high voltage (Validator Boost)
+  eth_shield:     emo('1f6e1'),   // shield (Smart Contract Shield)
   // ── NFT-linked meme art ──
   eth_sproto_gremlin: '/sproto-gremlin.png',
 };
@@ -304,7 +302,7 @@ function reg(...cs: CardDef[]) {
 }
 
 // Nodes
-reg(N('bnb'), N('sol'), N('avax'), N('eth'), N('xrp'));
+reg(N('bnb'), N('sol'), N('eth'), N('robinhood'), N('base'));
 
 // BnB — fast, cheap, aggressive memes
 reg(
@@ -352,27 +350,27 @@ reg(
   U('sol_validator','sol', 'Validator Boost',  2, 'aura_haste',            'Enchant Meme. Attached Meme has no summoning sickness.'),
 );
 
-// Avalanche — big bodies, lifelink
+// Robinhood — lifegain midrange, sturdy bodies, dividends
 reg(
-  M('avax_coq',     'avax', 'COQ',              1, 1, 2, 'Coq Inu crows across the C-Chain.'),
-  M('avax_kimbo',   'avax', 'KIMBO',            2, 2, 2, 'A snow dog with a community bite.'),
-  M('avax_nochill', 'avax', 'NOCHILL',          2, 1, 4, 'AVAX has no chill, and neither does this Meme.'),
-  M('avax_husky',   'avax', 'HUSKY',            3, 4, 3, 'The old Avalanche sled dog still pulls.'),
-  M('avax_tech',    'avax', 'TECH',             3, 3, 3, 'Pure tech, pure meme, pure red-chain banter.'),
-  M('avax_gec',     'avax', 'GEC',              4, 4, 5, 'Gecko sticks to the wall through every dip.'),
-  M('avax_meat',    'avax', 'MEAT',             5, 5, 5, 'The grill is hot and liquidity is sizzling.'),
-  M('avax_ket',     'avax', 'KET',              6, 7, 7, 'Yellow Ket prowls the snowfields for the final pump.'),
+  M('robinhood_hood',    'robinhood', 'HOOD',     1, 1, 2, 'Payment for order flow IPO\'d the casino.'),
+  M('robinhood_gme',     'robinhood', 'GME',      2, 1, 4, 'Diamond hands. The floor is the ceiling.'),
+  M('robinhood_amc',     'robinhood', 'AMC',      2, 2, 3, 'Apes together strong.'),
+  M('robinhood_kitty',   'robinhood', 'KITTY',    3, 3, 4, 'Roaring Kitty posts a single frame.'),
+  M('robinhood_tendies', 'robinhood', 'TENDIES',  3, 4, 3, 'Chicken tendies, secured.'),
+  M('robinhood_moon',    'robinhood', 'MOON',     4, 4, 5, 'To the moon, no brakes.'),
+  M('robinhood_yolo',    'robinhood', 'YOLO',     5, 6, 4, 'One life, all in on 0DTE calls.'),
+  M('robinhood_ape',     'robinhood', 'APE',      6, 6, 7, 'The whole ape army marches on the shorts.'),
   // Machines
-  A('avax_subnet',  'avax', 'Subnet Factory',  3, 'pump_all_+1+1',         'Custom chains compound your Memes +1/+1.'),
-  A('avax_staking', 'avax', 'Validator Set',   2, 'lifelink_all',          'Staked security heals you when your Memes deal damage.'),
-  A('avax_teleport','avax', 'Teleporter Bridge',4, 'meme_haste',           'Cross-chain messages arrive fast; your Memes have no summoning sickness.'),
-  A('avax_router',  'avax', 'Trader Joe Router',3, 'pump_attackers_+1+0',  'Route through the deepest pools: attacking Memes get +1/+0.'),
+  A('robinhood_dividend',  'robinhood', 'Dividend Reinvestment', 2, 'lifelink_all',        'Reinvested dividends heal you when your Memes deal damage.'),
+  A('robinhood_options',   'robinhood', 'Options Chain',         3, 'pump_attackers_+1+0', 'Leverage: your attacking Memes get +1/+0.'),
+  A('robinhood_fractional','robinhood', 'Fractional Shares',     3, 'on_meme_etb_draw',    'When a Meme enters under you, draw a card (once per turn).'),
+  A('robinhood_margin',    'robinhood', 'Margin Account',        3, 'pump_all_+1+1',       'Leverage the whole book: your Memes get +1/+1.'),
   // Moves
-  X('avax_snowball','avax', 'Snowball',         3, 'destroyMeme',           'A red-chain avalanche buries target Meme.'),
-  X('avax_rush',    'avax', 'Avalanche Rush',   2, 'gainLife4',             'Incentives hit the ecosystem. Gain 4 life.'),
-  X('avax_finality','avax', 'One-Block Finality',2, 'discardRandom',        'Their transaction is finalized out; they discard a random card.'),
+  X('robinhood_buydip', 'robinhood', 'Buy the Dip',    2, 'gainLife4', 'Stack the discount. Gain 4 life.'),
+  X('robinhood_gamma',  'robinhood', 'Gamma Squeeze',  3, 'damage5',   'Dealers scramble to hedge. Deal 5 damage to any target.'),
+  X('robinhood_pfof',   'robinhood', 'Order Flow',     3, 'drawTwo',   'Sell the flow, read the tape. Draw two cards.'),
   // Aura
-  U('avax_icebound','avax', 'Icebound Stake',   2, 'aura_lifelink',         'Enchant Meme. Damage attached Meme deals heals its controller.'),
+  U('robinhood_diamond','robinhood', 'Diamond Hands',  2, 'aura_+0+3', 'Enchant Meme. Attached Meme gets +0/+3.'),
 );
 
 // Ethereum — control, removal, big finishers
@@ -383,7 +381,6 @@ reg(
   M('eth_turbo',   'eth', 'TURBO',             2, 3, 1, 'Painted by a chatbot, listed on Binance.'),
   M('eth_mog',     'eth', 'MOG',               3, 3, 4, 'Mog the lessers.'),
   M('eth_shib',    'eth', 'SHIB',              3, 4, 3, 'The Dogecoin killer that became a brand.'),
-  M('eth_brett',   'eth', 'BRETT',             4, 4, 4, 'Pepe\'s blue friend.'),
   M('eth_pepe',    'eth', 'PEPE',              5, 5, 6, 'The king of ERC-20 memes.'),
   // NFT-linked meme — ETB zaps opp + draws a card (Sproto Gremlin NFT mint)
   ME('eth_sproto_gremlin', 'eth', 'Sproto Gremlin', 2, 2, 2, 'etb_zap_2_and_draw',
@@ -401,27 +398,27 @@ reg(
   U('eth_shield',  'eth', 'Smart Contract Shield', 2, 'aura_+0+3',         'Enchant Meme. Attached Meme gets +0/+3.'),
 );
 
-// XRP — discard, sneak, finishers
+// Base — card-advantage aggro, cheap swarm, onchain summer
 reg(
-  M('xrp_phnix',   'xrp', 'PHNIX',             1, 1, 2, 'Rises from the ledger ashes.'),
-  M('xrp_fuzzy',   'xrp', 'FUZZY',             1, 2, 1, 'Looks cuddly. Bites hard.'),
-  M('xrp_bert',    'xrp', 'BERT',              2, 3, 2, 'Bert never blinks.'),
-  M('xrp_xpm',     'xrp', 'XPM',               2, 2, 2, 'XRP Punks Mafia.'),
-  M('xrp_xpunks',  'xrp', 'XPUNKS',            3, 3, 4, 'XRPL punk energy.'),
-  M('xrp_oze',     'xrp', 'OZE',               3, 4, 2, 'Ozempic season. Cutting fat.'),
-  M('xrp_army',    'xrp', 'ARMY',              4, 5, 3, 'The XRP Army marches.'),
-  M('xrp_xmen',    'xrp', 'XRP-MEN',           5, 5, 5, 'Mutant ledger heroes assemble.'),
+  M('base_degen',   'base', 'DEGEN',    1, 2, 1, 'Tip your way to the top.'),
+  M('base_toshi',   'base', 'TOSHI',    1, 1, 2, 'Coinbase\'s cat mascot, onchain native.'),
+  M('base_brett',   'base', 'BRETT',    2, 3, 2, 'Pepe\'s blue friend, all in on Base.'),
+  M('base_miggles', 'base', 'MIGGLES',  2, 2, 2, 'The Base cat that would not sit down.'),
+  M('base_keycat',  'base', 'KEYCAT',   3, 3, 3, 'Cat on a keyboard, typing the bull case.'),
+  M('base_normie',  'base', 'NORMIE',   3, 4, 2, 'Onboarded from the Coinbase app.'),
+  M('base_doginme', 'base', 'DOGINME',  4, 4, 4, 'Based dog energy.'),
+  M('base_based',   'base', 'BASED',    5, 5, 5, 'Stay based, stay onchain.'),
   // Machines
-  A('xrp_ledger',  'xrp', 'Indexer Daemon',    3, 'on_meme_etb_draw',      'When a Meme enters under you, draw a card (once per turn).'),
-  A('xrp_lifelink','xrp', 'AMM Pool',          2, 'lifelink_all',          'Damage your Memes deal also heals you.'),
-  A('xrp_arb',     'xrp', 'Arbitrage Bot',     4, 'meme_haste',            'Your Memes have no summoning sickness.'),
-  A('xrp_algo',    'xrp', 'Trading Algorithm', 3, 'pump_attackers_+1+0',   'Your attacking Memes get +1/+0.'),
+  A('base_summer', 'base', 'Onchain Summer',   3, 'pump_all_+1+1',       'The whole ecosystem pumps: your Memes get +1/+1.'),
+  A('base_frames', 'base', 'Farcaster Frames', 3, 'on_meme_etb_draw',    'When a Meme enters under you, draw a card (once per turn).'),
+  A('base_wallet', 'base', 'Smart Wallet',     2, 'extra_node_per_turn', 'Gasless onboarding: play one extra Node each turn.'),
+  A('base_onramp', 'base', 'Coinbase Onramp',  4, 'meme_haste',          'Instant fiat rails: your Memes have no summoning sickness.'),
   // Moves
-  X('xrp_assassin','xrp', 'Doxx',              2, 'destroyMeme',           'KOL outs the founder. Destroy target Meme.'),
-  X('xrp_strike',  'xrp', 'Whale Dump',        3, 'damage5',               'Whale unloads at market. Deal 5 damage to any target.'),
-  X('xrp_subpoena','xrp', 'SEC Subpoena',      1, 'mill3',                 'Regulator subpoenas the dev. Opponent mills 3 cards.'),
+  X('base_tip',     'base', 'Tip DEGEN',   3, 'drawTwo',      'Allowance drops in the channel. Draw two cards.'),
+  X('base_bridge',  'base', 'Base Bridge', 2, 'bounceMeme',   'Bridge it back. Return target Meme to its owner\'s hand.'),
+  X('base_airdrop', 'base', 'Airdrop Szn', 3, 'damageAll_1',  'Points go live. Every Meme on the field takes 1 damage.'),
   // Aura
-  U('xrp_edge',    'xrp', 'Validator Edge',    2, 'aura_+3+0',             'Enchant Meme. Attached Meme gets +3/+0.'),
+  U('base_staybased','base', 'Stay Based', 2, 'aura_+3+0',    'Enchant Meme. Attached Meme gets +3/+0.'),
 );
 
 // ── Starter decks ────────────────────────────────────────────────────────────
@@ -441,12 +438,12 @@ export function starterDeck(color: Color): string[] {
 export const STARTER_DECKS: Record<Color, string[]> = {
   bnb: starterDeck('bnb'),
   sol: starterDeck('sol'),
-  avax: starterDeck('avax'),
   eth: starterDeck('eth'),
-  xrp: starterDeck('xrp'),
+  robinhood: starterDeck('robinhood'),
+  base: starterDeck('base'),
 };
 
-export const DEFAULT_MATCHUP: [Color, Color] = ['sol', 'eth'];
+export const DEFAULT_MATCHUP: [Color, Color] = ['base', 'eth'];
 
 // ── Deckbuilding ────────────────────────────────────────────────────────────
 
@@ -501,7 +498,7 @@ export function validateDeck(cards: string[], opts?: { requireSize?: boolean }):
  * color, then 'sol'.
  */
 export function derivePrimaryColor(cards: string[]): Color {
-  const counts: Record<Color, number> = { bnb: 0, sol: 0, avax: 0, eth: 0, xrp: 0 };
+  const counts: Record<Color, number> = { bnb: 0, sol: 0, eth: 0, robinhood: 0, base: 0 };
   let any = false;
   for (const id of cards) {
     const def = CARDS[id]; if (!def) continue;
@@ -515,7 +512,7 @@ export function derivePrimaryColor(cards: string[]): Color {
       counts[def.color]++;
     }
   }
-  let best: Color = 'sol'; let bestN = -1;
+  let best: Color = 'eth'; let bestN = -1;
   for (const c of COLORS) {
     if (counts[c] > bestN) { best = c; bestN = counts[c]; }
   }

@@ -226,7 +226,7 @@ export const SITES: ReadonlyArray<SacredSite> = [
 
   // ───── CRIMSON CREST — Act II ─────────────────────────────────────────
   {
-    id: 'coq_inu_coliseum', index: 7, act: 'pilgrimage', chain: 'avax',
+    id: 'coq_inu_coliseum', index: 7, act: 'pilgrimage', chain: 'robinhood',
     name: 'Coq Inu Coliseum',
     region: 'Crimson Crest · The Frost-Bound Lineage',
     description:
@@ -239,14 +239,14 @@ export const SITES: ReadonlyArray<SacredSite> = [
       bio:
         'The avatar of the Coq Inu egregore. Plays a battle-cry tribal deck that gets stronger ' +
         'every time he loses a card.',
-      botColor: 'avax', difficulty: 'normal',
+      botColor: 'robinhood', difficulty: 'normal',
       quote: '"COCK-A-DOODLE-DUEL."',
     },
     reward: 'Iron Feather (7/15) · A black-and-red feather sharper than any blade.',
     mapPos: { x: 235, y: 600 },
   },
   {
-    id: 'hot_shorts_pit', index: 8, act: 'pilgrimage', chain: 'avax',
+    id: 'hot_shorts_pit', index: 8, act: 'pilgrimage', chain: 'robinhood',
     name: 'The Hot Shorts Pit',
     region: 'Crimson Crest · The Frost-Bound Lineage',
     description:
@@ -259,14 +259,14 @@ export const SITES: ReadonlyArray<SacredSite> = [
       bio:
         'Made his name shorting every memecoin that ever pumped, twice. Plays a punishing control ' +
         'deck that taxes your every move.',
-      botColor: 'avax', difficulty: 'hard',
+      botColor: 'robinhood', difficulty: 'hard',
       quote: '"Funding is negative. You\'re still paying. I love it when that happens."',
     },
     reward: 'Bleeding Margin Chit (8/15) · A red wax seal that drips, but never quite empties.',
     mapPos: { x: 445, y: 545 },
   },
   {
-    id: 'icebound_citadel_of_joe', index: 9, act: 'pilgrimage', chain: 'avax',
+    id: 'icebound_citadel_of_joe', index: 9, act: 'pilgrimage', chain: 'robinhood',
     name: 'Icebound Citadel of Joe',
     region: 'Crimson Crest · The Frost-Bound Lineage',
     description:
@@ -279,7 +279,7 @@ export const SITES: ReadonlyArray<SacredSite> = [
       bio:
         'Mythic Hyperliquid figure. Half believe he was carved from the throne itself. Plays a ' +
         'perfectly-tuned mid-range deck with no apparent weakness and no obvious emotion.',
-      botColor: 'avax', difficulty: 'hard',
+      botColor: 'robinhood', difficulty: 'hard',
       quote: '"You are paying funding. I am collecting. Begin."',
     },
     reward: 'Frostshard Crown (9/15) · A circlet of unmelting ice. Marks the end of Act II.',
@@ -353,7 +353,7 @@ export const SITES: ReadonlyArray<SacredSite> = [
 
   // ───── BLACK LEDGER — Act III ─────────────────────────────────────────
   {
-    id: 'quiet_court_of_larsen', index: 13, act: 'coronation', chain: 'xrp',
+    id: 'quiet_court_of_larsen', index: 13, act: 'coronation', chain: 'base',
     name: 'Quiet Court of Larsen',
     region: 'Black Ledger · The Patient Court',
     description:
@@ -366,14 +366,14 @@ export const SITES: ReadonlyArray<SacredSite> = [
       bio:
         'A founder-judge of the Black Ledger who has built an entire deck around delayed reveals. ' +
         'Plays a control deck that hides almost every card until the resolve phase.',
-      botColor: 'xrp', difficulty: 'hard',
+      botColor: 'base', difficulty: 'hard',
       quote: '(He does not say anything. He sets a card face-down. He waits.)',
     },
     reward: 'Silent Gavel (13/15) · A black stone gavel that strikes without sound.',
     mapPos: { x: 600, y: 845 },
   },
   {
-    id: 'vault_of_the_drained', index: 14, act: 'coronation', chain: 'xrp',
+    id: 'vault_of_the_drained', index: 14, act: 'coronation', chain: 'base',
     name: 'Vault of the Drained',
     region: 'Black Ledger · The Patient Court',
     description:
@@ -386,7 +386,7 @@ export const SITES: ReadonlyArray<SacredSite> = [
       bio:
         'Former Black Ledger councillor. Self-redacted from all chain records. Plays a milling, ' +
         'discarding, hand-attack deck that drowns you in your own deck.',
-      botColor: 'xrp', difficulty: 'hard',
+      botColor: 'base', difficulty: 'hard',
       quote: '"You\'ll forget this duel by tomorrow. I made sure of it."',
     },
     reward: 'Drained Tessera (14/15) · A thin black tile that weighs more than it should.',
@@ -395,7 +395,7 @@ export const SITES: ReadonlyArray<SacredSite> = [
 
   // ───── CIPHER PEAK — The Final Ascent ─────────────────────────────────
   {
-    id: 'cipher_peak', index: 15, act: 'coronation', chain: 'xrp',
+    id: 'cipher_peak', index: 15, act: 'coronation', chain: 'base',
     name: 'The Ascent to Cipher Peak',
     region: 'Cipher Peak · The First Master\'s Last Meditation',
     description:
@@ -410,7 +410,7 @@ export const SITES: ReadonlyArray<SacredSite> = [
         'The ancient who carved order from the Mempool. Has been meditating at Cipher Peak\'s ' +
         'summit for ten cycles. Will rise to duel exactly once. Plays a flawless five-colour ' +
         'control deck that contains one of every Master\'s signature card.',
-      botColor: 'xrp', difficulty: 'hard',
+      botColor: 'base', difficulty: 'hard',
       quote: '"You walked all five Chains and belonged to none. Show me the Aetherweb you remember."',
     },
     reward:

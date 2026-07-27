@@ -43,7 +43,7 @@ import Iridescence from './Iridescence';
 // In prod the React build is served by the same Node server, so use same origin.
 const SERVER_BASE = (import.meta.env.VITE_SERVER_BASE as string | undefined) ?? '';
 const GAME_NAME = ChainsTCG.name!;
-const COLOR_ORDER: Color[] = ['bnb', 'sol', 'avax', 'eth', 'xrp'];
+const COLOR_ORDER: Color[] = ['bnb', 'sol', 'eth', 'robinhood', 'base'];
 
 const lobby = new LobbyClient({ server: SERVER_BASE || undefined });
 
@@ -138,6 +138,59 @@ const LOGIN_NAMES = [
   'NodeShaman', 'AlphaSeer', 'PixelOracle', 'ShardSorcerer', 'FrogLord',
 ];
 
+/** Gold interlocking geometric emblem for the login hero. */
+function LoginEmblem({ size = 92 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" aria-hidden
+      style={{ filter: 'drop-shadow(0 4px 16px rgba(0,0,0,0.65))' }}>
+      <defs>
+        <linearGradient id="ova-gold" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#ffe9a8" />
+          <stop offset="0.5" stopColor="#d9b24a" />
+          <stop offset="1" stopColor="#8a6a16" />
+        </linearGradient>
+      </defs>
+      <path d="M50 6 L86 34 L86 50 L50 22 L14 50 L14 34 Z" fill="url(#ova-gold)" />
+      <path d="M50 44 L86 72 L86 88 L50 60 L14 88 L14 72 Z" fill="url(#ova-gold)" opacity="0.9" />
+      <path d="M50 33 L59 44 L50 55 L41 44 Z" fill="#a855f7" />
+      <path d="M50 33 L59 44 L50 55 L41 44 Z" fill="none" stroke="#e9d5ff" strokeWidth="0.9" />
+    </svg>
+  );
+}
+
+/** Decorative, non-interactive TCG card used to frame the login hero (desktop only). */
+function LoginDecoCard({ cardName, klass, cost, atk, def, hue, style }: {
+  cardName: string; klass: string; cost: number; atk: number; def: number; hue: number;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <div style={{
+      width: 150, height: 214, borderRadius: 12, padding: 8, position: 'relative',
+      background: `linear-gradient(160deg, hsl(${hue} 45% 16%), hsl(${hue} 55% 8%))`,
+      border: '1px solid rgba(212,175,55,0.55)',
+      boxShadow: '0 26px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06)',
+      color: '#e8e2d0', fontFamily: 'inherit',
+      ...style,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{
+          width: 22, height: 22, borderRadius: '50%', fontWeight: 900, fontSize: 12,
+          background: 'linear-gradient(180deg,#ffe9a8,#b98f2b)', color: '#1a1408',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>{cost}</div>
+      </div>
+      <div style={{ marginTop: 6, fontSize: 10, fontWeight: 800, letterSpacing: 1, textAlign: 'center', color: '#f0e6c8' }}>{cardName}</div>
+      <div style={{
+        marginTop: 6, height: 96, borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)',
+        background: `radial-gradient(circle at 50% 38%, hsl(${hue} 70% 48% / .55), transparent 70%), linear-gradient(180deg, hsl(${hue} 40% 24%), hsl(${hue} 40% 10%))`,
+      }} />
+      <div style={{ marginTop: 6, fontSize: 8, fontWeight: 800, letterSpacing: 2, textAlign: 'center', color: '#c9a94a', textTransform: 'uppercase' }}>{klass}</div>
+      <div style={{ position: 'absolute', left: 9, bottom: 6, fontSize: 12, fontWeight: 900, color: '#8fd0ff' }}>{atk}</div>
+      <div style={{ position: 'absolute', right: 9, bottom: 6, fontSize: 12, fontWeight: 900, color: '#ff9a6a' }}>{def}</div>
+    </div>
+  );
+}
+
 function Login({ onLogin, onFirstTime }: {
   onLogin: (name: string) => void;
   onFirstTime: (wallet: ConnectedWallet) => void;
@@ -145,6 +198,8 @@ function Login({ onLogin, onFirstTime }: {
   const [name, setName] = useState(local.get<string>('lastName', '') || sess.get<string>('lastName', ''));
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState<SolanaWalletKind | null>(null);
+  const [mode, setMode] = useState<'wallet' | 'email' | 'guest'>('wallet');
+  const [notice, setNotice] = useState('');
 
   async function doConnect(kind: SolanaWalletKind) {
     setErr(''); setBusy(kind);
@@ -349,84 +404,114 @@ function Login({ onLogin, onFirstTime }: {
         })}
       </div>
 
-      {/* Content grid */}
-      <div style={{
-        position: 'relative', zIndex: 2,
-        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '40px 22px',
-      }}>
-        <div style={{
-          display: 'grid', gap: 36, alignItems: 'center',
-          gridTemplateColumns: 'minmax(0, 1fr)',
-          maxWidth: 1180, width: '100%',
-        }} className="login-layout">
-          <style>{`
-            @media (min-width: 980px) {
-              .login-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 560px) !important; }
-              .login-char { display: flex !important; }
-            }
-          `}</style>
+      {/* Bottom-center arena sigil glow */}
+      <div aria-hidden style={{
+        position: 'fixed', left: '50%', bottom: '-190px', transform: 'translateX(-50%)',
+        width: 760, height: 760, borderRadius: '50%', zIndex: 1, pointerEvents: 'none',
+        background: 'radial-gradient(circle, rgba(138,43,226,0.35), transparent 62%)',
+      }} />
+      <div aria-hidden style={{
+        position: 'fixed', left: '50%', bottom: '-380px', transform: 'translateX(-50%)',
+        width: 560, height: 560, borderRadius: '50%', zIndex: 1, pointerEvents: 'none',
+        border: '1px solid rgba(168,120,255,0.16)',
+        boxShadow: '0 0 0 60px rgba(168,120,255,0.045), 0 0 0 120px rgba(168,120,255,0.03)',
+      }} />
 
-          {/* Character artwork (desktop) */}
-          <div className="login-char login-fadein" style={{
-            display: 'none', justifyContent: 'center', alignItems: 'center',
-            position: 'relative', minHeight: 480,
-          }}>
-            <div style={{
-              position: 'absolute', width: 460, height: 460,
-              background: `radial-gradient(circle, ${PURPLE}33 0%, transparent 65%)`,
-              filter: 'blur(8px)',
-            }} />
-            <img src="/intro.png" alt="" style={{
-              position: 'relative', zIndex: 1,
-              maxWidth: '100%', maxHeight: '70vh', width: 'auto',
-              borderRadius: 18,
-              filter: `drop-shadow(0 18px 38px ${PURPLE}55) drop-shadow(0 4px 18px ${GOLD}33)`,
-              animation: 'loginIdleFloat 6s ease-in-out infinite',
-            }} />
+      {/* Decorative side cards (wide desktop only) */}
+      <div className="login-deco" style={{ display: 'none' }}>
+        <div style={{ position: 'fixed', left: '3vw', top: '20%', zIndex: 2, transform: 'rotate(-9deg)' }}>
+          <LoginDecoCard cardName="VOID WARDEN" klass="Legendary" cost={6} atk={8} def={7} hue={270} />
+        </div>
+        <div style={{ position: 'fixed', left: '11vw', top: '42%', zIndex: 2, transform: 'rotate(-4deg)' }}>
+          <LoginDecoCard cardName="CELESTIAL PALADIN" klass="Guardian" cost={4} atk={7} def={5} hue={45} />
+        </div>
+        <div style={{ position: 'fixed', right: '3vw', top: '18%', zIndex: 2, transform: 'rotate(8deg)' }}>
+          <LoginDecoCard cardName="ARCANE SOVEREIGN" klass="Mage" cost={5} atk={8} def={7} hue={210} />
+        </div>
+        <div style={{ position: 'fixed', right: '11vw', top: '43%', zIndex: 2, transform: 'rotate(4deg)' }}>
+          <LoginDecoCard cardName="EMBER REAVER" klass="Assassin" cost={5} atk={8} def={5} hue={12} />
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{
+        position: 'relative', zIndex: 3,
+        minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center',
+        padding: '46px 22px 104px',
+      }}>
+        <style>{`
+          @media (min-width: 1240px) { .login-deco { display: block !important; } }
+          @media (max-width: 640px) { .ova-tiles { grid-template-columns: 1fr !important; } }
+        `}</style>
+
+        {/* Emblem + title */}
+        <div className="login-fadein" style={{ textAlign: 'center' }}>
+          <LoginEmblem size={90} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 10 }}>
+            <span style={{ width: 46, height: 1, background: `linear-gradient(90deg, transparent, ${GOLD})` }} />
+            <span style={{ fontSize: 13, letterSpacing: 8, color: '#e7c96a', fontWeight: 700 }}>ON-CHAIN</span>
+            <span style={{ width: 46, height: 1, background: `linear-gradient(90deg, ${GOLD}, transparent)` }} />
+          </div>
+          <div style={{
+            fontFamily: '"Impact", "Haettenschweiler", "Arial Narrow Bold", "Inter", system-ui, sans-serif',
+            fontWeight: 900, fontSize: 'clamp(46px, 8vw, 104px)', lineHeight: 0.9, letterSpacing: 2,
+            marginTop: 6, textTransform: 'uppercase',
+            background: 'linear-gradient(180deg, #ffffff 0%, #dcdce6 46%, #9aa0b4 100%)',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+            filter: 'drop-shadow(0 3px 10px rgba(0,0,0,0.65))',
+          }}>Virtual Arena</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+            <span style={{ flex: '0 0 56px', height: 1, background: `linear-gradient(90deg, transparent, ${GOLD}88)` }} />
+            <span style={{ color: '#c9a94a', fontSize: 11 }}>◆</span>
+            <span style={{ fontSize: 12, letterSpacing: 5, color: '#c9a94a', fontWeight: 700 }}>BLOCKCHAIN TRADING CARD GAME</span>
+            <span style={{ color: '#c9a94a', fontSize: 11 }}>◆</span>
+            <span style={{ flex: '0 0 56px', height: 1, background: `linear-gradient(90deg, ${GOLD}88, transparent)` }} />
+          </div>
+        </div>
+
+        {/* Login panel */}
+        <div className="login-fadein" style={{
+          marginTop: 30, width: '100%', maxWidth: 760,
+          background: 'rgba(14,12,30,0.72)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+          border: '1px solid rgba(150,120,255,0.18)', borderRadius: 18,
+          padding: '26px 26px 22px',
+          boxShadow: '0 24px 70px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)',
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ color: '#b794f6', letterSpacing: 4, fontWeight: 800, fontSize: 14 }}>‹ WELCOME BACK, CHAMPION ›</div>
+            <div style={{ color: '#9a94ad', fontSize: 13, marginTop: 6 }}>Enter the Arena. Claim your victory.</div>
           </div>
 
-          {/* Login + extras column */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-            {/* Hero */}
-            <div className="login-fadein" style={{ textAlign: 'center', marginBottom: 4 }}>
-              <div style={{
-                fontFamily: '"Cinzel", "Times New Roman", serif',
-                fontWeight: 900, fontSize: 'clamp(28px, 4.2vw, 44px)', letterSpacing: 6,
-                color: GOLD,
-                animation: 'loginGlow 3.6s ease-in-out infinite',
-                background: 'linear-gradient(180deg, #ffe28a 0%, #d4af37 55%, #8a6a16 100%)',
-                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-                filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.7))',
-              }}>⚔ MEMETIC MASTERS</div>
-              <div style={{
-                fontFamily: '"Cinzel", "Times New Roman", serif',
-                fontWeight: 600, letterSpacing: 8, fontSize: 14, color: PURPLE,
-                marginTop: 4, textShadow: `0 0 14px ${PURPLE}88`,
-              }}>ENTER THE ARENA</div>
-              <div style={{
-                marginTop: 8, fontSize: 13, color: '#bdb6a8', maxWidth: 460, marginLeft: 'auto', marginRight: 'auto',
-              }}>A fantasy trading card game where memes become legends.</div>
-            </div>
+          {/* Three login tiles act as tabs */}
+          <div className="ova-tiles" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 18 }}>
+            {([
+              { key: 'wallet', icon: '👛', title: 'CONNECT WALLET', sub: 'Secure. Non-custodial. On-chain.' },
+              { key: 'email',  icon: '✉',  title: 'EMAIL LOGIN',    sub: 'Access your account.' },
+              { key: 'guest',  icon: '👤', title: 'GUEST LOGIN',    sub: 'Try the Arena as a guest.' },
+            ] as const).map(t => {
+              const active = mode === t.key;
+              return (
+                <button key={t.key} onClick={() => { setMode(t.key); setNotice(''); }} style={{
+                  textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', position: 'relative',
+                  background: active ? 'rgba(124,58,237,0.20)' : 'rgba(255,255,255,0.02)',
+                  border: `1px solid ${active ? 'rgba(139,92,246,0.75)' : 'rgba(150,140,180,0.16)'}`,
+                  borderRadius: 12, padding: '16px 14px',
+                  boxShadow: active ? '0 0 24px rgba(124,58,237,0.35)' : 'none',
+                  transition: 'background .15s ease, border-color .15s ease, box-shadow .15s ease',
+                }}>
+                  {t.key === 'wallet' && <span style={{ position: 'absolute', top: 8, right: 10, fontSize: 11, color: '#c9a94a' }}>✦</span>}
+                  <div style={{ fontSize: 20 }}>{t.icon}</div>
+                  <div style={{ marginTop: 10, fontWeight: 800, letterSpacing: 1, fontSize: 13, color: '#f2eeff' }}>{t.title}</div>
+                  <div style={{ marginTop: 4, fontSize: 11, color: '#8f89a3' }}>{t.sub}</div>
+                </button>
+              );
+            })}
+          </div>
 
-            {/* Login panel */}
-            <div className="login-fadein" style={{
-              background: 'rgba(20,20,40,0.78)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-              border: `1px solid ${GOLD}40`, borderRadius: 24,
-              padding: 24,
-              boxShadow: `0 0 40px ${PURPLE}33, 0 16px 50px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)`,
-            }}>
-              <div style={{
-                fontFamily: '"Cinzel", "Times New Roman", serif',
-                fontSize: 13, fontWeight: 700, letterSpacing: 4, color: GOLD,
-                textAlign: 'center', marginBottom: 14,
-              }}>CONNECT YOUR REALM</div>
-
-              {/* Wallet cards — 4 Solana options */}
-              <div style={{
-                display: 'grid', gap: 12,
-                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              }}>
+          {/* Mode-specific content */}
+          <div style={{ marginTop: 18 }}>
+            {mode === 'wallet' && (
+              <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
                 {([
                   { kind: 'phantom',  label: 'Phantom',  gradient: 'linear-gradient(135deg, #AB9FF2 0%, #6E5BD9 100%)', install: 'https://phantom.app/' },
                   { kind: 'solflare', label: 'Solflare', gradient: 'linear-gradient(135deg, #FFC517 0%, #FC9E37 100%)', install: 'https://solflare.com/' },
@@ -441,10 +526,9 @@ function Login({ onLogin, onFirstTime }: {
                       onClick={() => detected ? doConnect(w.kind) : window.open(w.install, '_blank', 'noopener')}
                       disabled={!!busy}
                       style={{
-                        background: w.gradient,
-                        color: '#0a0a18',
-                        border: 'none', borderRadius: 14,
-                        padding: '16px 16px', cursor: busy ? 'not-allowed' : 'pointer',
+                        background: w.gradient, color: '#0a0a18',
+                        border: 'none', borderRadius: 12,
+                        padding: '14px 14px', cursor: busy ? 'not-allowed' : 'pointer',
                         textAlign: 'left', fontFamily: 'inherit',
                         boxShadow: '0 10px 26px rgba(138,43,226,0.32), inset 0 1px 0 rgba(255,255,255,0.25)',
                         opacity: busy && busy !== w.kind ? 0.45 : 1,
@@ -452,8 +536,8 @@ function Login({ onLogin, onFirstTime }: {
                       }}
                     >
                       <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 3, opacity: 0.85 }}>⚡ SOLANA</div>
-                      <div style={{ fontFamily: '"Cinzel", serif', fontSize: 18, fontWeight: 800, letterSpacing: 1, marginTop: 4 }}>
-                        {busy === w.kind ? 'Summoning…' : w.label}
+                      <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: 1, marginTop: 4 }}>
+                        {busy === w.kind ? 'Connecting…' : w.label}
                       </div>
                       <div style={{ marginTop: 8, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>
                         {busy === w.kind ? '…' : (detected ? '→ Connect Wallet' : '↗ Install First')}
@@ -462,45 +546,14 @@ function Login({ onLogin, onFirstTime }: {
                   );
                 })}
               </div>
+            )}
 
-              {err && (
-                <div style={{
-                  marginTop: 14, padding: '10px 12px', borderRadius: 8,
-                  background: 'rgba(217,75,75,0.12)', border: '1px solid rgba(217,75,75,0.45)',
-                  color: '#ffb8b8', fontSize: 13,
-                }}>
-                  <div>{err}</div>
-                  {/context invalidated|reloaded or updated/i.test(err) && (
-                    <button onClick={() => window.location.reload()} style={{
-                      marginTop: 8, padding: '6px 12px', borderRadius: 6,
-                      background: '#D4AF37', color: '#1a1408', fontWeight: 700,
-                      border: 'none', cursor: 'pointer', fontSize: 12,
-                    }}>Reload Page Now</button>
-                  )}
-                </div>
-              )}
-
-              {/* Divider */}
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 12, margin: '20px 2px 16px',
-              }}>
-                <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, transparent, ${GOLD}66, transparent)` }} />
-                <div style={{
-                  fontFamily: '"Cinzel", serif', fontSize: 11, letterSpacing: 4, color: GOLD, fontWeight: 700,
-                }}>OR</div>
-                <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, transparent, ${GOLD}66, transparent)` }} />
-              </div>
-
-              {/* Guest */}
+            {mode === 'guest' && (
               <div>
-                <div style={{
-                  fontFamily: '"Cinzel", serif', fontSize: 13, fontWeight: 700, letterSpacing: 4, color: GOLD,
-                  textAlign: 'center', marginBottom: 10,
-                }}>ENTER AS GUEST</div>
                 <label style={{
                   display: 'block', fontSize: 11, color: '#9c9282', letterSpacing: 2, fontWeight: 700,
                   textTransform: 'uppercase', marginBottom: 6,
-                }}>Choose your summoner name</label>
+                }}>Choose your champion name</label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input
                     value={name}
@@ -510,7 +563,7 @@ function Login({ onLogin, onFirstTime }: {
                     style={{
                       flex: 1, padding: '12px 14px', fontSize: 14,
                       background: 'rgba(10,10,20,0.75)', color: '#fff',
-                      border: `1px solid ${GOLD}55`, borderRadius: 10, outline: 'none',
+                      border: '1px solid rgba(150,120,255,0.35)', borderRadius: 10, outline: 'none',
                       fontFamily: 'inherit',
                     }}
                   />
@@ -526,56 +579,97 @@ function Login({ onLogin, onFirstTime }: {
                     }}
                   >🎲 Random</button>
                 </div>
-
                 <button
                   className="login-cta"
                   onClick={() => name.trim() && onLogin(name.trim())}
                   disabled={!name.trim()}
                   style={{
-                    marginTop: 14, width: '100%',
-                    padding: '14px 18px',
+                    marginTop: 14, width: '100%', padding: '14px 18px',
                     background: name.trim()
-                      ? 'linear-gradient(135deg, #D4AF37 0%, #F6D365 100%)'
-                      : 'rgba(60,55,30,0.45)',
-                    color: name.trim() ? '#050514' : '#7a7060',
+                      ? 'linear-gradient(135deg, #7c3aed 0%, #a855f7 100%)'
+                      : 'rgba(60,55,80,0.45)',
+                    color: name.trim() ? '#fff' : '#8a86a0',
                     border: 'none', borderRadius: 12,
-                    fontFamily: '"Cinzel", serif', fontWeight: 800,
-                    letterSpacing: 4, fontSize: 15, textTransform: 'uppercase',
+                    fontWeight: 800, letterSpacing: 3, fontSize: 15, textTransform: 'uppercase',
                     cursor: name.trim() ? 'pointer' : 'not-allowed',
-                    boxShadow: name.trim() ? `0 0 24px ${GOLD}66, 0 8px 22px rgba(0,0,0,0.5)` : 'none',
-                    animation: name.trim() ? 'loginPulse 2.4s ease-out infinite' : 'none',
+                    boxShadow: name.trim() ? '0 0 24px rgba(124,58,237,0.5), 0 8px 22px rgba(0,0,0,0.5)' : 'none',
                   }}
-                >⚔ Enter Arena</button>
+                >Enter Arena</button>
               </div>
-            </div>
+            )}
 
-            {/* Feature cards */}
-            <div className="login-fadein" style={{
-              display: 'grid', gap: 8,
-              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-            }}>
-              {[
-                { i: '⚔️', t: 'Strategic Battles' },
-                { i: '🃏', t: 'Collect Cards' },
-                { i: '⛽', t: 'Master Gas' },
-                { i: '🌐', t: 'Multi-Chain' },
-                { i: '🏆', t: 'Climb Ranked' },
-              ].map(f => (
-                <div key={f.t} style={{
-                  background: 'rgba(20,20,40,0.55)', backdropFilter: 'blur(6px)',
-                  border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10,
-                  padding: '10px 8px', textAlign: 'center',
-                }}>
-                  <div style={{ fontSize: 18, filter: `drop-shadow(0 0 6px ${GOLD}88)` }}>{f.i}</div>
-                  <div style={{ marginTop: 2, fontSize: 11, color: '#c8bea8', fontWeight: 600, letterSpacing: 0.5 }}>{f.t}</div>
-                </div>
-              ))}
-            </div>
+            {mode === 'email' && (
+              <div style={{
+                padding: '18px 16px', borderRadius: 12, textAlign: 'center',
+                background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(150,140,180,0.28)',
+                color: '#a49ec0', fontSize: 13,
+              }}>
+                Email login is coming soon. For now, connect a wallet or continue as a guest.
+              </div>
+            )}
 
-            <div style={{ textAlign: 'center', fontSize: 11, color: '#6a6253', letterSpacing: 1, marginTop: 6 }}>
-              $MASTER · DpPowzjETiU6421ReuwBB8XmDB7sMyB2JGzFLssYpump
-            </div>
+            {err && (
+              <div style={{
+                marginTop: 14, padding: '10px 12px', borderRadius: 8,
+                background: 'rgba(217,75,75,0.12)', border: '1px solid rgba(217,75,75,0.45)',
+                color: '#ffb8b8', fontSize: 13,
+              }}>
+                <div>{err}</div>
+                {/context invalidated|reloaded or updated/i.test(err) && (
+                  <button onClick={() => window.location.reload()} style={{
+                    marginTop: 8, padding: '6px 12px', borderRadius: 6,
+                    background: '#7c3aed', color: '#fff', fontWeight: 700,
+                    border: 'none', cursor: 'pointer', fontSize: 12,
+                  }}>Reload Page Now</button>
+                )}
+              </div>
+            )}
           </div>
+
+          {/* OR CONTINUE WITH */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '20px 2px 14px' }}>
+            <div style={{ flex: 1, height: 1, background: 'linear-gradient(90deg, transparent, rgba(150,140,180,0.35), transparent)' }} />
+            <div style={{ fontSize: 11, letterSpacing: 3, color: '#8f89a3', fontWeight: 700 }}>OR CONTINUE WITH</div>
+            <div style={{ flex: 1, height: 1, background: 'linear-gradient(90deg, transparent, rgba(150,140,180,0.35), transparent)' }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 12 }}>
+            {([
+              { k: 'discord', label: 'Discord', glyph: '🎮', bg: 'rgba(88,101,242,0.9)', fg: '#fff' },
+              { k: 'google',  label: 'Google',  glyph: 'G',  bg: '#fff',                 fg: '#444' },
+              { k: 'apple',   label: 'Apple',   glyph: '', bg: '#111',                 fg: '#fff' },
+              { k: 'x',       label: 'X',       glyph: '𝕏',  bg: '#111',                 fg: '#fff' },
+            ] as const).map(s => (
+              <button key={s.k} onClick={() => setNotice(`${s.label} login is coming soon.`)} title={s.label} style={{
+                width: 52, height: 44, borderRadius: 12, background: s.bg,
+                border: '1px solid rgba(255,255,255,0.10)', cursor: 'pointer', color: s.fg,
+                fontWeight: 800, fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>{s.glyph}</button>
+            ))}
+          </div>
+          {notice && <div style={{ textAlign: 'center', marginTop: 12, fontSize: 12, color: '#c9a94a' }}>{notice}</div>}
+        </div>
+      </div>
+
+      {/* Footer bar */}
+      <div style={{
+        position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 4,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 12, padding: '12px 22px', pointerEvents: 'none', flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, pointerEvents: 'auto' }}>
+          <span style={{ color: '#8b5cf6', fontSize: 16 }}>🛡</span>
+          <div>
+            <div style={{ color: '#b794f6', fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>YOUR WALLET. YOUR ASSETS. YOUR VICTORY.</div>
+            <div style={{ color: '#7a7590', fontSize: 11 }}>Built on blockchain. Owned by you.</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, pointerEvents: 'auto' }}>
+          {['ABOUT', 'WHITEPAPER', 'DOCS', 'SUPPORT'].map((l, i, a) => (
+            <span key={l} style={{ color: '#8f89a3', fontSize: 11, letterSpacing: 1, fontWeight: 600 }}>
+              {l}{i < a.length - 1 ? ' ◇' : ''}
+            </span>
+          ))}
+          <span style={{ marginLeft: 6, padding: '6px 10px', borderRadius: 10, border: '1px solid rgba(150,140,180,0.25)', color: '#c8c2d8', fontSize: 11 }}>🌐 EN</span>
         </div>
       </div>
     </div>
@@ -771,7 +865,7 @@ const RULES_NAV: { id: RulesSectionId; label: string; icon: string }[] = [
 
 const RULES_SEARCH_INDEX: { id: RulesSectionId; text: string }[] = [
   { id: 'goal',       text: 'goal life 20 reduce opponent zero win last player standing' },
-  { id: 'setup',      text: 'setup chain bnb solana avalanche avax ethereum xrp 60 card deck draw 7 hand 20 life mulligan first player no draw' },
+  { id: 'setup',      text: 'setup chain bnb solana ethereum robinhood base 60 card deck draw 7 hand 20 life mulligan first player no draw' },
   { id: 'cards',      text: 'card types node meme machine move land creature artifact enchantment spell instant power toughness permanent one-shot' },
   { id: 'gas',        text: 'gas mana cost tap node color pool drain end of turn empty mixed' },
   { id: 'turn',       text: 'turn phase untap draw main combat attack block damage end discard summoning sick haste' },
@@ -985,7 +1079,7 @@ function RulesPage({ onBack }: { onBack: () => void }) {
           background: 'linear-gradient(180deg, #ffe28a 0%, #d4af37 55%, #8a6a16 100%)',
           WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
           filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.6))',
-        }}>MEMETIC MASTERS</div>
+        }}>ON-CHAIN VIRTUAL ARENA</div>
         <div style={{
           fontFamily: RULES_HEAD, fontWeight: 600, fontSize: 20,
           letterSpacing: 12, color: RULES_TOKENS.purple, marginTop: 4,
@@ -1541,7 +1635,7 @@ function Landing({
         gap: 8, flexWrap: 'wrap',
       }}>
         <div style={{ fontWeight: 800, fontSize: mobile ? 13 : 16, letterSpacing: 1.5, textShadow: '0 2px 8px #000' }}>
-          <ShinyBrand text="MEMETIC MASTERS TCG" />
+          <ShinyBrand text="ON-CHAIN VIRTUAL ARENA" />
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, color: '#ddd', textShadow: '0 1px 4px #000' }}>Signed in as <b>{myName}</b></span>
@@ -5164,7 +5258,7 @@ function SoloSetupModal({
           {/* Starter color picker — only meaningful when no custom deck is chosen. */}
           {selectedDeckId == null ? (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {(['bnb', 'sol', 'avax', 'eth', 'xrp'] as Color[]).map(c => {
+              {(['bnb', 'sol', 'eth', 'robinhood', 'base'] as Color[]).map(c => {
                 const meta = COLOR_META[c];
                 const active = color === c;
                 return (
@@ -5286,7 +5380,7 @@ function InstallPrompt() {
     }}>
       <div style={{ fontSize: 22 }}>📲</div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, marginBottom: 2 }}>Install Memetic Masters</div>
+        <div style={{ fontWeight: 700, marginBottom: 2 }}>Install On-Chain Virtual Arena</div>
         <div style={{ fontSize: 11, opacity: 0.85 }}>
           {showIos
             ? 'Tap the Share icon, then "Add to Home Screen" for fullscreen play.'
@@ -6199,8 +6293,8 @@ function ColorChooser({ label, value, onChange }: { label: string; value: Color;
               style={{
                 padding: '6px 10px',
                 background: sel ? meta.hex : '#181818',
-                color: sel ? (c === 'eth' ? '#000' : '#fff') : (c === 'xrp' ? '#fff' : meta.hex),
-                border: `2px solid ${c === 'xrp' ? '#fff' : meta.hex}`,
+                color: sel ? (meta.ink === '#fff' ? '#fff' : '#000') : meta.hex,
+                border: `2px solid ${meta.hex}`,
                 borderRadius: 4, fontWeight: 700, cursor: 'pointer', fontSize: 12,
               }}>{meta.name}</button>
           );

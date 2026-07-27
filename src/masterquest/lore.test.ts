@@ -34,7 +34,7 @@ describe('Memetic Masterquest lore', () => {
   });
 
   it('puts 3 sites on every chain in total', () => {
-    for (const c of ['bnb', 'sol', 'avax', 'eth', 'xrp'] as const) {
+    for (const c of ['bnb', 'sol', 'eth', 'robinhood', 'base'] as const) {
       expect(sitesByChain(c).length).toBe(3);
     }
   });

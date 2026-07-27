@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-type Color = 'bnb' | 'sol' | 'avax' | 'eth' | 'xrp';
+type Color = 'bnb' | 'sol' | 'eth' | 'robinhood' | 'base';
 
 type Match = {
   matchID: string;
@@ -32,19 +32,19 @@ const W = COLS * TILE;
 const H = ROWS * TILE;
 
 const COLOR_HEX: Record<Color, string> = {
-  bnb: '#f0b90b', sol: '#9945ff', avax: '#e84142', eth: '#e6e6e6', xrp: '#111111',
+  bnb: '#f0b90b', sol: '#9945ff', eth: '#e6e6e6', robinhood: '#00C805', base: '#0052FF',
 };
 
 const NPCS: NPC[] = [
   { x: 3,  y: 3,  color: 'bnb', name: 'BNB Bull',     blurb: 'Orange means fast gas. Flood the board with cheap memes — pressure wins before they stabilize.' },
   { x: 18, y: 3,  color: 'sol', name: 'Sol Degen',    blurb: 'Purple plays combos. Save Moves for one explosive turn — set up, then snap the table in half.' },
-  { x: 3,  y: 10, color: 'avax', name: 'Avalanche Camp', blurb: 'Red is resilient. Build around Validators and Subnets, then let your snowballing engine bury them.' },
+  { x: 3,  y: 10, color: 'robinhood', name: 'Robinhood Floor', blurb: 'Green grinds value. Bank dividends and diamond-hand big bodies until your lifegain outlasts them.' },
   { x: 18, y: 10, color: 'eth', name: 'Eth Cathedral',blurb: 'White is control. Bigger nodes, bigger memes. Trade evenly until your late-game crushes theirs.' },
-  { x: 10, y: 12, color: 'xrp', name: 'XRP Vault',    blurb: 'Black is disruption. Force discards and removal. Make every card they draw feel like a tax.' },
+  { x: 10, y: 12, color: 'base', name: 'Base Camp',    blurb: 'Blue floods wide and refills the hand. Ride onchain summer — draw engines keep the pressure endless.' },
 ];
 
 const COLOR_LABEL: Record<Color, string> = {
-  bnb: 'BNB', sol: 'Sol', avax: 'AVAX', eth: 'Eth', xrp: 'XRP',
+  bnb: 'BNB', sol: 'Sol', eth: 'Eth', robinhood: 'HOOD', base: 'Base',
 };
 
 export function Plaza({
@@ -147,17 +147,17 @@ export function Plaza({
     ctx.fillStyle = 'rgba(255,255,255,0.35)';
     ctx.fillText('BNB BAZAAR',     TILE,           TILE * 1.5);
     ctx.fillText('SOLANA BEACH',   W - TILE * 7,   TILE * 1.5);
-    ctx.fillText('AVAX CAMP',      TILE,           H - TILE * 0.5);
+    ctx.fillText('ROBINHOOD FLOOR', TILE,          H - TILE * 0.5);
     ctx.fillText('ETH CATHEDRAL',  W - TILE * 7,   H - TILE * 0.5);
     ctx.textAlign = 'center';
-    ctx.fillText('XRP VAULT', W / 2, H - TILE * 0.3);
+    ctx.fillText('BASE CAMP', W / 2, H - TILE * 0.3);
     ctx.textAlign = 'start';
 
     // NPC tiles.
     for (const n of NPCS) {
       ctx.fillStyle = COLOR_HEX[n.color];
       ctx.fillRect(n.x * TILE + 4, n.y * TILE + 4, TILE - 8, TILE - 8);
-      ctx.fillStyle = n.color === 'xrp' || n.color === 'sol' ? '#fff' : '#000';
+      ctx.fillStyle = n.color === 'base' || n.color === 'sol' ? '#fff' : '#000';
       ctx.font = '700 12px Inter, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(COLOR_LABEL[n.color], n.x * TILE + TILE / 2, n.y * TILE + TILE / 2 + 4);
