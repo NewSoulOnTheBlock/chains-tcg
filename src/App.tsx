@@ -21,7 +21,9 @@ import {
 import { errorText, errorIssues, isDeckBlocked } from './error-text';
 import { RANKED_AVAILABLE, RANKED_UNAVAILABLE_MESSAGE } from './ranked-client';
 import { connectRobinhoodChain, detectEvmWallet, shortAddr, ROBINHOOD_CHAIN } from './wallet';
-import { getCollection, deckCap, validateOwnedDeck, ownershipIssues } from './collection';
+// `validateOwnedDeck` / `deckCap` still exist and are the RANKED gate — see
+// `src/collection.ts`. They are intentionally not used by the deck builder.
+import { getCollection } from './collection';
 import { color as C, font as F, surface as SURF, edge as EDGE, depth as DEPTH } from './theme';
 import { Button as UIButton, goldPlate, obsidianPlate, engravedPanel } from './ui';
 import { SettingsPage, PREFS_EVENT } from './Settings';
@@ -2906,8 +2908,14 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
 
   const deckList = useMemo(() => { const out: string[] = []; for (const [id, n] of Object.entries(counts)) for (let i = 0; i < n; i++) out.push(id); return out; }, [counts]);
   const total = deckList.length;
-  const v60 = useMemo(() => validateOwnedDeck(myName, deckList), [myName, deckList, ownedTick]);
-  const copyIssues = useMemo(() => [...validateDeck(deckList, { requireSize: false }).issues, ...ownershipIssues(myName, deckList)], [myName, deckList, ownedTick]);
+  // FORMAT rules only: exactly 60 cards, max 4 copies of a non-node card.
+  // Card OWNERSHIP is deliberately not checked here — casual play lets anyone
+  // build any deck they like, from the whole catalogue, for free. Ownership is
+  // a RANKED entry requirement (booster-minted cards only), and ranked is the
+  // only place it may be enforced. Enforcing it in the builder locked every
+  // new player to node-only decks, which is the opposite of the intent.
+  const v60 = useMemo(() => validateDeck(deckList), [deckList]);
+  const copyIssues = useMemo(() => validateDeck(deckList, { requireSize: false }).issues, [deckList]);
   const legality: 'EMPTY' | 'INCOMPLETE' | 'INVALID' | 'READY' =
     total === 0 ? 'EMPTY' : total < DECK_SIZE ? 'INCOMPLETE' : v60.ok ? 'READY' : 'INVALID';
   const dirty = JSON.stringify([...deckList].sort()) !== savedSnapshot;
@@ -2928,8 +2936,9 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
       const cur = prev[id] ?? 0;
       let next = cur + delta;
       if (next < 0) next = 0;
-      // Cap at what the player owns (and the format copy limit).
-      const cap = deckCap(myName, id);
+      // Format copy limit only — nodes are unlimited, everything else caps at 4.
+      // No ownership cap: see the note on `v60` above.
+      const cap = isBasicNode(id) ? Infinity : MAX_COPIES_NONBASIC;
       if (next > cap) next = cap;
       if (delta > 0 && total >= DECK_SIZE) return prev;
       const out = { ...prev };
@@ -3158,14 +3167,14 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
               <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 150 : 176}px, 1fr))`, gap: 12 }}>
                 {visible.map((def) => (
                   <HubCardTile key={def.id} def={def} inDeck={counts[def.id] ?? 0}
-                    cap={deckCap(myName, def.id)} owned={owned[def.id] ?? 0} deckFull={deckFull} onAdd={() => bump(def.id, +1)} />
+                    cap={isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC} deckFull={deckFull} onAdd={() => bump(def.id, +1)} />
                 ))}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {visible.map((def) => (
                   <LibraryRow key={def.id} def={def} inDeck={counts[def.id] ?? 0}
-                    cap={deckCap(myName, def.id)} owned={owned[def.id] ?? 0} deckFull={deckFull} onAdd={() => bump(def.id, +1)} />
+                    cap={isBasicNode(def.id) ? Infinity : MAX_COPIES_NONBASIC} deckFull={deckFull} onAdd={() => bump(def.id, +1)} />
                 ))}
               </div>
             )}
@@ -5804,8 +5813,8 @@ function SoloSetupModal({
         if (cancelled) return;
         setDecks(list);
         // Single-player requires an owned custom deck — default to the first valid one.
-        const firstOwned = list.find(d => validateOwnedDeck(myName, d.cards).ok);
-        setSelectedDeckId(firstOwned ? firstOwned.id : null);
+        const firstLegal = list.find(d => validateDeck(d.cards).ok);
+        setSelectedDeckId(firstLegal ? firstLegal.id : null);
       } catch {
         if (!cancelled) setDecks([]);
       } finally {
@@ -5817,7 +5826,7 @@ function SoloSetupModal({
 
   const chosenCustom = selectedDeckId == null ? null : decks.find(d => d.id === selectedDeckId) ?? null;
   // Single-player requires a custom deck built only from owned (booster) cards.
-  const chosenOwnedOk = chosenCustom ? validateOwnedDeck(myName, chosenCustom.cards).ok : false;
+  const chosenOwnedOk = chosenCustom ? validateDeck(chosenCustom.cards).ok : false;
   const canStart = selectedDeckId != null && chosenOwnedOk;
 
   const btn = (active: boolean, accent: string): React.CSSProperties => ({
@@ -5894,7 +5903,7 @@ function SoloSetupModal({
             )}
             {!decksLoading && decks.map(d => {
               const active = selectedDeckId === d.id;
-              const ok = validateOwnedDeck(myName, d.cards).ok;
+              const ok = validateDeck(d.cards).ok;
               return (
                 <button key={d.id} onClick={() => ok && setSelectedDeckId(d.id)} disabled={!ok} style={{
                   background: active ? '#3aa66a' : '#1a1730',
@@ -5903,7 +5912,7 @@ function SoloSetupModal({
                   borderRadius: 8, padding: '8px 12px',
                   fontWeight: 700, cursor: ok ? 'pointer' : 'not-allowed', fontSize: 12,
                   opacity: ok ? 1 : 0.6, display: 'inline-flex', alignItems: 'center',
-                }} title={ok ? d.name : `${d.name} — needs 60 cards you own (build in Profile › Decks)`}>
+                }} title={ok ? d.name : `${d.name} — needs ${DECK_SIZE} cards (build in Profile › Decks)`}>
                   {d.name}{!ok ? <Warning size={12} style={{ marginLeft: 5 }} /> : null}
                 </button>
               );
