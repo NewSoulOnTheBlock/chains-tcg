@@ -1,0 +1,19 @@
+{
+  "name": "Airdrop Szn (Foil)",
+  "description": "Points go live. Every Meme on the field takes 1 damage.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1fa82.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Base"
+    },
+    {
+      "trait_type": "Type",
+      "value": "move"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "Smart Contract Suite",
+  "description": "Optimized calldata — your Moves cost 1 less Ethereum gas (min 0).",
+  "image": "https://chains-tcg.vercel.app/cards/smart_contract_suite.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Ethereum"
+    },
+    {
+      "trait_type": "Type",
+      "value": "machine"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

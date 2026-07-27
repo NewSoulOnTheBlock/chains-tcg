@@ -1,0 +1,27 @@
+{
+  "name": "GOAT (Foil)",
+  "description": "Goatseus Maximus, the AI prophet.",
+  "image": "https://s2.coinmarketcap.com/static/img/coins/128x128/33440.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Solana"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 6
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 5
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

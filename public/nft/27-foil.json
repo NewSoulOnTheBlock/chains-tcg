@@ -1,0 +1,19 @@
+{
+  "name": "Telegram Bot Suite (Foil)",
+  "description": "Your attacking Memes get +1/+0.",
+  "image": "https://chains-tcg.vercel.app/cards/telegram-bot-suite.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Solana"
+    },
+    {
+      "trait_type": "Type",
+      "value": "machine"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

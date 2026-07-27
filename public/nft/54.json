@@ -1,0 +1,27 @@
+{
+  "name": "PEPE",
+  "description": "The king of ERC-20 memes.",
+  "image": "https://chains-tcg.vercel.app/cards/pepe.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Ethereum"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 5
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 6
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

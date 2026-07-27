@@ -1,0 +1,19 @@
+{
+  "name": "Order Flow (Foil)",
+  "description": "Sell the flow, read the tape. Draw two cards.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f9fe.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Robinhood"
+    },
+    {
+      "trait_type": "Type",
+      "value": "move"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

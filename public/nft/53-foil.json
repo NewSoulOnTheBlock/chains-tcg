@@ -1,0 +1,27 @@
+{
+  "name": "SHIB (Foil)",
+  "description": "The Dogecoin killer that became a brand.",
+  "image": "https://chains-tcg.vercel.app/cards/shib.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Ethereum"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 4
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 3
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

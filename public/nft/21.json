@@ -1,0 +1,27 @@
+{
+  "name": "dogwifhat",
+  "description": "It is just a dog wif a hat.",
+  "image": "https://s2.coinmarketcap.com/static/img/coins/128x128/28752.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Solana"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 4
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 2
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

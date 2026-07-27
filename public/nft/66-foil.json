@@ -1,0 +1,27 @@
+{
+  "name": "BRETT (Foil)",
+  "description": "Pepe's blue friend, all in on Base.",
+  "image": "https://chains-tcg.vercel.app/cards/brett.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Base"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 3
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 2
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

@@ -6,5 +6,8 @@
   "wagerEscrow": "0xdbc49ff2cf44d2ba1a844d80d1f82d472440cc3d",
   "operator": "0x793a5e8b8Ff431cC2D8eE41e8ec2D9ad70247E60",
   "feeRecipient": "0x793a5e8b8Ff431cC2D8eE41e8ec2D9ad70247E60",
-  "rakeBps": 1000
+  "rakeBps": 1000,
+  "cardPack": "0x57200fb533b33823f8bd2ac8f3649e3b643830b3",
+  "cardPackPriceEth": "0.0035",
+  "cardCount": 80
 }

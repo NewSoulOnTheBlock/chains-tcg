@@ -1,0 +1,19 @@
+{
+  "name": "Layer 2 Rollup (Foil)",
+  "description": "Sequencer ships fast — your Memes have no summoning sickness.",
+  "image": "https://chains-tcg.vercel.app/cards/layer2_rollup.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Ethereum"
+    },
+    {
+      "trait_type": "Type",
+      "value": "machine"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

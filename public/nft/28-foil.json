@@ -1,0 +1,19 @@
+{
+  "name": "Snipe (Foil)",
+  "description": "Bot snipes the mint. Deal 3 damage to any target.",
+  "image": "https://chains-tcg.vercel.app/cards/snipe.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Solana"
+    },
+    {
+      "trait_type": "Type",
+      "value": "move"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

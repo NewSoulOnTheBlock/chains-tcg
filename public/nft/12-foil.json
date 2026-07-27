@@ -1,0 +1,19 @@
+{
+  "name": "Rug Pull (Foil)",
+  "description": "Dev pulls the liquidity. Destroy target Meme.",
+  "image": "https://chains-tcg.vercel.app/cards/rug_pull.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "BnB"
+    },
+    {
+      "trait_type": "Type",
+      "value": "move"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

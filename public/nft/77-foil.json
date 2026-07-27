@@ -1,0 +1,19 @@
+{
+  "name": "Base Bridge (Foil)",
+  "description": "Bridge it back. Return target Meme to its owner's hand.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f309.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Base"
+    },
+    {
+      "trait_type": "Type",
+      "value": "move"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

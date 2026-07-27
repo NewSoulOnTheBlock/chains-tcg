@@ -1,0 +1,19 @@
+{
+  "name": "Smart Contract Shield",
+  "description": "Enchant Meme. Attached Meme gets +0/+3.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f6e1.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Ethereum"
+    },
+    {
+      "trait_type": "Type",
+      "value": "aura"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

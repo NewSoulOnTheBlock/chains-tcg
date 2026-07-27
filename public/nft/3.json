@@ -1,0 +1,27 @@
+{
+  "name": "TST",
+  "description": "A test that pumped 1000x.",
+  "image": "https://chains-tcg.vercel.app/cards/tst.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "BnB"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 3
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 2
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

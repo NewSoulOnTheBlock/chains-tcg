@@ -1,0 +1,19 @@
+{
+  "name": "Liquidity Injection (Foil)",
+  "description": "Enchant Meme. Attached Meme gets +2/+2.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f4a7.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "BnB"
+    },
+    {
+      "trait_type": "Type",
+      "value": "aura"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

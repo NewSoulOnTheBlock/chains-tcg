@@ -1,0 +1,19 @@
+{
+  "name": "Exploit Disclosure",
+  "description": "White-hat dev kills the contract. Destroy target Machine.",
+  "image": "https://chains-tcg.vercel.app/cards/exploit_disclosure.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Ethereum"
+    },
+    {
+      "trait_type": "Type",
+      "value": "move"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

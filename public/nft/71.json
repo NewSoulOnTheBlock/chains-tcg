@@ -1,0 +1,27 @@
+{
+  "name": "BASED",
+  "description": "Stay based, stay onchain.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f535.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Base"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 5
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 5
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

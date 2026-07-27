@@ -1,0 +1,27 @@
+{
+  "name": "FARTCOIN (Foil)",
+  "description": "Silent but deadly.",
+  "image": "https://chains-tcg.vercel.app/cards/fartcoin.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Solana"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 5
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 4
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "Dividend Reinvestment",
+  "description": "Reinvested dividends heal you when your Memes deal damage.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f4b5.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Robinhood"
+    },
+    {
+      "trait_type": "Type",
+      "value": "machine"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

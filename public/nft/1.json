@@ -1,0 +1,27 @@
+{
+  "name": "BROCCOLI",
+  "description": "CZ's dog. Greens are bullish.",
+  "image": "https://chains-tcg.vercel.app/cards/broccoli.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "BnB"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 2
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 1
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "AI Trading Agent",
+  "description": "When a Meme enters under you, draw a card (once per turn).",
+  "image": "https://chains-tcg.vercel.app/cards/ai-trading-agent.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Solana"
+    },
+    {
+      "trait_type": "Type",
+      "value": "machine"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

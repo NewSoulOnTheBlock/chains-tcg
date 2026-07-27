@@ -1,0 +1,19 @@
+{
+  "name": "Gamma Squeeze (Foil)",
+  "description": "Dealers scramble to hedge. Deal 5 damage to any target.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/26a1.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Robinhood"
+    },
+    {
+      "trait_type": "Type",
+      "value": "move"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

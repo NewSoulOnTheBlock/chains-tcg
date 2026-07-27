@@ -1,0 +1,27 @@
+{
+  "name": "APE (Foil)",
+  "description": "The whole ape army marches on the shorts.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f98d.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Robinhood"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 6
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 7
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

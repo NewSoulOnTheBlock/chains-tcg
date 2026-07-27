@@ -1,0 +1,27 @@
+{
+  "name": "YOLO",
+  "description": "One life, all in on 0DTE calls.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b0.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Robinhood"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 6
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 4
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

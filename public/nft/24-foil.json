@@ -1,0 +1,19 @@
+{
+  "name": "MEV Bundler (Foil)",
+  "description": "Your Moves cost 1 less Solana gas (min 0).",
+  "image": "https://chains-tcg.vercel.app/cards/mev-bundler.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Solana"
+    },
+    {
+      "trait_type": "Type",
+      "value": "machine"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

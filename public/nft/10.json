@@ -1,0 +1,19 @@
+{
+  "name": "Sniper Bot",
+  "description": "Your Memes have no summoning sickness.",
+  "image": "https://chains-tcg.vercel.app/cards/sniper_bot.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "BnB"
+    },
+    {
+      "trait_type": "Type",
+      "value": "machine"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

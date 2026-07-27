@@ -14,6 +14,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Connection, Transaction } from '@solana/web3.js';
 import { CARDS, COLOR_META, type Color } from './cards';
+import { mintPack, PACK_PRICE_ETH, type RevealedCard } from './pack-evm';
 import { getProfileApi } from './profiles';
 import {
   detectSolanaWallets, getSolanaWallet, type SolanaWalletKind,
@@ -94,6 +95,58 @@ async function confirmWithFailover(
     }
   }
   throw new Error(`Confirm failed on every RPC:\n${errors.join('\n')}`);
+}
+
+/** On-chain booster mint on Robinhood Chain: 5 random cards + 1 foil random. */
+function EvmPackMint() {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [cards, setCards] = useState<RevealedCard[]>([]);
+  async function buy() {
+    setErr(''); setBusy(true); setCards([]);
+    try { setCards(await mintPack()); }
+    catch (e: any) { setErr(String(e?.shortMessage || e?.message || e)); }
+    finally { setBusy(false); }
+  }
+  return (
+    <section style={{ ...panel, marginBottom: 16, border: '1px solid #3a2a6a' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 900 }}>Booster Pack — Robinhood Chain</div>
+          <div style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>
+            Mint on-chain NFTs: <b>5 random cards + 1 foil</b>. {PACK_PRICE_ETH} ETH via MetaMask.
+          </div>
+        </div>
+        <button onClick={buy} disabled={busy} style={{
+          padding: '14px 22px', borderRadius: 12, border: 'none', cursor: busy ? 'wait' : 'pointer',
+          fontWeight: 900, letterSpacing: 1, fontSize: 15, color: '#fff',
+          background: 'linear-gradient(135deg,#7c3aed,#a855f7)', boxShadow: '0 0 24px rgba(124,92,255,0.5)',
+        }}>{busy ? 'Minting…' : `🎴 Mint Pack — ${PACK_PRICE_ETH} ETH`}</button>
+      </div>
+      {err && <div style={{ marginTop: 10, color: '#ffb8b8', fontSize: 13 }}>{err}</div>}
+      {cards.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ fontSize: 12, letterSpacing: 2, color: '#c9a94a', fontWeight: 800, marginBottom: 8 }}>YOU PULLED</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px,1fr))', gap: 10 }}>
+            {cards.map((c, i) => (
+              <div key={i} style={{
+                borderRadius: 10, padding: 8, textAlign: 'center',
+                background: c.foil ? 'linear-gradient(135deg,#3a2a6a,#7c5cff)' : 'rgba(20,16,40,0.8)',
+                border: c.foil ? '1px solid #c9a94a' : '1px solid #2a1e54',
+                boxShadow: c.foil ? '0 0 18px rgba(201,169,74,0.6)' : 'none',
+              }}>
+                {c.image
+                  ? <img src={c.image} alt={c.name} style={{ width: '100%', height: 70, objectFit: 'contain' }} />
+                  : <div style={{ height: 70 }} />}
+                <div style={{ fontSize: 11, fontWeight: 700, marginTop: 4 }}>{c.name}</div>
+                {c.foil && <div style={{ fontSize: 9, color: '#ffe9a8', fontWeight: 800, letterSpacing: 1 }}>✦ FOIL</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }
 
 export function BoostersPage({ myName, onBack }: { myName: string; onBack: () => void }) {
@@ -242,6 +295,7 @@ export function BoostersPage({ myName, onBack }: { myName: string; onBack: () =>
         </div>
 
         <div style={{ maxWidth: 1000, margin: '0 auto', padding: '18px 16px 80px' }}>
+          <EvmPackMint />
           {!liveMode && (
             <div style={{
               background: 'linear-gradient(90deg, #4a2010, #6a3010)',

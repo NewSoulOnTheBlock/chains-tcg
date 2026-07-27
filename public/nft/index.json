@@ -1,0 +1,407 @@
+{
+  "site": "https://chains-tcg.vercel.app",
+  "cardCount": 80,
+  "baseURI": "https://chains-tcg.vercel.app/nft/",
+  "cards": [
+    {
+      "index": 0,
+      "id": "bnb_babydoge",
+      "name": "BABYDOGE"
+    },
+    {
+      "index": 1,
+      "id": "bnb_broccoli",
+      "name": "BROCCOLI"
+    },
+    {
+      "index": 2,
+      "id": "bnb_tut",
+      "name": "TUT"
+    },
+    {
+      "index": 3,
+      "id": "bnb_tst",
+      "name": "TST"
+    },
+    {
+      "index": 4,
+      "id": "bnb_banana",
+      "name": "BANANA"
+    },
+    {
+      "index": 5,
+      "id": "bnb_mubarak",
+      "name": "MUBARAK"
+    },
+    {
+      "index": 6,
+      "id": "bnb_cheems",
+      "name": "CHEEMS"
+    },
+    {
+      "index": 7,
+      "id": "bnb_floki",
+      "name": "FLOKI"
+    },
+    {
+      "index": 8,
+      "id": "bnb_farm",
+      "name": "Volume Bot"
+    },
+    {
+      "index": 9,
+      "id": "bnb_bridge",
+      "name": "Token Launchpad"
+    },
+    {
+      "index": 10,
+      "id": "bnb_sniper",
+      "name": "Sniper Bot"
+    },
+    {
+      "index": 11,
+      "id": "bnb_mmalgo",
+      "name": "Market Maker Algo"
+    },
+    {
+      "index": 12,
+      "id": "bnb_rugpull",
+      "name": "Rug Pull"
+    },
+    {
+      "index": 13,
+      "id": "bnb_airdrop",
+      "name": "Airdrop Farm"
+    },
+    {
+      "index": 14,
+      "id": "bnb_honeypot",
+      "name": "Honeypot"
+    },
+    {
+      "index": 15,
+      "id": "bnb_liquidity",
+      "name": "Liquidity Injection"
+    },
+    {
+      "index": 16,
+      "id": "sol_pnut",
+      "name": "PNUT"
+    },
+    {
+      "index": 17,
+      "id": "sol_bonk",
+      "name": "BONK"
+    },
+    {
+      "index": 18,
+      "id": "sol_popcat",
+      "name": "POPCAT"
+    },
+    {
+      "index": 19,
+      "id": "sol_mew",
+      "name": "MEW"
+    },
+    {
+      "index": 20,
+      "id": "sol_bome",
+      "name": "BOME"
+    },
+    {
+      "index": 21,
+      "id": "sol_wif",
+      "name": "dogwifhat"
+    },
+    {
+      "index": 22,
+      "id": "sol_fartcoin",
+      "name": "FARTCOIN"
+    },
+    {
+      "index": 23,
+      "id": "sol_goat",
+      "name": "GOAT"
+    },
+    {
+      "index": 24,
+      "id": "sol_priority",
+      "name": "MEV Bundler"
+    },
+    {
+      "index": 25,
+      "id": "sol_oracle",
+      "name": "AI Trading Agent"
+    },
+    {
+      "index": 26,
+      "id": "sol_amm",
+      "name": "AMM Router"
+    },
+    {
+      "index": 27,
+      "id": "sol_tgbot",
+      "name": "Telegram Bot Suite"
+    },
+    {
+      "index": 28,
+      "id": "sol_zap",
+      "name": "Snipe"
+    },
+    {
+      "index": 29,
+      "id": "sol_bounce",
+      "name": "Frontrun"
+    },
+    {
+      "index": 30,
+      "id": "sol_tgpump",
+      "name": "Telegram Pump"
+    },
+    {
+      "index": 31,
+      "id": "sol_validator",
+      "name": "Validator Boost"
+    },
+    {
+      "index": 32,
+      "id": "robinhood_hood",
+      "name": "HOOD"
+    },
+    {
+      "index": 33,
+      "id": "robinhood_ozzy",
+      "name": "Ozzy"
+    },
+    {
+      "index": 34,
+      "id": "robinhood_cashcat",
+      "name": "Cashcat"
+    },
+    {
+      "index": 35,
+      "id": "robinhood_kitty",
+      "name": "KITTY"
+    },
+    {
+      "index": 36,
+      "id": "robinhood_tendies",
+      "name": "TENDIES"
+    },
+    {
+      "index": 37,
+      "id": "robinhood_moon",
+      "name": "MOON"
+    },
+    {
+      "index": 38,
+      "id": "robinhood_yolo",
+      "name": "YOLO"
+    },
+    {
+      "index": 39,
+      "id": "robinhood_ape",
+      "name": "APE"
+    },
+    {
+      "index": 40,
+      "id": "robinhood_dividend",
+      "name": "Dividend Reinvestment"
+    },
+    {
+      "index": 41,
+      "id": "robinhood_options",
+      "name": "Options Chain"
+    },
+    {
+      "index": 42,
+      "id": "robinhood_fractional",
+      "name": "Fractional Shares"
+    },
+    {
+      "index": 43,
+      "id": "robinhood_margin",
+      "name": "Margin Account"
+    },
+    {
+      "index": 44,
+      "id": "robinhood_buydip",
+      "name": "Buy the Dip"
+    },
+    {
+      "index": 45,
+      "id": "robinhood_gamma",
+      "name": "Gamma Squeeze"
+    },
+    {
+      "index": 46,
+      "id": "robinhood_pfof",
+      "name": "Order Flow"
+    },
+    {
+      "index": 47,
+      "id": "robinhood_diamond",
+      "name": "Diamond Hands"
+    },
+    {
+      "index": 48,
+      "id": "eth_andy",
+      "name": "ANDY"
+    },
+    {
+      "index": 49,
+      "id": "eth_apu",
+      "name": "APU"
+    },
+    {
+      "index": 50,
+      "id": "eth_wojak",
+      "name": "WOJAK"
+    },
+    {
+      "index": 51,
+      "id": "eth_turbo",
+      "name": "TURBO"
+    },
+    {
+      "index": 52,
+      "id": "eth_mog",
+      "name": "MOG"
+    },
+    {
+      "index": 53,
+      "id": "eth_shib",
+      "name": "SHIB"
+    },
+    {
+      "index": 54,
+      "id": "eth_pepe",
+      "name": "PEPE"
+    },
+    {
+      "index": 55,
+      "id": "eth_sproto_gremlin",
+      "name": "Sproto Gremlin"
+    },
+    {
+      "index": 56,
+      "id": "eth_eip1559",
+      "name": "Smart Contract Suite"
+    },
+    {
+      "index": 57,
+      "id": "eth_temple",
+      "name": "Dapp Ecosystem"
+    },
+    {
+      "index": 58,
+      "id": "eth_l2",
+      "name": "Layer 2 Rollup"
+    },
+    {
+      "index": 59,
+      "id": "eth_yield",
+      "name": "Yield Aggregator"
+    },
+    {
+      "index": 60,
+      "id": "eth_smite",
+      "name": "FUD Tweet"
+    },
+    {
+      "index": 61,
+      "id": "eth_heal",
+      "name": "DCA In"
+    },
+    {
+      "index": 62,
+      "id": "eth_exploit",
+      "name": "Exploit Disclosure"
+    },
+    {
+      "index": 63,
+      "id": "eth_shield",
+      "name": "Smart Contract Shield"
+    },
+    {
+      "index": 64,
+      "id": "base_degen",
+      "name": "DEGEN"
+    },
+    {
+      "index": 65,
+      "id": "base_toshi",
+      "name": "TOSHI"
+    },
+    {
+      "index": 66,
+      "id": "base_brett",
+      "name": "BRETT"
+    },
+    {
+      "index": 67,
+      "id": "base_miggles",
+      "name": "MIGGLES"
+    },
+    {
+      "index": 68,
+      "id": "base_keycat",
+      "name": "KEYCAT"
+    },
+    {
+      "index": 69,
+      "id": "base_normie",
+      "name": "NORMIE"
+    },
+    {
+      "index": 70,
+      "id": "base_doginme",
+      "name": "DOGINME"
+    },
+    {
+      "index": 71,
+      "id": "base_based",
+      "name": "BASED"
+    },
+    {
+      "index": 72,
+      "id": "base_summer",
+      "name": "Onchain Summer"
+    },
+    {
+      "index": 73,
+      "id": "base_frames",
+      "name": "Farcaster Frames"
+    },
+    {
+      "index": 74,
+      "id": "base_wallet",
+      "name": "Smart Wallet"
+    },
+    {
+      "index": 75,
+      "id": "base_onramp",
+      "name": "Coinbase Onramp"
+    },
+    {
+      "index": 76,
+      "id": "base_tip",
+      "name": "Tip DEGEN"
+    },
+    {
+      "index": 77,
+      "id": "base_bridge",
+      "name": "Base Bridge"
+    },
+    {
+      "index": 78,
+      "id": "base_airdrop",
+      "name": "Airdrop Szn"
+    },
+    {
+      "index": 79,
+      "id": "base_staybased",
+      "name": "Stay Based"
+    }
+  ]
+}

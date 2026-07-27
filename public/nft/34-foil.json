@@ -1,0 +1,27 @@
+{
+  "name": "Cashcat (Foil)",
+  "description": "Nine lives, every one of them in the money.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f911.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Robinhood"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 2
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 3
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

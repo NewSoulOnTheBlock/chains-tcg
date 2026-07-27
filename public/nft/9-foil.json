@@ -1,0 +1,19 @@
+{
+  "name": "Token Launchpad (Foil)",
+  "description": "You may play one extra Node each turn.",
+  "image": "https://chains-tcg.vercel.app/cards/token_launchpad.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "BnB"
+    },
+    {
+      "trait_type": "Type",
+      "value": "machine"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

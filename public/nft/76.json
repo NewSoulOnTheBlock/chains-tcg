@@ -1,0 +1,19 @@
+{
+  "name": "Tip DEGEN",
+  "description": "Allowance drops in the channel. Draw two cards.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1fa99.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Base"
+    },
+    {
+      "trait_type": "Type",
+      "value": "move"
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

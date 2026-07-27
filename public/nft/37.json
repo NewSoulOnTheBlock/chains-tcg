@@ -1,0 +1,27 @@
+{
+  "name": "MOON",
+  "description": "To the moon, no brakes.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f680.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Robinhood"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 4
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 5
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}

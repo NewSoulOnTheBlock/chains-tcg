@@ -1,0 +1,27 @@
+{
+  "name": "TUT (Foil)",
+  "description": "Mubarak's turtle. Slow and steady.",
+  "image": "https://s2.coinmarketcap.com/static/img/coins/128x128/33687.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "BnB"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 2
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 2
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "POPCAT (Foil)",
+  "description": "Pop. Pop. Pop.",
+  "image": "https://chains-tcg.vercel.app/cards/popcat.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Solana"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 2
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 3
+    },
+    {
+      "trait_type": "Foil",
+      "value": "Yes"
+    }
+  ]
+}

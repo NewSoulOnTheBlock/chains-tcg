@@ -1,0 +1,27 @@
+{
+  "name": "KEYCAT",
+  "description": "Cat on a keyboard, typing the bull case.",
+  "image": "https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f511.png",
+  "attributes": [
+    {
+      "trait_type": "Chain",
+      "value": "Base"
+    },
+    {
+      "trait_type": "Type",
+      "value": "meme"
+    },
+    {
+      "trait_type": "Power",
+      "value": 3
+    },
+    {
+      "trait_type": "Toughness",
+      "value": 3
+    },
+    {
+      "trait_type": "Foil",
+      "value": "No"
+    }
+  ]
+}
