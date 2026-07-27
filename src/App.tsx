@@ -283,6 +283,63 @@ function Login({ onLogin, onFirstTime }: {
   const CYAN = '#4FD1C5';
   const mobile = useIsMobile();
 
+  // ── Mobile / portrait login ──────────────────────────────────────────────
+  // A landscape splash can't carry tiny painted hotspots on a phone, so on mobile
+  // the artwork fills the screen (cover, no stretch) and real touch-sized controls
+  // sit in a bottom sheet.
+  if (mobile) {
+    const evm = detectEvmWallet();
+    const connecting = busy === 'robinhood';
+    return (
+      <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#07060f', fontFamily: F.body, color: '#F8F8F8' }}>
+        <audio ref={audioRef} src="/login-theme.mp3" loop preload="auto" style={{ display: 'none' }} />
+        <img src="/login-splash.png" alt="" draggable={false}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 22%', userSelect: 'none', zIndex: 0 }} />
+        <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 1, background: 'linear-gradient(180deg, rgba(7,6,15,0.1) 0%, rgba(7,6,15,0.55) 55%, rgba(7,6,15,0.96) 100%)' }} />
+        <button onClick={() => setMuted(m => !m)} aria-label={muted ? 'Unmute' : 'Mute'} style={{
+          position: 'fixed', top: 'calc(10px + env(safe-area-inset-top))', right: 12, zIndex: 5, width: 40, height: 40, borderRadius: 20,
+          background: 'rgba(10,5,30,0.6)', border: '1px solid rgba(212,175,55,0.45)', color: '#D4AF37', fontSize: 17, cursor: 'pointer',
+        }}>{muted ? '🔇' : (playing ? '🔊' : '🎵')}</button>
+
+        <div style={{
+          position: 'absolute', zIndex: 2, left: 0, right: 0, bottom: 0,
+          padding: '18px 16px calc(20px + env(safe-area-inset-bottom))',
+          display: 'flex', flexDirection: 'column', gap: 10,
+        }}>
+          <div style={{ textAlign: 'center', marginBottom: 2 }}>
+            <div style={{ color: '#b794f6', letterSpacing: 3, fontWeight: 800, fontSize: 13 }}>WELCOME, CHAMPION</div>
+            <div style={{ color: '#9a94ad', fontSize: 12, marginTop: 3 }}>Enter the Arena. Claim your victory.</div>
+          </div>
+
+          <button className="ocva-btn" disabled={!!busy}
+            onClick={() => evm.installed ? doConnectRobinhood() : window.open('https://metamask.io/download/', '_blank', 'noopener')}
+            style={{ width: '100%', padding: '15px', fontSize: 15, background: 'linear-gradient(135deg,#F6851B,#E2761B)', color: '#1a1408' }}>
+            🦊 {connecting ? 'Connecting…' : (evm.installed ? `Sign in with ${evm.label}` : 'Install MetaMask')}
+          </button>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input value={name} onChange={e => setName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && name.trim()) onLogin(name.trim()); }}
+              placeholder="Guest name" inputMode="text"
+              style={{ flex: 1, padding: '13px 14px', fontSize: 16, background: 'rgba(10,10,20,0.85)', color: '#fff', border: '1px solid rgba(150,120,255,0.35)', borderRadius: 12, outline: 'none' }} />
+            <button className="ocva-btn ocva-btn--primary" onClick={() => name.trim() && onLogin(name.trim())} disabled={!name.trim()}
+              style={{ padding: '0 18px', fontSize: 15 }}>Play</button>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 18, marginTop: 2 }}>
+            {(['Discord', 'Google', 'Apple', 'X'] as const).map(s => (
+              <button key={s} onClick={() => setNotice(`${s} login is coming soon.`)}
+                style={{ background: 'none', border: 'none', color: '#8f89a3', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>{s}</button>
+            ))}
+          </div>
+          {(err || notice) && (
+            <div style={{ textAlign: 'center', fontSize: 12, color: err ? '#ffb8b8' : '#c9a94a', marginTop: 2 }}>{err || notice}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{
       position: 'fixed', inset: 0, overflow: 'hidden',

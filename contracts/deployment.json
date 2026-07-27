@@ -1,0 +1,10 @@
+{
+  "chainId": 4663,
+  "rpc": "https://robinhood-mainnet.g.alchemy.com/v2/h7y2nsAnaBKL98b6RHAsM",
+  "deployer": "0x793a5e8b8Ff431cC2D8eE41e8ec2D9ad70247E60",
+  "masterToken": "0x66cf995bac9f4732c7cfed515811a79872a497c3",
+  "wagerEscrow": "0xdbc49ff2cf44d2ba1a844d80d1f82d472440cc3d",
+  "operator": "0x793a5e8b8Ff431cC2D8eE41e8ec2D9ad70247E60",
+  "feeRecipient": "0x793a5e8b8Ff431cC2D8eE41e8ec2D9ad70247E60",
+  "rakeBps": 1000
+}
