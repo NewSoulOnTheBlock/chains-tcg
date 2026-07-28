@@ -138,8 +138,27 @@ services:
       AUTH_DOMAIN: "${AUTH_DOMAIN:?AUTH_DOMAIN is required, e.g. ocva.online (prod) or localhost:8080 (dev)}"
       AUTH_URI: "${AUTH_URI:?AUTH_URI is required, e.g. https://ocva.online (prod) or http://localhost:8080 (dev)}"
       AUTH_STATEMENT: "${AUTH_STATEMENT:-Sign in to Chains TCG.}"
+      # Shown when an already-signed-in player links an ADDITIONAL wallet. It
+      # must read differently from AUTH_STATEMENT: linking a wallet hands the
+      # profile the collection derived from that wallet's on-chain holdings, so
+      # the user has to be able to tell it from "log me in". The server enforces
+      # the distinction independently via auth.nonces.purpose (migration 0013).
+      AUTH_LINK_STATEMENT: "${AUTH_LINK_STATEMENT:-Link this wallet to your Chains TCG profile.}"
       NONCE_TTL_SEC: ${NONCE_TTL_SEC:-300}
       REFRESH_TOKEN_TTL_SEC: ${REFRESH_TOKEN_TTL_SEC:-2592000}
+      # Smart-account (ERC-1271 / ERC-6492) sign-in. The ONLY outbound network
+      # call this service makes, reached only after cheap local ECDSA has
+      # already failed — so EOA logins are unaffected if the endpoint is down.
+      # Keyless public endpoint: no credential belongs on an unauthenticated
+      # code path, and the Alchemy key in contracts/deployment.json is committed
+      # to the repo and being rotated.
+      AUTH_SMART_ACCOUNT_LOGIN: "${AUTH_SMART_ACCOUNT_LOGIN:-true}"
+      AUTH_EVM_RPC_URL: "${AUTH_EVM_RPC_URL:-https://rpc.mainnet.chain.robinhood.com}"
+      AUTH_EVM_CHAIN_ID: ${AUTH_EVM_CHAIN_ID:-4663}
+      AUTH_EVM_TIMEOUT_MS: ${AUTH_EVM_TIMEOUT_MS:-5000}
+      AUTH_RL_ONCHAIN_IP_LIMIT: ${AUTH_RL_ONCHAIN_IP_LIMIT:-5}
+      AUTH_RL_ONCHAIN_ADDRESS_LIMIT: ${AUTH_RL_ONCHAIN_ADDRESS_LIMIT:-3}
+      AUTH_RL_ONCHAIN_GLOBAL_LIMIT: ${AUTH_RL_ONCHAIN_GLOBAL_LIMIT:-60}
     depends_on: *service-depends
     ports:
       - "127.0.0.1:${AUTH_PORT:-4001}:4001"

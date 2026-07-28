@@ -131,7 +131,7 @@ describe('verifyBoosterPayment', () => {
     nonce: NONCE,
     recipient: TREASURY,
     amountWei: 3_500_000_000_000_000n,
-    payerAddress: BUYER,
+    payerAddresses: [BUYER],
     intentCreatedAtSeconds: CREATED,
     minConfirmations: 2,
   };
@@ -194,6 +194,22 @@ describe('verifyBoosterPayment', () => {
 
   it('rejects a payment sent by somebody else', () => {
     expect(verifyBoosterPayment(tx({ from: TREASURY }), expectation)).toMatchObject({
+      ok: false,
+      code: 'not_sent_by_payer',
+    });
+  });
+
+  it('accepts a payment from a LINKED SECONDARY wallet', () => {
+    // `auth.address` is the buyer's PRIMARY address since account linking, so
+    // equality with one address rejected a buyer paying from their own second
+    // wallet — a payment that is genuinely theirs.
+    const SECOND = '0xeeee000000000000000000000000000000000005';
+    const multi = { ...expectation, payerAddresses: [BUYER, SECOND] };
+    expect(verifyBoosterPayment(tx({ from: SECOND }), multi)).toMatchObject({ ok: true });
+  });
+
+  it('rejects everything when the payer set is empty — widening is not loosening', () => {
+    expect(verifyBoosterPayment(tx(), { ...expectation, payerAddresses: [] })).toMatchObject({
       ok: false,
       code: 'not_sent_by_payer',
     });

@@ -307,6 +307,32 @@ export const Backpack = (p: IconProps) => (
   <Svg {...p}><path d="M5 10a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v9a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z" /><path d="M9.5 5V3.5h5V5M8.5 12.5h7v3h-7z" /></Svg>
 );
 
+// ── Sign-in marks (drawn here, not imported — no icon pack) ─────────────────
+
+/** Envelope, for email sign-in. */
+export const Mail = (p: IconProps) => (
+  <Svg {...p}><rect x="3" y="5.5" width="18" height="13" rx="2" /><path d="m4.5 7.5 7.5 5.5 7.5-5.5" /></Svg>
+);
+/** Key, for passkey sign-in. */
+export const Passkey = (p: IconProps) => (
+  <Svg {...p}><circle cx="8.5" cy="8.5" r="4.5" /><path d="m11.8 11.8 8.2 8.2M16.5 16.5l2.4-2.4M13.8 19.2l2-2" /></Svg>
+);
+/** Minimal single-colour "G", for Google sign-in. */
+export const GoogleG = (p: IconProps) => (
+  <Svg {...p}><path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1" /><path d="M20.5 12H12" /></Svg>
+);
+/** Apple mark, for Apple sign-in. */
+export const AppleMark = (p: IconProps) => (
+  <SvgFilled {...p}>
+    <path d="M15.9 8.2c-1 0-1.9.6-2.6.6s-1.6-.6-2.7-.6C8.5 8.2 6.6 9.9 6.6 12.8c0 3 2.1 6.7 3.8 6.7.8 0 1.2-.5 2.3-.5s1.4.5 2.3.5c1.7 0 3.5-3.4 3.5-5.4-1.4-.6-2.1-1.8-2.1-3.1 0-1.2.6-2.1 1.4-2.7-.6-.7-1.4-1.1-1.9-1.1z" />
+    <path d="M15.2 5.2c.6-.7 1-1.7.9-2.7-.9.1-2 .7-2.6 1.5-.6.6-1 1.6-.9 2.6 1 0 2-.7 2.6-1.4z" />
+  </SvgFilled>
+);
+/** X (Twitter) logomark. */
+export const XBrand = (p: IconProps) => (
+  <SvgFilled {...p}><path d="M17.8 3h3.1l-6.9 7.9L22.1 21h-6.4l-4.4-5.8L6.2 21H3.1l7.4-8.5L2.4 3h6.5l4 5.3L17.8 3zm-1.1 16.2h1.7L7.9 4.7H6.1l10.6 14.5z" /></SvgFilled>
+);
+
 export const Hourglass = (p: IconProps) => (
   <Svg {...p}><path d="M7 3h10M7 21h10" /><path d="M8 3v3.5c0 2 4 3.7 4 5.5s-4 3.5-4 5.5V21M16 3v3.5c0 2-4 3.7-4 5.5s4 3.5 4 5.5V21" /></Svg>
 );
@@ -383,6 +409,7 @@ export const ICONS = {
   warning: Warning, info: Info, lock: Lock, user: User, users: Users, chat: Chat, mic: Mic,
   soundOn: SoundOn, soundOff: SoundOff, music: Music, settings: Settings, tools: Tools,
   monitor: Monitor, mobile: Mobile, fox: Fox, backpack: Backpack,
+  mail: Mail, passkey: Passkey, googleG: GoogleG, appleMark: AppleMark, xBrand: XBrand,
   hourglass: Hourglass, enterKey: EnterKey, handshake: Handshake, lizard: Lizard,
   keyboard: Keyboard, fuel: Fuel, gridView: GridView, listView: ListView, medalFirst: MedalFirst,
   diamond: Diamond, diamondOutline: DiamondOutline, dot: Dot,

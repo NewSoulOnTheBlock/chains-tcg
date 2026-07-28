@@ -46,12 +46,20 @@ export async function setupTestDatabase(): Promise<void> {
 
 export async function truncateAll(): Promise<void> {
   // `core.profiles` is truncated CASCADE, so anything keyed on a profile —
-  // `core.card_ownership` included — is emptied with it. Naming that table here
-  // would couple every test file in this service to a migration it does not use.
+  // `core.card_ownership` and `core.profile_addresses` included — is emptied
+  // with it. Naming those tables here would couple every test file in this
+  // service to a migration it does not use.
+  //
+  // `core.profile_address_unlinks` is the exception and has to be named: 0013
+  // deliberately gives it NO foreign key, because an audit row must outlive the
+  // profile it names. Left behind, its rows arm the 30-day relink cooldown
+  // against the next test that links the same fixture address to a different
+  // profile id.
   await query(`
     TRUNCATE wager.shipping, wager.redemptions, wager.booster_intents,
              wager.booster_offers, wager.payouts, wager.deposits, wager.escrows,
-             game.match_results, game.matches, core.audit_log, core.profiles
+             game.match_results, game.matches, core.audit_log,
+             core.profile_address_unlinks, core.profiles
       RESTART IDENTITY CASCADE
   `);
   await query(`UPDATE wager.booster_counter SET next_ticket_number = 1, reserved_count = 0`);
@@ -65,13 +73,83 @@ export async function closeTestDatabase(): Promise<void> {
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
-export async function makeProfile(displayName: string, address: string): Promise<string> {
+/**
+ * A profile, and — since 0013 — its one primary `core.profile_addresses` row,
+ * created by the `profiles_link_primary_address` trigger rather than here.
+ *
+ * `chain` defaults to `robinhood`, which is where every real account lives
+ * since migration 0009 and therefore the only default that makes a fixture
+ * resemble production. The wager service's collection sync enumerates the
+ * addresses whose slug maps to the CardPack contract's chain id, so a fixture
+ * on `ethereum` is a profile with no eligible wallet.
+ */
+export async function makeProfile(
+  displayName: string,
+  address: string,
+  chain = 'robinhood',
+): Promise<string> {
   const { rows } = await query<{ id: string }>(
     `INSERT INTO core.profiles (address, chain, display_name)
-     VALUES ($1, 'ethereum', $2) RETURNING id`,
-    [address, displayName],
+     VALUES ($1, $2, $3) RETURNING id`,
+    [address, chain, displayName],
   );
   return rows[0]!.id;
+}
+
+// ── core.profile_addresses (0013) ───────────────────────────────────────────
+
+/**
+ * Link a SECOND (or third) wallet to a profile.
+ *
+ * The primary row already exists — 0013's `profiles_link_primary_address`
+ * trigger writes it on every profile INSERT, which is what guarantees no
+ * profile can exist with zero linked addresses. So this helper defaults to
+ * `is_primary = false`; asking for a second primary is a partial-unique-index
+ * violation, exactly as it is in production.
+ */
+export async function linkAddress(input: {
+  profileId: string;
+  address: string;
+  chain?: string;
+  kind?: 'eoa' | 'smart';
+  isPrimary?: boolean;
+}): Promise<void> {
+  await query(
+    `INSERT INTO core.profile_addresses (profile_id, address, chain, kind, is_primary)
+     VALUES ($1::bigint, $2, $3, $4, $5)`,
+    [
+      input.profileId,
+      // EVM addresses are stored lowercase; a Solana address is base58 and
+      // case-sensitive, so it is passed through untouched.
+      input.chain === 'solana' ? input.address : input.address.toLowerCase(),
+      input.chain ?? 'robinhood',
+      input.kind ?? 'eoa',
+      input.isPrimary ?? false,
+    ],
+  );
+}
+
+/**
+ * Reproduce a database on which 0013 has NOT been applied.
+ *
+ * The wager service must survive that state — its own migrations and the auth
+ * service's land in separate deploys — without either crashing or concluding
+ * that every player owns nothing. The two triggers go with the table: they
+ * write to it, so a profile could not be created while it is missing, and a
+ * pre-0013 database had neither.
+ */
+export async function simulateMissingProfileAddresses(): Promise<void> {
+  await query(`DROP TRIGGER IF EXISTS profiles_link_primary_address ON core.profiles`);
+  await query(`DROP TRIGGER IF EXISTS profiles_sync_primary_address ON core.profiles`);
+  await query(`DROP TABLE IF EXISTS core.profile_addresses CASCADE`);
+}
+
+/** Put 0013 back. It is idempotent, so re-applying the file is the whole job. */
+export async function restoreProfileAddresses(): Promise<void> {
+  const files = (await readdir(MIGRATIONS)).filter((f) => f.startsWith('0013_'));
+  for (const name of files) {
+    await query(await readFile(path.join(MIGRATIONS, name), 'utf8'));
+  }
 }
 
 export async function makeMatch(

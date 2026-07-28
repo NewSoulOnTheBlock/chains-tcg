@@ -10,8 +10,16 @@
  *
  * On EVM the intent binding is exact: a native-value payment carries calldata,
  * so the server-issued nonce travels *in the transaction itself*. The payment
- * must be to the treasury, for the exact quoted amount, from the authenticated
- * wallet, newer than the intent, and carrying that intent's nonce as calldata.
+ * must be to the treasury, for the exact quoted amount, from one of the
+ * authenticated profile's linked wallets, newer than the intent, and carrying
+ * that intent's nonce as calldata.
+ *
+ * "One of the linked wallets" rather than "the authenticated wallet" since
+ * account linking: `auth.address` became the profile's PRIMARY address, so a
+ * buyer signing in with one wallet and paying with another was rejected for a
+ * payment that was genuinely theirs. The set is server-derived (see
+ * `services/transactingAddresses.ts`) — the buyer identity still never comes
+ * from the request, which is what H-3 was about.
  */
 import type { ParsedTx } from '../chain/types.js';
 
@@ -35,8 +43,16 @@ export interface BoosterPaymentExpectation {
   recipient: string;
   /** EXACT amount in wei. */
   amountWei: bigint;
-  /** Authenticated buyer's wallet address. Lower-case. */
-  payerAddress: string;
+  /**
+   * EVERY wallet linked to the authenticated buyer's profile, lower-case.
+   *
+   * Plural since account linking: `auth.address` is the profile's PRIMARY
+   * address, not necessarily the wallet the buyer signed in with and not
+   * necessarily the one they paid from. Read from `core.profile_addresses` for
+   * the authenticated profile id — never from a request field (H-2). An empty
+   * set rejects every payment, which is the safe direction.
+   */
+  payerAddresses: readonly string[];
   /** Unix seconds; the payment must be newer than the intent. */
   intentCreatedAtSeconds: number;
   minConfirmations: number;
@@ -102,8 +118,8 @@ export function verifyBoosterPayment(
     return reject('tx_predates_intent', 'The payment is older than the purchase intent.');
   }
 
-  if (tx.from !== expect.payerAddress) {
-    return reject('not_sent_by_payer', 'The payment was not sent by the authenticated wallet.');
+  if (!expect.payerAddresses.includes(tx.from)) {
+    return reject('not_sent_by_payer', 'The payment was not sent by one of your linked wallets.');
   }
   if (tx.to !== expect.recipient) {
     return reject('wrong_recipient', 'The payment does not credit the booster treasury.');

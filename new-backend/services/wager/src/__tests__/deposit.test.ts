@@ -13,6 +13,8 @@ const TOKEN = '0x1111111111111111111111111111111111111111';
 const ESCROW = '0x2222222222222222222222222222222222222222';
 const PLAYER = '0x3333333333333333333333333333333333333333';
 const STRANGER = '0x4444444444444444444444444444444444444444';
+/** A second wallet linked to the SAME profile as PLAYER. */
+const SECOND = '0x5555555555555555555555555555555555555555';
 const ESCROW_CREATED = 1_700_000_000;
 
 const expectation: DepositExpectation = {
@@ -21,7 +23,7 @@ const expectation: DepositExpectation = {
   amountBase: 1_000_000n,
   token: TOKEN,
   depositAddress: ESCROW,
-  depositorAddress: PLAYER,
+  depositorAddresses: [PLAYER],
   escrowCreatedAtSeconds: ESCROW_CREATED,
   minConfirmations: 2,
 };
@@ -98,9 +100,59 @@ describe('verifyDepositTx', () => {
     expect(verdict).toMatchObject({ ok: false, code: 'wrong_sender' });
   });
 
-  it('rejects a transaction the authenticated wallet did not send', () => {
+  it('rejects a transaction none of the profile’s wallets sent', () => {
     const verdict = verifyDepositTx(tx({ from: STRANGER }), expectation);
     expect(verdict).toMatchObject({ ok: false, code: 'not_sent_by_depositor' });
+  });
+
+  /* ── one profile, several wallets ───────────────────────────────────── */
+
+  it('accepts a payment from a LINKED SECONDARY wallet', () => {
+    // `auth.address` is the profile's PRIMARY address since account linking, not
+    // the wallet the session signed with — so equality with one address would
+    // reject a player paying from their own second wallet.
+    const multi: DepositExpectation = { ...expectation, depositorAddresses: [PLAYER, SECOND] };
+    const verdict = verifyDepositTx(
+      tx({ from: SECOND, erc20Transfers: [transfer({ from: SECOND })] }),
+      multi,
+    );
+    expect(verdict).toMatchObject({ ok: true, fromAddress: SECOND });
+  });
+
+  it('returns the wallet whose balance actually fell, not the first in the set', () => {
+    // `fromAddress` is what gets written to `wager.deposits.from_address`, and
+    // that column is where refunds and winnings are paid back to.
+    const multi: DepositExpectation = { ...expectation, depositorAddresses: [PLAYER, SECOND] };
+    const verdict = verifyDepositTx(
+      tx({ from: SECOND, erc20Transfers: [transfer({ from: SECOND })] }),
+      multi,
+    );
+    if (verdict.ok) expect(verdict.fromAddress).toBe(SECOND);
+    else expect.unreachable('expected the deposit to be accepted');
+  });
+
+  it('still rejects a wallet that is NOT in the set — widening is not loosening', () => {
+    const multi: DepositExpectation = { ...expectation, depositorAddresses: [PLAYER, SECOND] };
+    expect(
+      verifyDepositTx(tx({ from: STRANGER, erc20Transfers: [transfer({ from: STRANGER })] }), multi),
+    ).toMatchObject({ ok: false, code: 'not_sent_by_depositor' });
+  });
+
+  it('rejects everything when the set is empty', () => {
+    // A profile with no EVM wallet, or a resolver that found nothing. Empty must
+    // mean "nobody", never "anybody".
+    const none: DepositExpectation = { ...expectation, depositorAddresses: [] };
+    expect(verifyDepositTx(tx(), none)).toMatchObject({
+      ok: false,
+      code: 'not_sent_by_depositor',
+    });
+  });
+
+  it('rejects tokens moved out of a wallet outside the set, even by a wallet inside it', () => {
+    const multi: DepositExpectation = { ...expectation, depositorAddresses: [PLAYER, SECOND] };
+    expect(
+      verifyDepositTx(tx({ from: PLAYER, erc20Transfers: [transfer({ from: STRANGER })] }), multi),
+    ).toMatchObject({ ok: false, code: 'wrong_sender' });
   });
 
   it('rejects a transfer older than the escrow', () => {

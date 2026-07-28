@@ -1,7 +1,10 @@
 import { createPublicClient, http, parseAbi } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-const RPC = process.env.ROBINHOOD_RPC || 'https://robinhood-mainnet.g.alchemy.com/v2/h7y2nsAnaBKL98b6RHAsM';
+const RPC = process.env.ROBINHOOD_RPC || 'https://rpc.mainnet.chain.robinhood.com';
+// Robinhood Chain's official PUBLIC, KEYLESS endpoint (chain 4663). A live
+// Alchemy key used to sit here as the fallback and was readable by anyone with
+// the repo. Set ROBINHOOD_RPC to use a provider endpoint; never inline a key.
 const PACK = '0x57200fb533b33823f8bd2ac8f3649e3b643830b3';
 const abi = parseAbi([
   'function mintPack() payable returns (uint256[])',

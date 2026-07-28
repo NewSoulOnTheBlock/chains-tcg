@@ -154,11 +154,46 @@ export interface NonceChallenge {
 export interface AuthProfile {
   /** bigint-safe decimal string. Never `parseInt` it. */
   profileId: string;
+  /**
+   * The profile's PRIMARY address — NOT necessarily the wallet that just
+   * signed. One profile can own several addresses (see `addresses.ts`), and
+   * signing in with any of them returns the primary here.
+   *
+   * Use this for "this account is …". Use `VerifyResponse.signedInWith.address`
+   * for "you signed in with …". They are the same string for the overwhelming
+   * majority of players, and conflating them is invisible until the day someone
+   * links a second wallet.
+   */
   address: string;
   chain: string;
   displayName: string;
   /** `['player']`, or `['player','operator']`. Comes from the TOKEN. */
   roles: string[];
+}
+
+/** How an address proves itself. */
+export type AddressKind =
+  /** An ordinary keypair wallet. Verified with a local `secp256k1` recover. */
+  | 'eoa'
+  /**
+   * An ERC-4337 smart contract account. Verified ON CHAIN via ERC-1271, or via
+   * ERC-6492 while the account is still counterfactual — which is why the
+   * `chain_unreachable` / `chain_id_mismatch` / `chain_call_failed` failures
+   * exist for this kind and not for `eoa`.
+   */
+  | 'smart';
+
+/**
+ * `POST /auth/verify` → `signedInWith`: the address that actually signed the
+ * challenge, which may not be `profile.address`.
+ *
+ * Added additively by the backend; treat as optional so a client built against
+ * a newer backend still works against an older one.
+ */
+export interface SignedInWith {
+  address: string;
+  chain: AuthChain;
+  kind: AddressKind;
 }
 
 /** `POST /auth/verify` and `POST /auth/refresh` (the latter without `profile`). */
@@ -174,6 +209,11 @@ export interface TokenResponse {
 
 export interface VerifyResponse extends TokenResponse {
   profile: AuthProfile;
+  /**
+   * The wallet that signed this challenge. Optional only for
+   * forward/backward compatibility — the live backend always sends it.
+   */
+  signedInWith?: SignedInWith;
 }
 
 /**
@@ -245,11 +285,22 @@ export async function verifySignature(params: {
 
   const res = await post<VerifyResponse>('/auth/verify', body, { auth: 'none' });
 
+  // WHICH address goes in the session?
+  //
+  // `Session.address` is documented as "the wallet address that signed in", and
+  // that is what it must stay: it is the identity this credential pair was
+  // minted for. `res.profile.address` is the profile's PRIMARY address, which
+  // for a player with several linked wallets is a different string — storing it
+  // here would make the session claim a wallet the user did not just prove.
+  //
+  // `signedInWith` is a recent, additive field. Falling back to
+  // `profile.address` reproduces the old behaviour exactly, which is correct
+  // for the single-address case (where the two are equal anyway).
   setSession({
     accessToken: res.accessToken,
     refreshToken: res.refreshToken,
-    address: res.profile.address,
-    chain: params.chain,
+    address: res.signedInWith?.address ?? res.profile.address,
+    chain: res.signedInWith?.chain ?? params.chain,
   });
 
   return res;
@@ -420,13 +471,41 @@ export async function signIn(params: {
 }): Promise<VerifyResponse> {
   const { address, chain } = params;
 
-  const challenge = await requestNonce({ address, chain });
+  return signInWithSigner({
+    address,
+    chain,
+    // Sign the server's message VERBATIM. Any transformation here breaks it.
+    signMessage: (message) =>
+      chain === 'solana'
+        ? signMessageSolana(message, requireProvider(params.solanaProvider))
+        : signMessageEvm(message, address),
+  });
+}
 
-  // Sign the server's message VERBATIM. Any transformation here breaks it.
-  const signature =
-    chain === 'solana'
-      ? await signMessageSolana(challenge.message, requireProvider(params.solanaProvider))
-      : await signMessageEvm(challenge.message, address);
+/**
+ * The same three-step handshake, with the SIGNING step supplied by the caller.
+ *
+ * This is the seam any non-injected signer needs. `signIn()` above signs with
+ * the injected provider's `personal_sign`; an embedded wallet (e.g. Privy's —
+ * see `src/privy/`) instead signs with its own SDK's signMessage, which is
+ * still a plain EIP-191 `personal_sign` over the exact server string. A smart
+ * contract account would plug in here too, with an ERC-1271/6492 signature the
+ * server already knows how to verify.
+ *
+ * All paths mint the nonce here, sign the server's exact string, and verify
+ * here. There is deliberately no second auth path: only the middle step varies.
+ *
+ * `address` MUST be the address that `signMessage` signs as.
+ */
+export async function signInWithSigner(params: {
+  address: string;
+  chain: AuthChain;
+  signMessage: (message: string) => Promise<string>;
+}): Promise<VerifyResponse> {
+  const { address, chain } = params;
+
+  const challenge = await requestNonce({ address, chain });
+  const signature = await params.signMessage(challenge.message);
 
   return verifySignature({
     address,

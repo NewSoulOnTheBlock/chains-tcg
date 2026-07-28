@@ -34,6 +34,7 @@ import { planVoidRefund, payoutIdempotencyKey, type FundedSeat } from '../domain
 import { executePayout, type PayoutRunnerDeps } from './payoutRunner.js';
 import type { ChainReader } from '../chain/types.js';
 import type { StakePolicy } from '../domain/stakes.js';
+import { resolveTransactingAddresses } from './transactingAddresses.js';
 
 export interface EscrowServiceDeps {
   reader: ChainReader;
@@ -252,6 +253,10 @@ export async function submitDeposit(
     const seat = seatForProfile(seats, auth.profileId);
     assertParticipant(seat);
 
+    // Every wallet this profile may pay from, read INSIDE this transaction so a
+    // concurrent unlink cannot land between the read and the deposit row.
+    const payers = await resolveTransactingAddresses(client, auth);
+
     // (3) Insert first. The database is the guard.
     try {
       await insertDeposit(client, {
@@ -259,7 +264,17 @@ export async function submitDeposit(
         escrowId: escrow.id,
         seat,
         profileId: auth.profileId,
-        fromAddress: auth.address,
+        // PROVISIONAL. `from_address` is the refund/payout destination
+        // (`planVoidRefund`, `planSettlement`), so it has to end up being the
+        // wallet whose balance actually fell — which the chain has not been
+        // asked about yet at step 3, and which is no longer necessarily
+        // `auth.address` now that a player may pay from any linked wallet. The
+        // column is NOT NULL and the insert must precede the RPC call, so the
+        // profile's primary address stands in and is corrected from the verdict
+        // below. No other session can observe the interim value: the correction
+        // is in this same transaction, and a failed verification rolls the row
+        // back entirely.
+        fromAddress: auth.address.toLowerCase(),
         amountBase: escrow.amountBase,
         blockNumber: null,
       });
@@ -286,7 +301,11 @@ export async function submitDeposit(
       amountBase: escrow.amountBase,
       token: escrow.token,
       depositAddress: escrow.depositAddress,
-      depositorAddress: auth.address.toLowerCase(),
+      // A COMPARISON: "does this payment come from someone who is this player?"
+      // Any wallet linked to the authenticated profile answers yes. Not
+      // `auth.address` alone — that is the profile's primary wallet, and a
+      // player paying from their linked secondary is still this player.
+      depositorAddresses: payers.addresses,
       escrowCreatedAtSeconds: Math.floor(escrow.createdAt.getTime() / 1000),
       minConfirmations: deps.minConfirmations,
     });
@@ -306,12 +325,39 @@ export async function submitDeposit(
           });
     }
 
+    // `from_address` is corrected here, from the verdict, and this is the
+    // load-bearing half of widening the check above. `verdict.fromAddress` is
+    // the `from` of the ERC-20 Transfer log — the wallet whose balance actually
+    // fell — and refunds and winnings are paid back to this column. Leaving the
+    // provisional primary in place would silently move a player's stake from the
+    // wallet that funded it to a different wallet of theirs on every refund,
+    // which is wrong even though both are theirs, and is a real loss if the
+    // primary is later unlinked or is an account they cannot withdraw from.
     await client.query(
       `UPDATE wager.deposits
-          SET block_number = $2, block_time = to_timestamp($3), log_index = $4
+          SET from_address = $5, block_number = $2, block_time = to_timestamp($3), log_index = $4
         WHERE signature = $1`,
-      [input.txHash, String(verdict.blockNumber), verdict.blockTimestamp, verdict.logIndex],
+      [
+        input.txHash,
+        String(verdict.blockNumber),
+        verdict.blockTimestamp,
+        verdict.logIndex,
+        verdict.fromAddress,
+      ],
     );
+
+    if (verdict.fromAddress !== auth.address.toLowerCase()) {
+      // Not an error — this is the case the widening exists to serve. Logged
+      // because "which of a player's wallets funded which seat" is the first
+      // question asked when a payout is disputed, and the address is already
+      // durable on the row.
+      log().info('deposit_from_secondary_wallet', {
+        escrow_id: escrow.id,
+        seat,
+        address_source: payers.source,
+        linked_addresses: payers.addresses.length,
+      });
+    }
 
     const deposits = await lockDeposits(client, escrow.id);
     const both = deposits.length >= 2;
@@ -394,6 +440,13 @@ export async function voidEscrow(
 
     await appendAudit(client, {
       actorProfileId: auth.profileId,
+      // A VALUE RECORDED, and deliberately the PRIMARY address rather than any
+      // linked one. `auth.roles` is what authorised this call, and the operator
+      // role is derived by `deriveRoles` from an address in OPERATOR_ADDRESSES;
+      // recording the primary names the address the privilege was granted
+      // against, which is the identity an auditor will be reconciling with. A
+      // set of addresses is not an actor, and the wallet an operator happened to
+      // sign in with is not the reason they were allowed to do this.
       actorAddress: auth.address,
       actorRoles: auth.roles,
       action: 'wager.void',

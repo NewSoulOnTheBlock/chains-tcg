@@ -7,7 +7,9 @@
  *
  * Every field of `DepositExpectation` comes from server-held state:
  *   escrowId, amountBase, token, depositAddress ← wager.escrows
- *   seat, depositorAddress                      ← game.matches mapping + req.auth
+ *   seat                                        ← game.matches mapping
+ *   depositorAddresses                          ← core.profile_addresses, for
+ *                                                 req.auth.profileId
  * The request body contributes exactly one value: the transaction hash.
  *
  * ── HOW A PAYMENT IS BOUND TO ONE ESCROW SEAT ON EVM ────────────────────────
@@ -20,8 +22,13 @@
  *      is fixed at escrow-creation time and a later key rotation cannot
  *      retroactively redefine it. This is the hook a per-escrow deposit vault
  *      slots into later (see the report) without touching this code.
- *   2. `from` equals the authenticated profile's address, so a payment can only
- *      ever be claimed by the wallet that made it.
+ *   2. `from` is one of the authenticated profile's LINKED addresses, so a
+ *      payment can only ever be claimed by the player who made it. This was
+ *      equality with a single address until account linking; `auth.address` is
+ *      now the profile's primary wallet rather than the one it signed in with,
+ *      so equality would reject a player paying from their own second wallet.
+ *      The set is read from `core.profile_addresses` for the authenticated
+ *      profile id and can never be widened by a request (H-2).
  *   3. The amount is EXACT, so one large transfer cannot satisfy several
  *      expectations.
  *   4. The transfer is newer than the escrow row, so historical transfers are
@@ -45,8 +52,20 @@ export interface DepositExpectation {
   token: string;
   /** Address this escrow's deposits must credit. Lower-case. */
   depositAddress: string;
-  /** Authenticated profile's wallet address. Lower-case. */
-  depositorAddress: string;
+  /**
+   * EVERY wallet linked to the authenticated profile, lower-case.
+   *
+   * Plural since account linking: `auth.address` is the profile's PRIMARY
+   * address, which is not necessarily the wallet the player signed in with and
+   * is certainly not necessarily the wallet they pay from. A player who pays
+   * from a linked secondary is the same player.
+   *
+   * The set always comes from `core.profile_addresses` for the authenticated
+   * profile id (`services/wager/src/services/transactingAddresses.ts`), NEVER
+   * from a request field — H-2. An empty set rejects everything, which is the
+   * safe direction.
+   */
+  depositorAddresses: readonly string[];
   /** Unix seconds; the transfer must be newer than the escrow itself. */
   escrowCreatedAtSeconds: number;
   /** Confirmations required before a deposit counts. */
@@ -115,11 +134,14 @@ export function verifyDepositTx(tx: ParsedTx | null, expect: DepositExpectation)
     );
   }
 
-  // The authenticated wallet must be the account that sent the transaction.
-  if (tx.from !== expect.depositorAddress) {
+  // One of the authenticated profile's wallets must be the account that sent
+  // the transaction. Membership in a server-derived set, not equality with a
+  // single address — but still a closed set, and still one the request cannot
+  // influence.
+  if (!expect.depositorAddresses.includes(tx.from)) {
     return reject(
       'not_sent_by_depositor',
-      'The transaction was not sent by the authenticated wallet.',
+      'The transaction was not sent by one of your linked wallets.',
     );
   }
 
@@ -143,9 +165,15 @@ export function verifyDepositTx(tx: ParsedTx | null, expect: DepositExpectation)
       sawWrongAmount = true;
       continue;
     }
-    // The tokens must leave the depositor's own balance, not merely be moved by
-    // a transaction they happened to send.
-    if (transfer.from !== expect.depositorAddress) {
+    // The tokens must leave one of the depositor's own balances, not merely be
+    // moved by a transaction they happened to send.
+    //
+    // Tested independently of `tx.from` above rather than pinned to whichever
+    // address matched there. Both are wallets of the SAME profile, so a player
+    // sending from wallet A a transaction that moves wallet B's tokens is moving
+    // their own money either way; and `fromAddress` below returns the wallet
+    // whose balance actually fell, which is where a refund has to go.
+    if (!expect.depositorAddresses.includes(transfer.from)) {
       sawWrongSender = true;
       continue;
     }
@@ -160,7 +188,7 @@ export function verifyDepositTx(tx: ParsedTx | null, expect: DepositExpectation)
   }
 
   if (sawWrongSender) {
-    return reject('wrong_sender', 'The tokens did not come from the authenticated wallet.');
+    return reject('wrong_sender', 'The tokens did not come from one of your linked wallets.');
   }
   if (sawWrongToken) return reject('wrong_token', 'The transfer used a different token contract.');
   if (sawWrongAmount) {

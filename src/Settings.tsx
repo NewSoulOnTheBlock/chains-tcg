@@ -19,8 +19,29 @@ import { engravedPanel } from './ui';
 import { hapticsSupported, HAPTICS_KEY, Haptics } from './haptics';
 import {
   ArrowLeft, Check, Copy, Book, Warning, Trash, User, Globe, Swords,
-  Settings as SettingsIcon, SoundOn, Monitor,
+  Settings as SettingsIcon, SoundOn, Monitor, Link as LinkIcon, Fox, Mail,
 } from './icons';
+// ── Linked wallets ──────────────────────────────────────────────────────────
+// One profile, several addresses. The API client (`src/api/addresses.ts`) and
+// the copy/pure logic (`src/linked-wallets.ts`) are both vendor-neutral; the
+// only Privy-aware pieces are the eager `PRIVY_ENABLED` flag and the LAZY
+// `PrivyLinkPanel` below — the SDK chunk loads only when a player actually
+// opens "link a sign-in".
+import { getSession, type LinkedAddress } from './api';
+import { listAddresses, linkWithSigner, setPrimaryAddress, unlinkAddress } from './api/addresses';
+import { APP_AUTH_CHAIN, signMessageEvm } from './api/auth';
+import { connectRobinhoodChain, detectEvmWallet } from './wallet';
+import { refreshCollection } from './collection';
+import { errorText } from './error-text';
+import {
+  UNLINK_CONSEQUENCES, UNLINK_SHORT_WARNING, formatLinkedAt, linkedWalletErrorText,
+  sameAddress, sortLinkedAddresses, unlinkBlockedReason, unlinkBlockedText, walletKindLabel,
+} from './linked-wallets';
+import { PRIVY_ENABLED } from './privy/env';
+
+const PrivyLinkPanel = React.lazy(() =>
+  import('./privy/runtime').then((m) => ({ default: m.PrivyLinkPanel })),
+);
 
 // ── Preference keys ─────────────────────────────────────────────────────────
 // These are the exact localStorage keys the rest of the app already reads. The
@@ -325,6 +346,94 @@ function ClearDataDialog({ onCancel, onConfirm }: { onCancel: () => void; onConf
   );
 }
 
+// ── Unlink confirmation ─────────────────────────────────────────────────────
+// Same two-step shape as ClearDataDialog, because the stakes are HIGHER: the
+// server deletes the profile's chain-derived collection by database trigger
+// the moment the address goes. Plain language, before the fact, with an
+// explicit acknowledgement — never a surprise.
+function UnlinkWalletDialog({
+  target, onCancel, onConfirm,
+}: { target: LinkedAddress; onCancel: () => void; onConfirm: () => void }) {
+  const [ack, setAck] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 120, padding: 18,
+        background: 'rgba(4,4,12,0.72)', backdropFilter: 'blur(5px)',
+        display: 'grid', placeItems: 'center', overflowY: 'auto',
+      }}
+    >
+      <div
+        role="dialog" aria-modal="true" aria-labelledby="ocva-unlink-title"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          ...engravedPanel(true), width: 'min(440px, 100%)', padding: 20,
+          borderColor: 'rgba(255,97,111,0.35)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <span aria-hidden style={{ color: S.danger, display: 'inline-flex' }}><Warning size={18} /></span>
+          <h2 id="ocva-unlink-title" style={{
+            margin: 0, fontFamily: SERIF, fontWeight: 800, fontSize: 19, color: S.danger,
+          }}>Unlink this wallet?</h2>
+        </div>
+        <p style={{
+          margin: '0 0 10px', fontFamily: F.mono, fontSize: 12, color: S.text,
+          wordBreak: 'break-all',
+        }}>{target.address}</p>
+        <p style={{ margin: '0 0 10px', fontSize: 13.5, lineHeight: 1.55, color: S.text2 }}>
+          Removing a wallet does more than remove an address. The moment it goes:
+        </p>
+        <ul style={{ margin: '0 0 12px', paddingLeft: 20, fontSize: 13, lineHeight: 1.7, color: S.text2 }}>
+          {UNLINK_CONSEQUENCES.map((line) => <li key={line}>{line}</li>)}
+        </ul>
+        <p style={{ margin: '0 0 14px', fontSize: 12.5, lineHeight: 1.55, color: S.muted }}>
+          The wallet itself and the cards it holds on chain are untouched — but this profile
+          forgets everything it scanned, and cards held only by this wallet cannot be re-proved
+          without it. There is also a 30-day wait before this wallet can join another profile.
+        </p>
+
+        <label style={{
+          display: 'flex', alignItems: 'center', gap: 10, minHeight: 44, cursor: 'pointer',
+          padding: '8px 10px', borderRadius: 10, background: SURF.obsidianWell,
+          border: `1px solid ${S.hair}`, fontSize: 13, color: S.text,
+        }}>
+          <input
+            type="checkbox" checked={ack} onChange={(e) => setAck(e.currentTarget.checked)}
+            style={{ width: 18, height: 18, accentColor: S.danger, cursor: 'pointer' }}
+          />
+          I understand my scanned collection will be deleted.
+        </label>
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16, flexWrap: 'wrap' }}>
+          <button
+            type="button" onClick={onCancel} className="ova-plate ova-plate--obsidian"
+            style={{ minHeight: 44, padding: '11px 18px', fontSize: 12.5, fontFamily: F.body }}
+          >KEEP WALLET</button>
+          <button
+            type="button" onClick={onConfirm} disabled={!ack}
+            style={{
+              minHeight: 44, padding: '11px 20px', borderRadius: 10, cursor: ack ? 'pointer' : 'not-allowed',
+              fontFamily: F.body, fontWeight: 800, fontSize: 12.5, letterSpacing: '0.1em',
+              background: ack ? 'linear-gradient(180deg,#ff8a94,#e04452)' : 'rgba(90,60,66,0.4)',
+              color: ack ? '#2a0508' : 'rgba(255,255,255,0.35)',
+              border: `1px solid ${ack ? '#b8323f' : 'rgba(255,255,255,0.08)'}`,
+              boxShadow: ack ? EDGE.bevel : 'none',
+            }}
+          >UNLINK WALLET</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Page ────────────────────────────────────────────────────────────────────
 
 export function SettingsPage({
@@ -348,6 +457,13 @@ export function SettingsPage({
   // Account
   const [prof, setProf] = useState<Profile | null>(null);
   const [copied, setCopied] = useState(false);
+  // Linked wallets
+  const [addrs, setAddrs] = useState<LinkedAddress[] | null>(null);
+  const [addrErr, setAddrErr] = useState('');
+  const [addrBusy, setAddrBusy] = useState<null | 'link' | 'primary' | 'unlink'>(null);
+  const [confirmUnlink, setConfirmUnlink] = useState<LinkedAddress | null>(null);
+  const [privyLinkOpen, setPrivyLinkOpen] = useState(false);
+  const [addrReload, setAddrReload] = useState(0);
   // Data
   const [confirmClear, setConfirmClear] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -364,6 +480,16 @@ export function SettingsPage({
     getMyProfileApi().then((p) => { if (alive) setProf(p); }).catch(() => {});
     return () => { alive = false; };
   }, [myName]);
+
+  // Every address on this profile, primary first. The server orders the list;
+  // optimistic updates below re-sort with the same rule so nothing jumps.
+  useEffect(() => {
+    let alive = true;
+    listAddresses()
+      .then((list) => { if (alive) { setAddrs(sortLinkedAddresses(list)); setAddrErr(''); } })
+      .catch((e) => { if (alive) setAddrErr(errorText(e)); });
+    return () => { alive = false; };
+  }, [addrReload]);
 
   // The floating mute stud writes musicMuted/battleMuted directly, and another
   // tab can write any of these. Re-read so the switches never show a stale value.
@@ -436,6 +562,100 @@ export function SettingsPage({
     flash('Dismissed prompts will show again.');
   }
 
+  // ── Linked-wallets actions ───────────────────────────────────────────────
+  // Every failure goes through `linkedWalletErrorText()` — real words for the
+  // named refusals (cooldown with its date, linked-elsewhere, already-linked,
+  // primary, last), `errorText()` for everything else. Raw codes never reach
+  // the toast.
+
+  /** 4001 = the user closed the wallet prompt. Not a fault; say so. */
+  function linkActionError(e: unknown, action: 'link' | 'primary' | 'unlink'): string {
+    const code = (e as { code?: unknown } | null)?.code;
+    if (code === 4001) return 'Signature cancelled. Approve the message in your wallet to link it.';
+    return linkedWalletErrorText(e, action);
+  }
+
+  /** Link the injected browser wallet (MetaMask & co) to THIS profile. */
+  async function linkBrowserWallet() {
+    if (addrBusy) return;
+    setAddrBusy('link');
+    try {
+      // Same connection path as sign-in: switches to Robinhood Chain (4663)
+      // and confirms it, so the message the wallet shows names the right
+      // network. The wallet BEING LINKED signs the "Link this wallet…"
+      // challenge; the session stays whoever is signed in.
+      const { address } = await connectRobinhoodChain();
+      if ((addrs ?? []).some((a) => sameAddress(a.address, address))) {
+        flash('That wallet is already on your profile.');
+        return;
+      }
+      const row = await linkWithSigner({
+        address,
+        chain: APP_AUTH_CHAIN,
+        signMessage: (message) => signMessageEvm(message, address),
+      });
+      setAddrs((prev) => sortLinkedAddresses([...(prev ?? []), row]));
+      flash('Wallet linked. Its cards count for this profile after the next SCAN CHAIN.');
+    } catch (e) {
+      flash(linkActionError(e, 'link'));
+    } finally {
+      setAddrBusy(null);
+    }
+  }
+
+  async function makePrimary(target: LinkedAddress) {
+    if (addrBusy) return;
+    setAddrBusy('primary');
+    try {
+      const updated = await setPrimaryAddress({ address: target.address, chain: target.chain });
+      setAddrs((prev) => sortLinkedAddresses(
+        (prev ?? []).map((a) => ({
+          ...a,
+          isPrimary: sameAddress(a.address, updated.address) && a.chain === updated.chain,
+        })),
+      ));
+      flash('Primary wallet updated.');
+    } catch (e) {
+      flash(linkActionError(e, 'primary'));
+    } finally {
+      setAddrBusy(null);
+    }
+  }
+
+  /**
+   * Gate BEFORE the dialog: the two refusals we can predict (last address,
+   * primary while others remain) get their explanation on the press instead
+   * of a confirmation for an action that cannot succeed.
+   */
+  function requestUnlink(target: LinkedAddress) {
+    if (addrBusy) return;
+    const blocked = unlinkBlockedReason(target, addrs ?? []);
+    if (blocked) {
+      flash(unlinkBlockedText(blocked));
+      return;
+    }
+    setConfirmUnlink(target);
+  }
+
+  async function doUnlink(target: LinkedAddress) {
+    setConfirmUnlink(null);
+    setAddrBusy('unlink');
+    try {
+      await unlinkAddress({ address: target.address, chain: target.chain });
+      setAddrs((prev) => (prev ?? []).filter(
+        (a) => !(sameAddress(a.address, target.address) && a.chain === target.chain),
+      ));
+      // The server-side trigger has already wiped the scanned collection;
+      // re-read so every screen shows "not scanned" instead of stale cards.
+      void refreshCollection();
+      flash('Wallet unlinked. Your scanned collection was cleared — press SCAN CHAIN to re-prove your cards.');
+    } catch (e) {
+      flash(linkActionError(e, 'unlink'));
+    } finally {
+      setAddrBusy(null);
+    }
+  }
+
   function clearLocalData() {
     try { localStorage.clear(); } catch {}
     try { sessionStorage.clear(); } catch {}
@@ -445,6 +665,9 @@ export function SettingsPage({
 
   const walletAddr = prof?.walletAddress ?? null;
   const walletNet = walletAddr ? (walletAddr.startsWith('0x') ? 'Robinhood Chain' : 'Solana') : null;
+  // The address THIS session signed in with — not necessarily the primary.
+  const sessionAddr = getSession()?.address ?? null;
+  const evmWallet = detectEvmWallet();
 
   return (
     <div style={{
@@ -608,6 +831,84 @@ export function SettingsPage({
           />
         </Section>
 
+        {/* ── Linked wallets ─────────────────────────────────────────────── */}
+        <SectionHead icon={<LinkIcon size={15} />} label="Linked wallets" />
+        <Section>
+          {addrs === null && !addrErr && (
+            <Row title="Linked wallets" hint="Loading your linked wallets…"
+              control={<span style={{ fontSize: 12, color: S.muted }}>…</span>} last />
+          )}
+          {addrErr && (
+            <Row title="Linked wallets" hint={addrErr}
+              control={<RowButton onClick={() => setAddrReload((n) => n + 1)}>RETRY</RowButton>} last />
+          )}
+          {addrs !== null && !addrErr && (
+            <>
+              {addrs.map((a) => {
+                const mine = sameAddress(a.address, sessionAddr);
+                const linkedLine = formatLinkedAt(a.linkedAt);
+                return (
+                  <Row
+                    key={`${a.chain}:${a.address}`}
+                    title={a.isPrimary ? 'Primary wallet' : 'Linked wallet'}
+                    hint={
+                      <span style={{ display: 'block' }}>
+                        <span style={{
+                          fontFamily: F.mono, fontSize: 12, color: S.text,
+                          wordBreak: 'break-all', display: 'block',
+                        }}>{a.address}</span>
+                        <span style={{ display: 'block', marginTop: 2 }}>
+                          {walletKindLabel(a.kind)}
+                          {linkedLine ? ` · ${linkedLine}` : ''}
+                          {mine ? ' · signed in on this device' : ''}
+                        </span>
+                      </span>
+                    }
+                    control={
+                      <>
+                        {!a.isPrimary && (
+                          <RowButton onClick={() => void makePrimary(a)}
+                            title="Make this the address other players see">
+                            {addrBusy === 'primary' ? '…' : 'MAKE PRIMARY'}
+                          </RowButton>
+                        )}
+                        <RowButton tone="danger" onClick={() => requestUnlink(a)}
+                          title={UNLINK_SHORT_WARNING}>
+                          {addrBusy === 'unlink' ? '…' : 'UNLINK'}
+                        </RowButton>
+                      </>
+                    }
+                  />
+                );
+              })}
+              <Row
+                title="Link a browser wallet"
+                hint="Attach another wallet (MetaMask & co) to this profile. Your NFT cards from every linked wallet count together after a SCAN CHAIN. The wallet signs one free message — nothing moves."
+                control={
+                  <RowButton onClick={() => void linkBrowserWallet()}
+                    title={evmWallet.installed ? `Link with ${evmWallet.label}` : 'Link a wallet'}>
+                    <Fox size={14} /> {addrBusy === 'link' ? 'LINKING…' : 'LINK…'}
+                  </RowButton>
+                }
+              />
+              <Row
+                title="Link an email or social sign-in"
+                hint={PRIVY_ENABLED
+                  ? 'Sign in with email, Google, Apple, X or a passkey and it will open this profile from any device — no wallet extension needed.'
+                  : 'Email & social sign-in is not available in this build.'}
+                control={PRIVY_ENABLED
+                  ? (
+                    <RowButton onClick={() => setPrivyLinkOpen(true)}>
+                      <Mail size={14} /> LINK…
+                    </RowButton>
+                  )
+                  : <span style={{ fontSize: 12, color: S.muted }}>—</span>}
+                last
+              />
+            </>
+          )}
+        </Section>
+
         {/* ── Data ──────────────────────────────────────────────────────── */}
         <SectionHead icon={<Trash size={15} />} label="Data" />
         <Section>
@@ -666,6 +967,29 @@ export function SettingsPage({
 
       {confirmClear && (
         <ClearDataDialog onCancel={() => setConfirmClear(false)} onConfirm={clearLocalData} />
+      )}
+
+      {confirmUnlink && (
+        <UnlinkWalletDialog
+          target={confirmUnlink}
+          onCancel={() => setConfirmUnlink(null)}
+          onConfirm={() => void doUnlink(confirmUnlink)}
+        />
+      )}
+
+      {privyLinkOpen && (
+        <React.Suspense fallback={null}>
+          <PrivyLinkPanel
+            onLinked={(row) => {
+              setAddrs((prev) => sortLinkedAddresses([
+                ...(prev ?? []).filter((a) => !(sameAddress(a.address, row.address) && a.chain === row.chain)),
+                row,
+              ]));
+              flash('Sign-in linked. It now opens this profile on any device.');
+            }}
+            onClose={() => setPrivyLinkOpen(false)}
+          />
+        </React.Suspense>
       )}
     </div>
   );

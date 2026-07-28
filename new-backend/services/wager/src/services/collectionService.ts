@@ -9,13 +9,20 @@
  * localStorage value is the highest-payoff attack in the product.
  *
  * Two operations:
- *   `getMyCollection`  reads the stored snapshot. Cheap, no network.
+ *   `getMyCollection`  reads the stored snapshot. Cheap, one extra index read.
  *   `syncMyCollection` re-derives the snapshot from chain state and replaces it.
  *
- * Both take the address from `AuthContext`, never from a request. Identity is
- * `(address, chain)` proven at login, so the address is already authenticated;
- * accepting one from a body or a path would recreate audit finding H-2, where
- * anyone could read anyone's holdings by knowing their wallet.
+ * ── ONE PROFILE, SEVERAL WALLETS ───────────────────────────────────────────
+ *
+ * A profile is no longer one address. Account abstraction sign-in comes with
+ * account linking, so a player who minted booster packs with MetaMask and then
+ * signed in with an email-backed smart account must still own their cards. The
+ * addresses come from `core.profile_addresses` for the AUTHENTICATED profile id
+ * — see `collectionAddresses.ts` — and never from a request body, a query
+ * string or a path segment. Identity is proven at login and the collection is
+ * always the caller's; accepting an address from a request would recreate audit
+ * finding H-2, where anyone could read anyone's holdings by knowing their
+ * wallet.
  */
 import type { PoolClient } from 'pg';
 import { AppError, getPool, withTransaction } from '../platform/shared.js';
@@ -30,6 +37,7 @@ import {
 } from '../db/ownership.js';
 import { assertMatchesChain, cardIdForIndex } from '../nft/cardCatalogue.js';
 import type { CardPackReader } from '../chain/cardPackReader.js';
+import { assertSyncable, resolveCollectionAddresses } from './collectionAddresses.js';
 
 export interface CollectionServiceDeps {
   /** Null when no CardPack contract is configured — sync is then unavailable. */
@@ -90,6 +98,31 @@ export interface CollectionView {
    * re-orgs, a lagging RPC endpoint, and any second reader.
    */
   syncedBlock: number | null;
+  /**
+   * The caller's OWN wallets that chain ownership is derived from — every
+   * address linked to this profile on the chain CardPack lives on, lowercased
+   * and sorted. Additive; no existing client reads it.
+   *
+   * On `POST /wager/collection/sync` this is exactly the set that was
+   * enumerated. On `GET /wager/collection` it is the set a sync WOULD cover
+   * right now, which is not necessarily the set the stored snapshot came from:
+   * linking a wallet changes this list immediately and changes `cards` only at
+   * the next sync. That gap is the useful signal — a client can compare it
+   * against what it last synced and prompt — but it is a gap, and closing it
+   * properly needs a column on `core.card_ownership_sync` that this service is
+   * not allowed to add (see the note on `recordSync` below).
+   *
+   * Empty on a deployment with no CardPack contract configured: nothing there
+   * derives ownership from a chain at all.
+   */
+  addresses: string[];
+  /**
+   * Linked wallets on OTHER chains, which cannot hold a CardPack token and are
+   * therefore not enumerated. A count, not a list — the client's use for it is
+   * "2 of your wallets are not on this chain", and the addresses themselves are
+   * already in `addresses` when they are relevant.
+   */
+  addressesSkipped: number;
 }
 
 /** Fold owned rows into the wire shape. Shared so sync and read cannot drift. */
@@ -103,15 +136,32 @@ function viewOf(rows: readonly OwnedCardRow[]): Pick<CollectionView, 'cards' | '
   return { cards, distinct: rows.length, total };
 }
 
-/** Only ever the caller's own collection. There is no "collection by wallet" route. */
-export async function getMyCollection(auth: AuthContext): Promise<CollectionView> {
+/**
+ * Only ever the caller's own collection. There is no "collection by wallet"
+ * route, and `deps` is here for the contract's chain id, not to read it.
+ *
+ * This does NOT apply `assertSyncable`. Its refusals exist to stop a
+ * destructive reconcile running against an address list that cannot be trusted;
+ * rendering already-stored rows is harmless in both of those states, and a read
+ * route that 503s on a misconfiguration takes the collection screen down for a
+ * problem only the sync has.
+ */
+export async function getMyCollection(
+  deps: CollectionServiceDeps,
+  auth: AuthContext,
+): Promise<CollectionView> {
   const rows = await listOwnedCards(getPool(), auth.profileId);
   const state = await readSyncState(getPool(), auth.profileId);
+  const plan = deps.cardPack
+    ? await resolveCollectionAddresses(auth, deps.cardPack.chainId)
+    : null;
   return {
     ...viewOf(rows),
     synced: state !== null,
     syncedAt: state ? state.syncedAt.toISOString() : null,
     syncedBlock: state ? state.blockNumber : null,
+    addresses: plan ? plan.addresses : [],
+    addressesSkipped: plan ? plan.skipped.reduce((n, s) => n + s.count, 0) : 0,
   };
 }
 
@@ -124,7 +174,10 @@ export interface SyncResult extends CollectionView {
    * `syncedBlock` existing on the shared view.
    */
   blockNumber: number;
-  /** Tokens the address once received but no longer holds. */
+  /**
+   * Tokens the profile's addresses once received but no longer hold, summed
+   * across every address enumerated.
+   */
   transferredAway: number;
   /** Rows removed because the profile no longer holds that card. */
   removed: number;
@@ -137,16 +190,68 @@ export interface SyncResult extends CollectionView {
  *   1. verify the manifest still agrees with the contract's immutable
  *      `cardCount()` — a shifted card index silently rewrites history, so it is
  *      checked before anything is written, every time,
- *   2. enumerate holdings (complete, or an exception — never partial),
- *   3. resolve indexes to card ids, failing closed on an unknown index,
- *   4. reconcile, record the sync, and re-read the merged collection, in ONE
+ *   2. resolve WHICH WALLETS this profile owns cards through, and refuse rather
+ *      than reconcile if that list cannot be trusted,
+ *   3. enumerate holdings for every one of them (complete, or an exception —
+ *      never partial), and union the result,
+ *   4. resolve indexes to card ids, failing closed on an unknown index,
+ *   5. reconcile, record the sync, and re-read the merged collection, in ONE
  *      transaction.
  *
- * Step 4 is a full reconcile of the `source = 'chain'` rows: sold cards are
+ * ── UNION FIRST, THEN EXACTLY ONE RECONCILE ────────────────────────────────
+ *
+ * Step 5 is destructive: every chain-sourced card absent from what it is handed
+ * is DELETED. So the per-address loop in step 3 accumulates into a single
+ * `counts` map and the reconcile runs ONCE, for the profile.
+ *
+ * Reconciling per address would be the obvious shape and it is a data-loss bug.
+ * Address A's pass would hand the reconcile only A's cards, deleting everything
+ * held by B; B's pass would then delete everything held by A. A player with two
+ * linked wallets would end each sync owning whichever wallet happened to be
+ * enumerated last, and the loss is silent — the response would look like a
+ * successful sync of a smaller collection. There is no per-address partition in
+ * `core.card_ownership` to reconcile inside, and adding one would be the wrong
+ * fix: ownership is a fact about the PROFILE, so the snapshot that replaces it
+ * has to be a fact about the profile too.
+ *
+ * ── PARTIAL ENUMERATION ABORTS THE WHOLE SYNC ──────────────────────────────
+ *
+ * The loop does not catch. `CardPackReader` already throws rather than returning
+ * a short list when a log window fails, precisely because a truncated read is
+ * indistinguishable from a player who sold everything; the same reasoning
+ * applies one level up. If address B's enumeration fails, the union is missing
+ * B's cards, and reconciling it deletes them. So one address failing fails the
+ * sync, nothing is written, and the previous snapshot — including its block
+ * pointer — stays exactly as it was. An incomplete answer is never written
+ * down.
+ *
+ * ── WHICH BLOCK THE SNAPSHOT CLAIMS ────────────────────────────────────────
+ *
+ * Each address is enumerated against its own head block, so a multi-address
+ * sync has several. The recorded one is the MINIMUM. The snapshot is a single
+ * claim about the whole profile, and the strongest claim it can honestly make
+ * is bounded by its oldest component: reporting the maximum would tell a
+ * staleness check that the collection is fresher than the earliest read
+ * actually supports. With one address, minimum and maximum are the same number
+ * and nothing changes.
+ *
+ * ── TOKEN IDS ARE DE-DUPLICATED ────────────────────────────────────────────
+ *
+ * An ERC-721 token has exactly one owner, so the same token cannot appear under
+ * two addresses of the same profile and a plain sum would already be correct.
+ * It is de-duplicated anyway, because the cost is a `Set` and the failure it
+ * covers is silent: one wallet linked under two chain slugs that both resolve
+ * to this chain id would be enumerated twice, doubling every quantity it holds
+ * and handing a player a playset they do not own. `collectionAddresses` also
+ * de-duplicates the addresses themselves; this is the second net, and it counts
+ * what it caught.
+ *
+ * Step 5 is a full reconcile of the `source = 'chain'` rows: sold cards are
  * deleted. The chain is the truth and this is a projection of it, not a ledger
  * that only grows. Booster-granted rows are a different partition and are left
  * alone — they were never on chain, so their absence from a chain snapshot means
- * nothing (0011).
+ * nothing (0011), and they are not tied to any wallet, so widening the wallet
+ * set does not touch them.
  *
  * The sync-state row is written INSIDE that transaction, not after it. Written
  * after, a crash between commit and update leaves the collection replaced and
@@ -174,28 +279,72 @@ export async function syncMyCollection(
   // index moved — which would map every token to the wrong card.
   assertMatchesChain(await reader.cardCount());
 
-  // The address comes from the proven session identity, never from a request.
-  const snapshot = await reader.holdingsOf(auth.address);
+  // Every wallet linked to the AUTHENTICATED profile, from the database. Never
+  // an address the caller supplied, and never only the one they signed in with.
+  const plan = await resolveCollectionAddresses(auth, reader.chainId);
+  // Refuses instead of reconciling when the list cannot be trusted. Before the
+  // write, like every other guard on this path.
+  assertSyncable(plan, reader.chainId);
 
   const counts = new Map<string, number>();
-  for (const token of snapshot.tokens) {
-    // Throws on an index outside the manifest rather than inventing an id.
-    const cardId = cardIdForIndex(token.cardIndex);
-    counts.set(cardId, (counts.get(cardId) ?? 0) + 1);
+  const seenTokens = new Set<string>();
+  let blockNumber = Number.POSITIVE_INFINITY;
+  let tokensHeld = 0;
+  let transferredAway = 0;
+  let duplicateTokens = 0;
+
+  // SEQUENTIAL, not `Promise.all`. Each `holdingsOf` is already internally
+  // concurrent against a public endpoint this project does not operate, and a
+  // rejected member of a fan-out leaves its siblings running with nobody
+  // waiting on them. Profiles have a handful of addresses, not hundreds.
+  for (const address of plan.addresses) {
+    // Deliberately not caught. A failure here means the union is missing this
+    // address's cards, and the reconcile below deletes everything the union
+    // omits — so the whole sync fails and the previous snapshot stands.
+    const snapshot = await reader.holdingsOf(address);
+    blockNumber = Math.min(blockNumber, snapshot.blockNumber);
+    transferredAway += snapshot.transferredAway;
+
+    for (const token of snapshot.tokens) {
+      const tokenKey = token.tokenId.toString();
+      if (seenTokens.has(tokenKey)) {
+        duplicateTokens += 1;
+        continue;
+      }
+      seenTokens.add(tokenKey);
+      // Throws on an index outside the manifest rather than inventing an id.
+      const cardId = cardIdForIndex(token.cardIndex);
+      counts.set(cardId, (counts.get(cardId) ?? 0) + 1);
+      tokensHeld += 1;
+    }
   }
 
+  // Unreachable while `assertSyncable` holds — it refuses an empty list — but
+  // the recorded block must never be `Infinity`, and a head read is cheaper
+  // than a lie about which block a snapshot is true as of.
+  if (!Number.isFinite(blockNumber)) blockNumber = await reader.getBlockNumber();
+
   const outcome = await withTransaction(async (client: PoolClient) => {
+    // ONE reconcile, for the profile, against the UNION. Running this per
+    // address would delete each address's cards on the next address's pass.
     const summary = await reconcileChainCards(client, { profileId: auth.profileId, counts });
     const syncedAt = await recordSync(client, {
       profileId: auth.profileId,
-      // The CONTRACT, not the player's wallet: the wallet is already
-      // `core.profiles.address` and cannot change for a profile, whereas
-      // repointing CARD_PACK_ADDRESS makes every stored snapshot a statement
-      // about a different collection.
+      // The CONTRACT, not a player wallet — and note that this is why widening
+      // a sync from one address to several needs no schema change here. The
+      // column never held the wallet: `core.card_ownership_sync.address` is
+      // documented in 0011 as the CardPack contract, because repointing
+      // CARD_PACK_ADDRESS makes every stored snapshot a statement about a
+      // different collection, while the wallet was already in core.profiles.
+      // So there is no "first address" being silently recorded here; there is
+      // no address of the player's recorded here at all.
       address: reader.contractAddress,
       chainId: reader.chainId,
-      blockNumber: snapshot.blockNumber,
-      tokenCount: snapshot.tokens.length,
+      blockNumber,
+      // Tokens held across EVERY address enumerated, after de-duplication.
+      // Still reconciles against a block explorer, just against as many wallet
+      // pages as `addresses` names.
+      tokenCount: tokensHeld,
     });
     const rows = await listOwnedCards(client, auth.profileId);
     return { summary, syncedAt, rows };
@@ -207,9 +356,14 @@ export async function syncMyCollection(
     profile_id: auth.profileId,
     chain_contract: reader.contractAddress,
     chain_id: reader.chainId,
-    block_number: snapshot.blockNumber,
-    tokens_held: snapshot.tokens.length,
-    tokens_transferred_away: snapshot.transferredAway,
+    block_number: blockNumber,
+    // Counts, not the wallets themselves: this is an info-level line.
+    addresses: plan.addresses.length,
+    address_source: plan.source,
+    addresses_skipped: plan.skipped.map((s) => `${s.chain}:${s.count}`),
+    tokens_held: tokensHeld,
+    tokens_transferred_away: transferredAway,
+    duplicate_tokens: duplicateTokens,
     distinct_cards: summary.distinctCards,
     total_cards: summary.totalCards,
     cards_removed: summary.removedCards,
@@ -219,9 +373,11 @@ export async function syncMyCollection(
     ...viewOf(outcome.rows),
     synced: true,
     syncedAt: outcome.syncedAt.toISOString(),
-    syncedBlock: snapshot.blockNumber,
-    blockNumber: snapshot.blockNumber,
-    transferredAway: snapshot.transferredAway,
+    syncedBlock: blockNumber,
+    blockNumber,
+    transferredAway,
     removed: summary.removedCards,
+    addresses: plan.addresses,
+    addressesSkipped: plan.skipped.reduce((n, s) => n + s.count, 0),
   };
 }

@@ -8,6 +8,7 @@ import { registeredRoutes, startService } from '@chains/shared';
 import { env } from './env.js';
 import { pruneExpiredNonces } from './nonce.js';
 import { mountAuthRoutes } from './routes.js';
+import { smartAccountLoginSummary } from './signature.js';
 
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -30,6 +31,13 @@ async function main(): Promise<void> {
   // Printed once at boot: an unauthenticated route is visible in the log, not
   // buried in a router file.
   service.logger.info('routes_registered', { routes: registeredRoutes() });
+
+  // The login path can now make an outbound RPC call. Which endpoint, which
+  // chain and whether the path is enabled at all belong in the boot log, not in
+  // a shell — the same reason the route table is printed above. `/readyz` is
+  // deliberately NOT gated on it: EOA logins need no chain, so an unreachable
+  // RPC must not take the whole service out of rotation.
+  service.logger.info('smart_account_login', smartAccountLoginSummary());
 
   const timer = setInterval(() => {
     void pruneExpiredNonces()

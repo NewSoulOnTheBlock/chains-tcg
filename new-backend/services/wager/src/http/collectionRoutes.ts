@@ -13,6 +13,11 @@
  * else. That was audit finding H-2, and `routes.test.ts` asserts no path in this
  * service matches /wallet|address/.
  *
+ * That holds unchanged now that a profile can have several wallets: the extra
+ * addresses come from `core.profile_addresses` keyed on the authenticated
+ * profile id, so widening the collection widened what the server looks up and
+ * not what the request can say.
+ *
  * The sync route is rate-limited harder than the read: each call costs a chain
  * log scan plus one `ownerOf` per token, against a public endpoint this project
  * does not operate.
@@ -45,7 +50,7 @@ export function mountCollectionRoutes(
     summary: 'the caller’s own owned cards, from the stored chain snapshot',
     middleware: [rateLimit({ name: 'wager:collection', by: 'profile', ...limits })],
     handler: asyncHandler(async (req, res) => {
-      res.json(await getMyCollection(callerOf(req)));
+      res.json(await getMyCollection(deps, callerOf(req)));
     }),
   });
 

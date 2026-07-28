@@ -12,6 +12,15 @@
  *  - an unresolvable index fails the whole sync rather than writing part of it,
  *  - a chain sync does NOT touch booster-granted cards (0011's `source`),
  *  - never-synced and synced-and-empty are two distinguishable answers.
+ *
+ * Every profile here has exactly ONE linked address — 0013's
+ * `profiles_link_primary_address` trigger writes it, and nothing links a
+ * second. That is the case the whole file was written for and it must keep
+ * behaving identically now that a profile CAN have several: widening ownership
+ * to every linked wallet is only safe if the one-wallet player cannot tell.
+ *
+ * The multi-wallet behaviour is in `collectionLinkedAddresses.test.ts`, and the
+ * pre-0013 database is in `collectionDegraded.test.ts`.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AppError, query } from '../platform/shared.js';
@@ -54,6 +63,9 @@ class FakeCardPack {
   async cardCount(): Promise<number> {
     return this.chainCardCount;
   }
+  async getBlockNumber(): Promise<number> {
+    return 1;
+  }
   async holdingsOf(owner: string): Promise<HoldingsSnapshot> {
     this.askedFor.push(owner.toLowerCase());
     return (
@@ -66,8 +78,18 @@ function depsFor(fake: FakeCardPack): CollectionServiceDeps {
   return { cardPack: fake as unknown as CardPackReader };
 }
 
+/**
+ * Read a stored collection. The deps only supply the contract's chain id, which
+ * is what decides which linked addresses could hold one of its tokens.
+ */
+function readCollection(profileId: string, address: string) {
+  return getMyCollection(depsFor(new FakeCardPack({})), authFor(profileId, address));
+}
+
 function authFor(profileId: string, address: string): AuthContext {
-  return { profileId, address, chain: 'ethereum', roles: [] } as unknown as AuthContext;
+  // `robinhood` since 0009 — the slug real accounts live in, and the one that
+  // maps to the chain id CardPack is deployed on.
+  return { profileId, address, chain: 'robinhood', roles: [] } as unknown as AuthContext;
 }
 
 function snapshot(
@@ -118,7 +140,7 @@ suite('chain-derived card ownership', () => {
     expect(result.total).toBe(6);
     expect(result.blockNumber).toBe(1234);
 
-    const stored = await getMyCollection(authFor(alice, ALICE_ADDR));
+    const stored = await readCollection(alice, ALICE_ADDR);
     expect(stored.cards).toEqual(result.cards);
     expect(stored.syncedAt).not.toBeNull();
   });
@@ -137,7 +159,7 @@ suite('chain-derived card ownership', () => {
     };
     const fake = new FakeCardPack(holdings);
     await syncMyCollection(depsFor(fake), authFor(alice, ALICE_ADDR));
-    expect((await getMyCollection(authFor(alice, ALICE_ADDR))).total).toBe(3);
+    expect((await readCollection(alice, ALICE_ADDR)).total).toBe(3);
 
     // Alice sells two of the three tokens.
     holdings[ALICE_ADDR.toLowerCase()] = snapshot(20, [43], 2);
@@ -146,7 +168,7 @@ suite('chain-derived card ownership', () => {
     expect(result.cards).toEqual({ robinhood_margin: 1 });
     expect(result.removed).toBe(2);
     expect(result.transferredAway).toBe(2);
-    expect((await getMyCollection(authFor(alice, ALICE_ADDR))).cards).toEqual({
+    expect((await readCollection(alice, ALICE_ADDR)).cards).toEqual({
       robinhood_margin: 1,
     });
   });
@@ -163,15 +185,15 @@ suite('chain-derived card ownership', () => {
     });
     await syncMyCollection(depsFor(fake), authFor(alice, ALICE_ADDR));
     // Bob synced nothing and holds nothing; Alice's rows are untouched.
-    expect((await getMyCollection(authFor(bob, '0xbbbb000000000000000000000000000000000022'))).cards)
+    expect((await readCollection(bob, '0xbbbb000000000000000000000000000000000022')).cards)
       .toEqual({});
-    expect((await getMyCollection(authFor(alice, ALICE_ADDR))).total).toBe(2);
+    expect((await readCollection(alice, ALICE_ADDR)).total).toBe(2);
   });
 
   it('THE SHIFT GUARD: a disagreeing cardCount stops the sync before it writes', async () => {
     const holdings = { [ALICE_ADDR.toLowerCase()]: snapshot(10, [43, 22]) };
     await syncMyCollection(depsFor(new FakeCardPack(holdings)), authFor(alice, ALICE_ADDR));
-    const before = (await getMyCollection(authFor(alice, ALICE_ADDR))).cards;
+    const before = (await readCollection(alice, ALICE_ADDR)).cards;
 
     // Someone inserted a card into src/cards.ts and did not regenerate.
     const drifted = new FakeCardPack(holdings, CARD_COUNT + 1);
@@ -180,7 +202,7 @@ suite('chain-derived card ownership', () => {
     ).rejects.toMatchObject({ details: { reason: 'card_index_out_of_sync' } });
 
     // Nothing was written, and nothing was destroyed.
-    expect((await getMyCollection(authFor(alice, ALICE_ADDR))).cards).toEqual(before);
+    expect((await readCollection(alice, ALICE_ADDR)).cards).toEqual(before);
   });
 
   it('an index outside the manifest fails the whole sync, not just that card', async () => {
@@ -193,7 +215,7 @@ suite('chain-derived card ownership', () => {
     ).rejects.toThrow(/outside the manifest/);
 
     // A partial write here would have deleted card index 1 while keeping 0.
-    expect((await getMyCollection(authFor(alice, ALICE_ADDR))).total).toBe(2);
+    expect((await readCollection(alice, ALICE_ADDR)).total).toBe(2);
   });
 
   it('answers 503 rather than emptying collections when no contract is configured', async () => {
@@ -205,7 +227,7 @@ suite('chain-derived card ownership', () => {
   });
 
   it('reports an empty collection for a profile that has never synced', async () => {
-    const view = await getMyCollection(authFor(bob, '0xbbbb000000000000000000000000000000000022'));
+    const view = await readCollection(bob, '0xbbbb000000000000000000000000000000000022');
     expect(view).toEqual({
       cards: {},
       distinct: 0,
@@ -213,6 +235,11 @@ suite('chain-derived card ownership', () => {
       synced: false,
       syncedAt: null,
       syncedBlock: null,
+      // Every field a deployed client reads is unchanged; `addresses` and
+      // `addressesSkipped` are the only additions, and they are exhaustively
+      // pinned here so a future edit cannot quietly drop one of the others.
+      addresses: ['0xbbbb000000000000000000000000000000000022'],
+      addressesSkipped: 0,
     });
   });
 
@@ -231,7 +258,7 @@ suite('chain-derived card ownership', () => {
     expect(result.cards).toEqual({});
     expect(result.synced).toBe(true);
 
-    const view = await getMyCollection(authFor(alice, ALICE_ADDR));
+    const view = await readCollection(alice, ALICE_ADDR);
     expect(view.cards).toEqual({});
     expect(view.synced).toBe(true);
     expect(view.syncedAt).not.toBeNull();
@@ -243,10 +270,8 @@ suite('chain-derived card ownership', () => {
       depsFor(new FakeCardPack({ [ALICE_ADDR.toLowerCase()]: snapshot(7, []) })),
       authFor(alice, ALICE_ADDR),
     );
-    const syncedEmpty = await getMyCollection(authFor(alice, ALICE_ADDR));
-    const neverSynced = await getMyCollection(
-      authFor(bob, '0xbbbb000000000000000000000000000000000022'),
-    );
+    const syncedEmpty = await readCollection(alice, ALICE_ADDR);
+    const neverSynced = await readCollection(bob, '0xbbbb000000000000000000000000000000000022');
 
     expect(syncedEmpty.cards).toEqual(neverSynced.cards);
     expect(syncedEmpty.total).toBe(neverSynced.total);
@@ -309,7 +334,7 @@ suite('chain-derived card ownership', () => {
 
     // A pointer at block 200 over block-100 cards would be a snapshot claiming
     // data that was rolled back.
-    expect((await getMyCollection(authFor(alice, ALICE_ADDR))).syncedBlock).toBe(100);
+    expect((await readCollection(alice, ALICE_ADDR)).syncedBlock).toBe(100);
   });
 
   // ── the two sources ───────────────────────────────────────────────────────
@@ -328,7 +353,7 @@ suite('chain-derived card ownership', () => {
     // `eth_pepe` was never on chain, so it is absent from the snapshot — which
     // under the old (profile_id, card_id) key is exactly what got it deleted.
     expect(result.cards).toEqual({ robinhood_margin: 1, eth_pepe: 2 });
-    expect((await getMyCollection(authFor(alice, ALICE_ADDR))).cards).toEqual({
+    expect((await readCollection(alice, ALICE_ADDR)).cards).toEqual({
       robinhood_margin: 1,
       eth_pepe: 2,
     });
@@ -366,5 +391,19 @@ suite('chain-derived card ownership', () => {
 
     expect(result.cards).toEqual({ eth_pepe: 1 });
     expect(result.removed).toBe(2);
+  });
+
+  // ── the one-wallet profile, under the linking table ───────────────────────
+
+  it('a one-wallet profile enumerates exactly its own linked wallet', async () => {
+    const fake = new FakeCardPack({ [ALICE_ADDR.toLowerCase()]: snapshot(10, [43]) });
+    const result = await syncMyCollection(depsFor(fake), authFor(alice, ALICE_ADDR));
+
+    // The address came from `core.profile_addresses` — written by 0013's
+    // trigger when the profile was created — and not from the session claim
+    // that happens to name the same wallet.
+    expect(result.addresses).toEqual([ALICE_ADDR.toLowerCase()]);
+    expect(result.addressesSkipped).toBe(0);
+    expect(fake.askedFor).toEqual([ALICE_ADDR.toLowerCase()]);
   });
 });

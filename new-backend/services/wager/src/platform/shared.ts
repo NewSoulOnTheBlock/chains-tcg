@@ -10,7 +10,10 @@ export {
   asyncHandler,
   isUniqueViolation,
   isForeignKeyViolation,
+  CHAINS,
   createLogger,
+  isValidAddress,
+  normalizeAddress,
   getPool,
   getRedis,
   initDb,
@@ -41,6 +44,7 @@ export {
 
 export type {
   AuthContext,
+  ChainSpec,
   Logger,
   Pool,
   PoolClient,

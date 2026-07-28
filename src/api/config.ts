@@ -19,8 +19,15 @@
  * Read a `VITE_*` variable in a way that survives both Vite (`import.meta.env`)
  * and plain Node (`process.env`) — the latter matters for the vitest suite and
  * for any `npx tsx` script that imports this layer.
+ *
+ * Exported because it is the ONLY sanctioned way to read build-time config in
+ * this app. A second copy of this three-line dance is how one reader ends up
+ * looking at `import.meta.env` while another looks at `process.env` and the two
+ * disagree about whether a key is present. If you need a new `VITE_*` value,
+ * import this — do not re-implement it. (`src/privy/env.ts` is the other
+ * caller.)
  */
-function readEnv(key: string): string | undefined {
+export function readEnv(key: string): string | undefined {
   const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
   const fromVite = viteEnv?.[key];
   if (typeof fromVite === 'string' && fromVite.length > 0) return fromVite;

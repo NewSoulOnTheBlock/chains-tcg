@@ -7,7 +7,10 @@ import { createWalletClient, createPublicClient, http, formatEther } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts';
 
 const ROOT = process.cwd();
-const RPC = process.env.ROBINHOOD_RPC || 'https://robinhood-mainnet.g.alchemy.com/v2/h7y2nsAnaBKL98b6RHAsM';
+const RPC = process.env.ROBINHOOD_RPC || 'https://rpc.mainnet.chain.robinhood.com';
+// Robinhood Chain's official PUBLIC, KEYLESS endpoint (chain 4663). A live
+// Alchemy key used to sit here as the fallback and was readable by anyone with
+// the repo. Set ROBINHOOD_RPC to use a provider endpoint; never inline a key.
 const pk = '0x' + process.env.DEPLOYER_PK.replace(/^0x/, '');
 
 const robinhood = {

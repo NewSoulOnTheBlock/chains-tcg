@@ -53,6 +53,7 @@ import {
 } from '../domain/boosterPayment.js';
 import { rollTicketCards } from '../domain/packRoll.js';
 import type { ChainReader, TicketMinter } from '../chain/types.js';
+import { resolveTransactingAddresses } from './transactingAddresses.js';
 
 export interface BoosterServiceDeps {
   reader: ChainReader;
@@ -139,6 +140,13 @@ export async function createBoosterIntent(
   const offer = await insertOffer(getPool(), {
     nonce,
     profileId: auth.profileId,
+    // A VALUE RECORDED, and the PRIMARY address is the right one. Nothing
+    // authorises on this column — `confirmBoosterPayment` proves the intent is
+    // the caller's with `offer.profileId !== auth.profileId`, and proves the
+    // payment with the linked-wallet set — so it is a record of who asked for
+    // this quote. The wallet that will eventually pay is unknowable here, and
+    // recording whichever wallet happened to sign in would make the column vary
+    // between sessions for one buyer and identify nobody.
     address: auth.address.toLowerCase(),
     // Price is server-side. The client never proposes an amount.
     amountWei: deps.priceWei,
@@ -207,11 +215,20 @@ export async function confirmBoosterPayment(
       throw AppError.conflict('That purchase intent has expired', { reason: 'intent_expired' });
     }
 
+    // Every wallet this profile may pay from, read INSIDE the transaction that
+    // consumes the offer so a concurrent unlink cannot slip between the two.
+    const payers = await resolveTransactingAddresses(client, auth);
+
     const verdict = verifyBoosterPayment(tx, {
       nonce,
       recipient: deps.treasuryAddress,
       amountWei: offer.amountWei,
-      payerAddress: auth.address.toLowerCase(),
+      // A COMPARISON: "did this payment come from someone who is this buyer?"
+      // Any wallet linked to the authenticated profile answers yes. The offer's
+      // own `address` column is deliberately NOT used as the expectation — it
+      // records who requested the quote, and holding a buyer to the wallet their
+      // session named at quote time is the bug this widening removes.
+      payerAddresses: payers.addresses,
       intentCreatedAtSeconds: Math.floor(offer.createdAt.getTime() / 1000),
       minConfirmations: deps.minConfirmations,
     });
@@ -235,6 +252,30 @@ export async function confirmBoosterPayment(
         paymentTxHash: input.paymentTxHash,
         nonce,
         profileId: auth.profileId,
+        // A VALUE RECORDED, and the PRIMARY address, NOT the wallet that paid.
+        //
+        // This is the ticket's mint destination (`minter.mintTicket`) and its
+        // display address. It is not an authorisation input: every route that
+        // hands a ticket back checks `intent.profileId !== auth.profileId`, and
+        // the legacy `GET /api/boosters/tickets/:wallet` that made an address
+        // load-bearing is exactly what H-2 removed.
+        //
+        // So the question is only "where should the collectible land", and the
+        // answer must be deterministic. Minting to whichever wallet funded the
+        // purchase would send a durable asset to an incidental funding source —
+        // an exchange-adjacent hot wallet, a wallet the player later unlinks —
+        // and would put two tickets bought by one player in two places for no
+        // reason they chose. The primary is the profile's canonical wallet, it
+        // is what /auth/me and GET /api/profiles/me already show them, and it
+        // moves only when they explicitly promote another address.
+        //
+        // Letting a buyer NAME a destination is a product decision, and it would
+        // have to be validated against this same linked set rather than taken
+        // from the body. It is not this fix.
+        //
+        // Contrast `wager.deposits.from_address`, which is corrected to the
+        // paying wallet: that one is where money goes BACK, so it must be the
+        // wallet the money came from.
         ownerAddress: auth.address.toLowerCase(),
         amountWei: verdict.amountWei,
         envCap: deps.supplyCap,

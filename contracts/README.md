@@ -34,7 +34,7 @@ forge test -vvv          # unit + fuzz (pot conservation, rake split, timeouts, 
 ## Deploy to Robinhood Chain
 
 ```bash
-export ROBINHOOD_RPC=https://robinhood-mainnet.g.alchemy.com/v2/<key>
+export ROBINHOOD_RPC=https://rpc.mainnet.chain.robinhood.com   # public + keyless; never commit a provider key
 export PRIVATE_KEY=0x...            # deployer (becomes owner)
 export WAGER_TOKEN=0x...            # $MASTER ERC-20 on Robinhood Chain
 export OPERATOR=0x...               # the game server's settle wallet

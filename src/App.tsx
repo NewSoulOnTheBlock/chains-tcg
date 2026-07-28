@@ -59,6 +59,7 @@ import {
   StarOutline, Crown, Gem, Coins, Chart, Castle, Temple, Book, Books, Globe, Moon, Orb, Medal,
   Link as LinkIcon, Chain, Warning, Info, Lock, User, Settings, Tools,
   Mobile, Fox, Backpack, Diamond, DiamondOutline, Dot, SoundOn, SoundOff, Music,
+  Mail, Passkey as PasskeyIcon, GoogleG, AppleMark, XBrand,
   Hourglass, EnterKey, Lizard, GridView, ListView, MedalFirst,
   Hand, Dice, Icon, type IconKey,
 } from './icons';
@@ -74,6 +75,18 @@ import ShinyText, { ShinyBrand, ShinyButtonLabel } from './ShinyText';
 // gzipped), which we don't want in the in-game bundle. Loaded on demand
 // only when the Landing screen mounts.
 const PixelTrail = React.lazy(() => import('./PixelTrail'));
+// Privy (email / social / passkey sign-in) is the same story, only heavier:
+// `./privy/runtime` is the ONLY module that imports `@privy-io/react-auth`,
+// and it is only ever reached through this lazy seam (plus the dynamic
+// `import()` in `logout()`). `./privy/env` is the eager, SDK-free half — the
+// app id check and the "signed in with Privy on this device" marker.
+import {
+  PRIVY_ENABLED, PRIVY_LOGIN_METHODS, getPrivyHint, setPrivyHint,
+  type PrivyLoginMethod,
+} from './privy/env';
+const PrivyLoginPanel = React.lazy(() =>
+  import('./privy/runtime').then((m) => ({ default: m.PrivyLoginPanel })),
+);
 import SideRays from './SideRays';
 import Iridescence from './Iridescence';
 
@@ -224,10 +237,30 @@ function LoginEmblem({ size = 92 }: { size?: number }) {
   );
 }
 
-function Login({ onSignedIn }: { onSignedIn: () => void }) {
+function Login({ onSignedIn }: {
+  /**
+   * `suggestWalletLink` is set after a Privy sign-in that CREATED the account:
+   * that player just landed on a brand-new, empty profile, and if they have
+   * played before their cards live on their old wallet's profile — App shows
+   * the "already played with a wallet?" prompt. A wallet sign-in never sets it.
+   */
+  onSignedIn: (info?: { suggestWalletLink?: boolean }) => void;
+}) {
   const [err, setErr] = useState('');
   const [stage, setStage] = useState<'idle' | 'connecting' | 'signing'>('idle');
   const [remember, setRemember] = useState(false);
+  // ── Privy (email / social / passkey) ─────────────────────────────────────
+  // The five buttons below are EAGER — plain styled buttons, no SDK — so the
+  // heavy chunk is only fetched when one is pressed, or when a silent resume
+  // should run. `n` is a remount key: each attempt gets a fresh panel.
+  //
+  // Resume is read ONCE at mount: if a Privy sign-in happened on this device
+  // and our session has expired, the panel mounts immediately (method null)
+  // and re-authenticates silently instead of making the player click.
+  const [privyMount, setPrivyMount] = useState<{ method: PrivyLoginMethod | null; n: number } | null>(
+    () => (PRIVY_ENABLED && getPrivyHint() ? { method: null, n: 0 } : null),
+  );
+  const [privyBusy, setPrivyBusy] = useState(false);
 
   // "Remember me on this device" is the ONLY way the refresh token reaches
   // localStorage. The default is sessionStorage — one tab, gone when it closes
@@ -347,7 +380,7 @@ function Login({ onSignedIn }: { onSignedIn: () => void }) {
           </div>
         </div>
 
-        <button className="ocva-btn" disabled={busy}
+        <button className="ocva-btn" disabled={busy || privyBusy}
           onClick={() => evm.installed ? signIn() : window.open('https://metamask.io/download/', '_blank', 'noopener')}
           style={{ width: '100%', padding: '15px', fontSize: 15, background: 'linear-gradient(135deg,#F6851B,#E2761B)', color: '#1a1408' }}>
           <Fox size={18} /> {busy ? label : (evm.installed ? `Sign in with ${evm.label}` : 'Install MetaMask')}
@@ -366,6 +399,68 @@ function Login({ onSignedIn }: { onSignedIn: () => void }) {
         <div style={{ fontSize: 10.5, color: '#6f6a80', marginTop: -6, lineHeight: 1.45 }}>
           Off by default: your session lives in this tab only and ends when you close it.
         </div>
+
+        {/* Email / social / passkey — Privy. Hidden entirely (no dead space,
+            no crash) when the build has no `VITE_PRIVY_APP_ID`; wallet sign-in
+            above must work identically either way. The buttons are eager and
+            SDK-free; the SDK chunk is fetched only when one is PRESSED (or a
+            silent resume runs), so a wallet-only player never downloads it. */}
+        {PRIVY_ENABLED && (
+          <>
+            <div aria-hidden style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '2px 0' }}>
+              <span style={{ flex: 1, height: 1, background: 'rgba(212,175,55,0.28)' }} />
+              <span style={{ fontSize: 10.5, letterSpacing: '0.22em', color: '#9a94ad', fontWeight: 800 }}>
+                OR CONTINUE WITH
+              </span>
+              <span style={{ flex: 1, height: 1, background: 'rgba(212,175,55,0.28)' }} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: 8 }}>
+              {PRIVY_LOGIN_METHODS.map(({ key, label }) => {
+                const Glyph = key === 'email' ? Mail
+                  : key === 'google' ? GoogleG
+                  : key === 'apple' ? AppleMark
+                  : key === 'twitter' ? XBrand
+                  : PasskeyIcon;
+                const off = busy || privyBusy;
+                return (
+                  <button
+                    key={key} type="button" disabled={off}
+                    onClick={() => setPrivyMount((prev) => ({ method: key, n: (prev?.n ?? 0) + 1 }))}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                      minHeight: 44, padding: '10px 8px', borderRadius: 10, cursor: off ? 'default' : 'pointer',
+                      fontFamily: F.body, fontWeight: 700, fontSize: 12.5, letterSpacing: '0.04em',
+                      background: 'rgba(18,14,34,0.85)', color: '#e8e2f2',
+                      border: '1px solid rgba(212,175,55,0.35)',
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+                      opacity: off ? 0.55 : 1,
+                    }}
+                  >
+                    <Glyph size={15} /> {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 10.5, color: '#6f6a80', textAlign: 'center', lineHeight: 1.45 }}>
+              These create a wallet for you behind the scenes — same account on every device you sign in on.
+            </div>
+            {privyMount && (
+              <React.Suspense fallback={
+                <div role="status" style={{ fontSize: 12, color: '#c8c2d8', textAlign: 'center' }}>
+                  {privyMount.method === null ? 'Signing you back in…' : 'Loading sign-in…'}
+                </div>
+              }>
+                <PrivyLoginPanel
+                  key={privyMount.n}
+                  resume={privyMount.method === null}
+                  initialMethod={privyMount.method}
+                  onBusyChange={setPrivyBusy}
+                  onSignedIn={({ isNewUser }) => onSignedIn({ suggestWalletLink: isNewUser })}
+                />
+              </React.Suspense>
+            )}
+          </>
+        )}
 
         {err && (
           <div role="alert" style={{ textAlign: 'center', fontSize: 12.5, color: '#ffb8b8', marginTop: 2, lineHeight: 1.5 }}>
@@ -389,6 +484,54 @@ function loginErrorText(e: unknown): string {
     return 'That signature was not accepted. Try again — the challenge may have expired.';
   }
   return errorText(e);
+}
+
+/**
+ * Shown once, right after a Privy sign-in that CREATED the account.
+ *
+ * Why it exists: profiles are keyed on `(address, chain)`, so a player who has
+ * been signing in with MetaMask and now tries email/Google has just landed on
+ * a DIFFERENT, empty profile — their cards did not vanish, they are on the
+ * other profile. Without this prompt that reads as data loss.
+ *
+ * The honest guidance covers both cases: a wallet that never had a profile
+ * can simply be linked here (Settings → Linked wallets); a wallet that already
+ * HAS a profile cannot be linked to this one (the server refuses with
+ * `address_linked_elsewhere`), so those players should sign back in with the
+ * wallet and link this new sign-in from there instead.
+ */
+function WalletLinkPrompt({ onSettings, onDismiss }: { onSettings: () => void; onDismiss: () => void }) {
+  return (
+    <div style={{
+      position: 'fixed', left: '50%', transform: 'translateX(-50%)',
+      bottom: 'calc(16px + env(safe-area-inset-bottom))', zIndex: 140,
+      width: 'min(460px, calc(100vw - 28px))',
+      background: 'rgba(12,10,26,0.96)', border: '1px solid rgba(212,175,55,0.45)',
+      borderRadius: 14, padding: '14px 16px', boxShadow: '0 18px 50px rgba(0,0,0,0.6)',
+      color: '#F8F8F8', fontFamily: F.body, backdropFilter: 'blur(10px)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span aria-hidden style={{ color: C.gold, display: 'inline-flex' }}><LinkIcon size={16} /></span>
+        <b style={{ fontSize: 13.5, letterSpacing: '0.06em', color: C.goldHi }}>NEW PROFILE — ALREADY PLAYED WITH A WALLET?</b>
+      </div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.55, color: '#bab4c9' }}>
+        This sign-in starts a fresh profile. If your NFT cards live in a wallet like MetaMask,
+        link that wallet in <b style={{ color: '#e8e2f2' }}>Settings → Linked wallets</b> to bring
+        your collection into this profile. If that wallet already has its own profile here, sign
+        in with the wallet instead — your cards are there — and link this new sign-in from its Settings.
+      </div>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
+        <button type="button" onClick={onDismiss} className="ova-plate ova-plate--obsidian"
+          style={{ minHeight: 40, padding: '8px 14px', fontSize: 11.5, fontFamily: F.body, borderRadius: 9 }}>
+          NOT NOW
+        </button>
+        <button type="button" onClick={onSettings} className="ova-plate ova-plate--gold"
+          style={{ minHeight: 40, padding: '8px 14px', fontSize: 11.5, fontFamily: F.body, borderRadius: 9 }}>
+          OPEN SETTINGS
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ── Background music player (used for menu + battle tracks) ────────────────
@@ -7021,6 +7164,13 @@ export default function App() {
   const [signedIn, setSignedIn] = useState<boolean>(() => sessionApi.isSignedIn());
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileError, setProfileError] = useState<string>('');
+  /**
+   * A Privy sign-in just CREATED this account → the profile is brand new and
+   * empty. Shows the one-time "already played with a wallet? Link it in
+   * Settings" prompt. Session state only — the situation cannot recur for the
+   * same account, so there is nothing to persist.
+   */
+  const [offerWalletLink, setOfferWalletLink] = useState(false);
 
   const [seat, setSeat] = useState<Seat | null>(() => sess.get<Seat | null>('seat', null));
   const [view, setView] = useState<View>(() => sess.get<View>('view', 'landing'));
@@ -7074,6 +7224,7 @@ export default function App() {
       setView('landing');
       setLinkProblem(null);
       setSeatChecked(false);
+      setOfferWalletLink(false);
       sess.del('seat'); sess.del('view');
     }
   }), []);
@@ -7288,9 +7439,22 @@ export default function App() {
 
   async function logout() {
     sess.del('seat'); sess.del('view');
+    // Signing out of the app must also sign out of Privy — a lingering Privy
+    // session on a shared machine would silently re-authenticate the next
+    // visitor. Read the marker BEFORE clearing it (clearing first stops the
+    // login screen's silent-resume racing this teardown), and only a device
+    // that actually used Privy ever loads the chunk.
+    const hadPrivy = getPrivyHint();
+    setPrivyHint(false);
     // `auth.logout()` revokes the family server-side and always clears locally,
     // even if the network call fails. `onSessionChange` does the UI reset.
     try { await auth.logout(); } catch { sessionApi.clearSession(); }
+    if (hadPrivy) {
+      try {
+        const privy = await import('./privy/runtime');
+        await privy.signOutOfPrivy();
+      } catch { /* best effort — our own session is already gone */ }
+    }
   }
   function joinedSeat(s: Seat) { sess.set('seat', s); setSeat(s); }
   function leftSeat() { sess.del('seat'); setSeat(null); goto('landing'); }
@@ -7298,7 +7462,15 @@ export default function App() {
 
   // Signed out is a real app state, not an absence of one. It is also where an
   // expired session lands, because `onSessionChange` fires for that too.
-  if (!signedIn) return <Login onSignedIn={() => { setView('landing'); void reloadProfile(); }} />;
+  if (!signedIn) {
+    return (
+      <Login onSignedIn={(info) => {
+        setView('landing');
+        setOfferWalletLink(info?.suggestWalletLink === true);
+        void reloadProfile();
+      }} />
+    );
+  }
 
   // Signed in but the profile has not arrived: hold rather than render screens
   // that all take a display name we do not have yet.
@@ -7327,6 +7499,12 @@ export default function App() {
   return (
     <>
       <InstallPrompt />
+      {offerWalletLink && view !== 'settings' && !seat && (
+        <WalletLinkPrompt
+          onSettings={() => { setOfferWalletLink(false); goto('settings'); }}
+          onDismiss={() => setOfferWalletLink(false)}
+        />
+      )}
       {soloCfg && (
         <SoloClient
           playerName={name || 'Player'}
