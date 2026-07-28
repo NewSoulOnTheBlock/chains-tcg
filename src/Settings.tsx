@@ -37,7 +37,7 @@ import {
   UNLINK_CONSEQUENCES, UNLINK_SHORT_WARNING, formatLinkedAt, linkedWalletErrorText,
   sameAddress, sortLinkedAddresses, unlinkBlockedReason, unlinkBlockedText, walletKindLabel,
 } from './linked-wallets';
-import { PRIVY_ENABLED } from './privy/env';
+import { PRIVY_ENABLED, isPrivyOAuthReturn } from './privy/env';
 
 const PrivyLinkPanel = React.lazy(() =>
   import('./privy/runtime').then((m) => ({ default: m.PrivyLinkPanel })),
@@ -462,7 +462,12 @@ export function SettingsPage({
   const [addrErr, setAddrErr] = useState('');
   const [addrBusy, setAddrBusy] = useState<null | 'link' | 'primary' | 'unlink'>(null);
   const [confirmUnlink, setConfirmUnlink] = useState<LinkedAddress | null>(null);
-  const [privyLinkOpen, setPrivyLinkOpen] = useState(false);
+  // Auto-reopen after a social-OAuth REDIRECT: linking via Google/Apple/X
+  // reloads the page, and only a mounted PrivyProvider can consume the
+  // `privy_oauth_*` return params and finish the link the player started.
+  const [privyLinkOpen, setPrivyLinkOpen] = useState<boolean>(
+    () => PRIVY_ENABLED && isPrivyOAuthReturn(),
+  );
   const [addrReload, setAddrReload] = useState(0);
   // Data
   const [confirmClear, setConfirmClear] = useState(false);

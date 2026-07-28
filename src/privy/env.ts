@@ -86,6 +86,35 @@ export const PRIVY_LOGIN_METHODS: readonly { key: PrivyLoginMethod; label: strin
   { key: 'passkey', label: 'Passkey' },
 ] as const;
 
+// ── OAuth return detection, SDK-free ────────────────────────────────────────
+//
+// Social login (Google / Apple / X) is a FULL-PAGE REDIRECT: Privy sends the
+// browser to the provider, the provider returns to `auth.privy.io`'s callback,
+// and that bounces back to US with `privy_oauth_state` / `privy_oauth_code`
+// in the QUERY string. The SDK consumes those at `PrivyProvider` init — but
+// our provider is lazy-mounted, so on that reload somebody has to notice the
+// params and mount the runtime WITHOUT a click. That somebody is this
+// function: eager, no SDK, just a URL look.
+//
+// The param names mirror what `@privy-io/react-auth` appends (also visible as
+// string constants in its bundle). If Privy adds one, the worst case is that
+// we fail to auto-mount and the player presses the button again.
+
+export function isPrivyOAuthReturn(): boolean {
+  try {
+    const search = (globalThis as { location?: { search?: string } }).location?.search ?? '';
+    if (!search) return false;
+    const params = new URLSearchParams(search);
+    return (
+      params.has('privy_oauth_state') ||
+      params.has('privy_oauth_code') ||
+      params.has('privy_oauth_provider')
+    );
+  } catch {
+    return false;
+  }
+}
+
 const HINT_KEY = 'chains.privy.hint.v1';
 
 /** Did a Privy-backed sign-in happen on this device (and no logout since)? */

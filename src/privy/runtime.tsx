@@ -252,11 +252,14 @@ export interface PrivyLoginResult {
 
 function LoginPanelInner({
   resume,
+  oauthReturn,
   initialMethod,
   onBusyChange,
   onSignedIn,
 }: {
   resume: boolean;
+  /** The page just reloaded from a social-OAuth redirect; finish that login. */
+  oauthReturn: boolean;
   /** Launch this method's Privy modal as soon as the SDK is ready. */
   initialMethod: PrivyLoginMethod | null;
   onBusyChange?: (busy: boolean) => void;
@@ -266,9 +269,25 @@ function LoginPanelInner({
   const { ready, authenticated } = usePrivy();
   const { wallets } = useWallets();
 
+  // `onComplete` serves two shapes of login. Same-page (modal / passkey /
+  // email OTP): the flow is in `privy_login`, so PRIVY_OK advances it. OAuth
+  // REDIRECT return: the page reloaded, the flow object is fresh (`idle`),
+  // and the SDK completes authentication unprompted — OAUTH_RETURN_OK is the
+  // idle-legal event that still carries `isNewUser`. The ref exists because
+  // this callback must read the CURRENT step, not the one it closed over.
+  const flowRef = useRef(flow);
+  flowRef.current = flow;
+
   const { login } = useLogin({
-    onComplete: ({ isNewUser, wasAlreadyAuthenticated }) =>
-      dispatch({ type: 'PRIVY_OK', isNewUser: isNewUser && !wasAlreadyAuthenticated }),
+    onComplete: ({ isNewUser, wasAlreadyAuthenticated }) => {
+      const fresh = isNewUser && !wasAlreadyAuthenticated;
+      if (flowRef.current.step === 'privy_login') {
+        dispatch({ type: 'PRIVY_OK', isNewUser: fresh });
+      } else if (oauthReturn) {
+        dispatch({ type: 'OAUTH_RETURN_OK', isNewUser: fresh });
+      }
+      // Otherwise: a hint-resume mount — the resume effect below owns it.
+    },
     onError: (code) => {
       if (code === 'exited_auth_flow') {
         dispatch({ type: 'PRIVY_CANCELLED' });
@@ -278,6 +297,16 @@ function LoginPanelInner({
       dispatch({ type: 'PRIVY_ERROR', message: privyFailureCopy(code) });
     },
   });
+
+  // Belt and braces for the redirect return: if the SDK restored the session
+  // but `onComplete` never fired (event timing differs across SDK versions),
+  // advance anyway once authentication is visible. `isNewUser` is unknowable
+  // on this path, so it stays false — the only cost is no wallet-link prompt.
+  useEffect(() => {
+    if (!oauthReturn || !ready || !authenticated) return;
+    const t = setTimeout(() => dispatch({ type: 'OAUTH_RETURN_OK', isNewUser: false }), 400);
+    return () => clearTimeout(t);
+  }, [oauthReturn, ready, authenticated]);
 
   // The BUTTONS live eagerly in App.tsx (this chunk must not be needed to
   // paint them); this panel is mounted per attempt with the chosen method and
@@ -383,6 +412,7 @@ function LoginPanelInner({
  */
 export function PrivyLoginPanel(props: {
   resume: boolean;
+  oauthReturn: boolean;
   initialMethod: PrivyLoginMethod | null;
   onBusyChange?: (busy: boolean) => void;
   onSignedIn: (result: PrivyLoginResult) => void;

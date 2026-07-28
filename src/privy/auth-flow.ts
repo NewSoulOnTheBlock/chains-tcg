@@ -55,6 +55,14 @@ export type PrivyFlowEvent =
   | { type: 'RESUME' }
   /** Privy authentication finished. */
   | { type: 'PRIVY_OK'; isNewUser: boolean }
+  /**
+   * The page RELOADED mid-login: social OAuth is a full-page redirect, and on
+   * return the SDK finishes authentication with no modal and no click. Valid
+   * from `idle` (the flow object did not survive the reload), and unlike
+   * RESUME it carries `isNewUser` — a first-ever X login must still get the
+   * "link your old wallet" prompt.
+   */
+  | { type: 'OAUTH_RETURN_OK'; isNewUser: boolean }
   /** The player closed Privy's modal. Not an error — back to idle. */
   | { type: 'PRIVY_CANCELLED' }
   | { type: 'PRIVY_ERROR'; message: string }
@@ -85,6 +93,11 @@ export function privyFlowReduce(state: PrivyFlow, event: PrivyFlowEvent): PrivyF
     case 'PRIVY_OK':
       if (state.step !== 'privy_login') return state;
       return { ...state, step: 'waiting_wallet', isNewUser: event.isNewUser };
+
+    case 'OAUTH_RETURN_OK':
+      if (state.step !== 'idle') return state;
+      // Not a resume: the player DID click, on the previous page load.
+      return { step: 'waiting_wallet', resumed: false, isNewUser: event.isNewUser, message: null };
 
     case 'PRIVY_CANCELLED':
       if (state.step !== 'privy_login') return state;

@@ -137,6 +137,44 @@ describe('failures', () => {
   });
 });
 
+describe('the OAuth redirect return (page reloaded mid-login)', () => {
+  it('completes from idle, carrying isNewUser through to the wallet-link prompt', () => {
+    const flow = run(
+      { type: 'OAUTH_RETURN_OK', isNewUser: true },
+      { type: 'WALLET_READY' },
+      { type: 'BACKEND_OK' },
+    );
+    expect(flow.step).toBe('done');
+    expect(flow.resumed).toBe(false);
+    expect(shouldOfferWalletLink(flow)).toBe(true);
+  });
+
+  it('is NOT a resume: its failures are shown, not swallowed', () => {
+    const flow = run(
+      { type: 'OAUTH_RETURN_OK', isNewUser: false },
+      { type: 'WALLET_READY' },
+      { type: 'BACKEND_ERROR', message: 'That signature was not accepted.' },
+    );
+    expect(flowErrorText(flow)).toBe('That signature was not accepted.');
+  });
+
+  it('a returning social user does not get the wallet-link prompt', () => {
+    const flow = run(
+      { type: 'OAUTH_RETURN_OK', isNewUser: false },
+      { type: 'WALLET_READY' },
+      { type: 'BACKEND_OK' },
+    );
+    expect(shouldOfferWalletLink(flow)).toBe(false);
+  });
+
+  it('is inert anywhere but idle — the belt-and-braces fallback cannot double-fire', () => {
+    const inFlight = run({ type: 'OAUTH_RETURN_OK', isNewUser: true }, { type: 'WALLET_READY' });
+    expect(privyFlowReduce(inFlight, { type: 'OAUTH_RETURN_OK', isNewUser: false })).toBe(inFlight);
+    const clicked = run({ type: 'START' });
+    expect(privyFlowReduce(clicked, { type: 'OAUTH_RETURN_OK', isNewUser: false })).toBe(clicked);
+  });
+});
+
 describe('late or duplicate async results are inert', () => {
   it('a timeout firing after the wallet arrived changes nothing', () => {
     const signing = run({ type: 'START' }, { type: 'PRIVY_OK', isNewUser: false }, { type: 'WALLET_READY' });

@@ -81,7 +81,7 @@ const PixelTrail = React.lazy(() => import('./PixelTrail'));
 // `import()` in `logout()`). `./privy/env` is the eager, SDK-free half — the
 // app id check and the "signed in with Privy on this device" marker.
 import {
-  PRIVY_ENABLED, PRIVY_LOGIN_METHODS, getPrivyHint, setPrivyHint,
+  PRIVY_ENABLED, PRIVY_LOGIN_METHODS, getPrivyHint, isPrivyOAuthReturn, setPrivyHint,
   type PrivyLoginMethod,
 } from './privy/env';
 const PrivyLoginPanel = React.lazy(() =>
@@ -254,11 +254,16 @@ function Login({ onSignedIn }: {
   // heavy chunk is only fetched when one is pressed, or when a silent resume
   // should run. `n` is a remount key: each attempt gets a fresh panel.
   //
-  // Resume is read ONCE at mount: if a Privy sign-in happened on this device
-  // and our session has expired, the panel mounts immediately (method null)
-  // and re-authenticates silently instead of making the player click.
+  // Two no-click mount reasons, both read ONCE at mount:
+  //   • OAuth RETURN — social login is a full-page redirect; the page just
+  //     reloaded with `privy_oauth_*` params that only the SDK can consume,
+  //     so the runtime must mount itself to finish the login the player
+  //     started before the redirect.
+  //   • Resume — a Privy sign-in happened on this device before and our
+  //     session expired; re-authenticate silently instead of asking again.
+  const [privyOAuthReturn] = useState<boolean>(() => PRIVY_ENABLED && isPrivyOAuthReturn());
   const [privyMount, setPrivyMount] = useState<{ method: PrivyLoginMethod | null; n: number } | null>(
-    () => (PRIVY_ENABLED && getPrivyHint() ? { method: null, n: 0 } : null),
+    () => (PRIVY_ENABLED && (isPrivyOAuthReturn() || getPrivyHint()) ? { method: null, n: 0 } : null),
   );
   const [privyBusy, setPrivyBusy] = useState(false);
 
@@ -447,12 +452,15 @@ function Login({ onSignedIn }: {
             {privyMount && (
               <React.Suspense fallback={
                 <div role="status" style={{ fontSize: 12, color: '#c8c2d8', textAlign: 'center' }}>
-                  {privyMount.method === null ? 'Signing you back in…' : 'Loading sign-in…'}
+                  {privyMount.method !== null ? 'Loading sign-in…'
+                    : privyOAuthReturn ? 'Completing sign-in…'
+                    : 'Signing you back in…'}
                 </div>
               }>
                 <PrivyLoginPanel
                   key={privyMount.n}
-                  resume={privyMount.method === null}
+                  resume={privyMount.method === null && !privyOAuthReturn}
+                  oauthReturn={privyMount.method === null && privyOAuthReturn}
                   initialMethod={privyMount.method}
                   onBusyChange={setPrivyBusy}
                   onSignedIn={({ isNewUser }) => onSignedIn({ suggestWalletLink: isNewUser })}
