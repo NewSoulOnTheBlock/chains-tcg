@@ -59,7 +59,7 @@ import {
   StarOutline, Crown, Gem, Coins, Chart, Castle, Temple, Book, Books, Globe, Moon, Orb, Medal,
   Link as LinkIcon, Chain, Warning, Info, Lock, User, Settings, Tools,
   Mobile, Fox, Backpack, Diamond, DiamondOutline, Dot, SoundOn, SoundOff, Music,
-  Mail, Passkey as PasskeyIcon, GoogleG, AppleMark, XBrand,
+  Mail, GoogleG, XBrand,
   Hourglass, EnterKey, Lizard, GridView, ListView, MedalFirst,
   Hand, Dice, Icon, type IconKey,
 } from './icons';
@@ -80,10 +80,7 @@ const PixelTrail = React.lazy(() => import('./PixelTrail'));
 // and it is only ever reached through this lazy seam (plus the dynamic
 // `import()` in `logout()`). `./privy/env` is the eager, SDK-free half — the
 // app id check and the "signed in with Privy on this device" marker.
-import {
-  PRIVY_ENABLED, PRIVY_LOGIN_METHODS, getPrivyHint, isPrivyOAuthReturn, setPrivyHint,
-  type PrivyLoginMethod,
-} from './privy/env';
+import { PRIVY_ENABLED, getPrivyHint, isPrivyOAuthReturn, setPrivyHint } from './privy/env';
 const PrivyLoginPanel = React.lazy(() =>
   import('./privy/runtime').then((m) => ({ default: m.PrivyLoginPanel })),
 );
@@ -254,7 +251,9 @@ function Login({ onSignedIn }: {
   // heavy chunk is only fetched when one is pressed, or when a silent resume
   // should run. `n` is a remount key: each attempt gets a fresh panel.
   //
-  // Two no-click mount reasons, both read ONCE at mount:
+  // One eager SOCIAL LOGINS button; Privy's own modal lists the methods
+  // (email / Google / X). The lazy panel mounts on the button press — plus
+  // two no-click mount reasons, both read ONCE at mount:
   //   • OAuth RETURN — social login is a full-page redirect; the page just
   //     reloaded with `privy_oauth_*` params that only the SDK can consume,
   //     so the runtime must mount itself to finish the login the player
@@ -262,8 +261,8 @@ function Login({ onSignedIn }: {
   //   • Resume — a Privy sign-in happened on this device before and our
   //     session expired; re-authenticate silently instead of asking again.
   const [privyOAuthReturn] = useState<boolean>(() => PRIVY_ENABLED && isPrivyOAuthReturn());
-  const [privyMount, setPrivyMount] = useState<{ method: PrivyLoginMethod | null; n: number } | null>(
-    () => (PRIVY_ENABLED && (isPrivyOAuthReturn() || getPrivyHint()) ? { method: null, n: 0 } : null),
+  const [privyMount, setPrivyMount] = useState<{ openLogin: boolean; n: number } | null>(
+    () => (PRIVY_ENABLED && (isPrivyOAuthReturn() || getPrivyHint()) ? { openLogin: false, n: 0 } : null),
   );
   const [privyBusy, setPrivyBusy] = useState(false);
 
@@ -419,49 +418,39 @@ function Login({ onSignedIn }: {
               </span>
               <span style={{ flex: 1, height: 1, background: 'rgba(212,175,55,0.28)' }} />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: 8 }}>
-              {PRIVY_LOGIN_METHODS.map(({ key, label }) => {
-                const Glyph = key === 'email' ? Mail
-                  : key === 'google' ? GoogleG
-                  : key === 'apple' ? AppleMark
-                  : key === 'twitter' ? XBrand
-                  : PasskeyIcon;
-                const off = busy || privyBusy;
-                return (
-                  <button
-                    key={key} type="button" disabled={off}
-                    onClick={() => setPrivyMount((prev) => ({ method: key, n: (prev?.n ?? 0) + 1 }))}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-                      minHeight: 44, padding: '10px 8px', borderRadius: 10, cursor: off ? 'default' : 'pointer',
-                      fontFamily: F.body, fontWeight: 700, fontSize: 12.5, letterSpacing: '0.04em',
-                      background: 'rgba(18,14,34,0.85)', color: '#e8e2f2',
-                      border: '1px solid rgba(212,175,55,0.35)',
-                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
-                      opacity: off ? 0.55 : 1,
-                    }}
-                  >
-                    <Glyph size={15} /> {label}
-                  </button>
-                );
-              })}
-            </div>
+            <button
+              type="button" disabled={busy || privyBusy}
+              onClick={() => setPrivyMount((prev) => ({ openLogin: true, n: (prev?.n ?? 0) + 1 }))}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 9,
+                width: '100%', minHeight: 46, padding: '12px 14px', borderRadius: 10,
+                cursor: (busy || privyBusy) ? 'default' : 'pointer',
+                fontFamily: F.body, fontWeight: 800, fontSize: 13, letterSpacing: '0.08em',
+                background: 'rgba(18,14,34,0.85)', color: '#e8e2f2',
+                border: '1px solid rgba(212,175,55,0.35)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+                opacity: (busy || privyBusy) ? 0.55 : 1,
+              }}
+            >
+              <Mail size={15} /> <GoogleG size={15} /> <XBrand size={14} /> SOCIAL LOGINS
+            </button>
             <div style={{ fontSize: 10.5, color: '#6f6a80', textAlign: 'center', lineHeight: 1.45 }}>
-              These create a wallet for you behind the scenes — same account on every device you sign in on.
+              Email, Google or X — a wallet is created for you behind the scenes,
+              and it is the same account on every device you sign in on.
             </div>
             {privyMount && (
               <React.Suspense fallback={
                 <div role="status" style={{ fontSize: 12, color: '#c8c2d8', textAlign: 'center' }}>
-                  {privyMount.method !== null ? 'Loading sign-in…'
+                  {privyMount.openLogin ? 'Loading sign-in…'
                     : privyOAuthReturn ? 'Completing sign-in…'
                     : 'Signing you back in…'}
                 </div>
               }>
                 <PrivyLoginPanel
                   key={privyMount.n}
-                  resume={privyMount.method === null && !privyOAuthReturn}
-                  oauthReturn={privyMount.method === null && privyOAuthReturn}
-                  initialMethod={privyMount.method}
+                  resume={!privyMount.openLogin && !privyOAuthReturn}
+                  oauthReturn={!privyMount.openLogin && privyOAuthReturn}
+                  openLogin={privyMount.openLogin}
                   onBusyChange={setPrivyBusy}
                   onSignedIn={({ isNewUser }) => onSignedIn({ suggestWalletLink: isNewUser })}
                 />

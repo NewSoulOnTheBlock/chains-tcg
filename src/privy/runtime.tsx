@@ -44,6 +44,7 @@ import { createRoot } from 'react-dom/client';
 import {
   PrivyProvider,
   getEmbeddedConnectedWallet,
+  useCreateWallet,
   useLogin,
   usePrivy,
   useWallets,
@@ -71,17 +72,19 @@ import { linkWithSigner, type LinkedAddress } from '../api/addresses.js';
 import { linkedWalletErrorText } from '../linked-wallets.js';
 import { errorText } from '../error-text.js';
 import { font as F } from '../theme.js';
-import { AppleMark, GoogleG, Mail, Passkey, Warning, XBrand } from '../icons.js';
+import { Mail, Warning } from '../icons.js';
 
 // ── Provider config ─────────────────────────────────────────────────────────
 
 /**
  * One config for every surface. Notable choices:
  *
- * - `loginMethods`: email, google, apple, twitter, passkey. NO `wallet` —
- *   external-wallet sign-in stays on our own `connectRobinhoodChain()` path,
- *   untouched, and offering it twice with different plumbing would mint
- *   different sessions for the same click.
+ * - `loginMethods`: from `PRIVY_LOGIN_METHODS` (email, google, twitter — the
+ *   explicit product pick). NO `wallet` — external-wallet sign-in stays on
+ *   our own `connectRobinhoodChain()` path, untouched, and offering it twice
+ *   with different plumbing would mint different sessions for the same click.
+ *   These are what Privy's login MODAL lists; each must also be enabled in
+ *   the Privy dashboard or it fails with `disallowed_login_method`.
  * - `createOnLogin: 'users-without-wallets'`: every social user gets an
  *   embedded EOA on first login; `useLogin`'s `onComplete` fires only after
  *   that creation has happened.
@@ -90,7 +93,7 @@ import { AppleMark, GoogleG, Mail, Passkey, Warning, XBrand } from '../icons.js'
  *   nothing to review and a second modal reads as phishing.
  */
 const PRIVY_CONFIG: PrivyClientConfig = {
-  loginMethods: ['email', 'google', 'apple', 'twitter', 'passkey'],
+  loginMethods: [...PRIVY_LOGIN_METHODS],
   appearance: {
     theme: 'dark',
     accentColor: '#d9b45a',
@@ -110,6 +113,42 @@ function utf8ToHex(text: string): string {
   let hex = '0x';
   for (const b of bytes) hex += b.toString(16).padStart(2, '0');
   return hex;
+}
+
+/**
+ * While `active`, make sure the authenticated user's embedded wallet exists,
+ * and hand it back once it does.
+ *
+ * `createOnLogin: 'users-without-wallets'` normally creates it during login —
+ * but a login can be INTERRUPTED between authentication and wallet creation
+ * (the OAuth redirect return, before the auto-mount fix, did exactly that),
+ * leaving a user who is authenticated yet walletless forever. The documented
+ * repair is `useCreateWallet().createWallet()`, so after a short grace period
+ * for `useWallets()` to hydrate, that is what this does. An
+ * `embedded_wallet_already_exists` race is harmless — the wallet surfaces
+ * through `useWallets()` either way, and the panels' own timeouts backstop
+ * genuine failure.
+ */
+function useEnsureEmbeddedWallet(active: boolean): ConnectedWallet | null {
+  const { authenticated } = usePrivy();
+  const { wallets } = useWallets();
+  const { createWallet } = useCreateWallet();
+  const tried = useRef(false);
+  const embedded = getEmbeddedConnectedWallet(wallets);
+  const missing = embedded === null;
+  useEffect(() => {
+    if (!active || !authenticated || !missing || tried.current) return;
+    const timer = setTimeout(() => {
+      tried.current = true;
+      createWallet().catch((e: unknown) => {
+        const code = (e as { privyErrorCode?: unknown } | null)?.privyErrorCode;
+        logPrivyFailure('create-wallet', typeof code === 'string' ? code : 'embedded_wallet_create_error');
+      });
+    }, 1_200);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, authenticated, missing]);
+  return embedded;
 }
 
 /**
@@ -210,39 +249,28 @@ class PrivyBoundary extends React.Component<
   }
 }
 
-// ── The button row (used by the Settings link dialog only — the LOGIN screen
-//    renders its own eager copy in App.tsx so the chunk is not needed to paint
-//    buttons) ───────────────────────────────────────────────────────────────
+// ── The one action button the link dialog uses (the LOGIN screen's single
+//    "SOCIAL LOGINS" button is eager, in App.tsx — this chunk must not be
+//    needed to paint it) ─────────────────────────────────────────────────────
 
-const METHOD_ICONS: Record<PrivyLoginMethod, (p: { size?: number | string }) => React.JSX.Element> = {
-  email: Mail,
-  google: GoogleG,
-  apple: AppleMark,
-  twitter: XBrand,
-  passkey: Passkey,
-};
-
-function MethodButtons({ disabled, onPick }: { disabled: boolean; onPick: (m: PrivyLoginMethod) => void }) {
+function PanelButton({
+  disabled, onClick, children,
+}: { disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: 8 }}>
-      {PRIVY_LOGIN_METHODS.map(({ key, label }) => { const Glyph = METHOD_ICONS[key]; return (
-        <button
-          key={key} type="button" disabled={disabled}
-          onClick={() => onPick(key)}
-          style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-            minHeight: 44, padding: '10px 8px', borderRadius: 10, cursor: disabled ? 'default' : 'pointer',
-            fontFamily: F.body, fontWeight: 700, fontSize: 12.5, letterSpacing: '0.04em',
-            background: 'rgba(18,14,34,0.85)', color: '#e8e2f2',
-            border: '1px solid rgba(212,175,55,0.35)',
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
-            opacity: disabled ? 0.55 : 1,
-          }}
-        >
-          <Glyph size={15} /> {label}
-        </button>
-      ); })}
-    </div>
+    <button
+      type="button" disabled={disabled}
+      onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        width: '100%', minHeight: 44, padding: '10px 12px', borderRadius: 10,
+        cursor: disabled ? 'default' : 'pointer',
+        fontFamily: F.body, fontWeight: 700, fontSize: 12.5, letterSpacing: '0.06em',
+        background: 'rgba(18,14,34,0.85)', color: '#e8e2f2',
+        border: '1px solid rgba(212,175,55,0.35)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+        opacity: disabled ? 0.55 : 1,
+      }}
+    >{children}</button>
   );
 }
 
@@ -258,21 +286,20 @@ export interface PrivyLoginResult {
 function LoginPanelInner({
   resume,
   oauthReturn,
-  initialMethod,
+  openLogin,
   onBusyChange,
   onSignedIn,
 }: {
   resume: boolean;
   /** The page just reloaded from a social-OAuth redirect; finish that login. */
   oauthReturn: boolean;
-  /** Launch this method's Privy modal as soon as the SDK is ready. */
-  initialMethod: PrivyLoginMethod | null;
+  /** The SOCIAL LOGINS button was pressed: open Privy's modal when ready. */
+  openLogin: boolean;
   onBusyChange?: (busy: boolean) => void;
   onSignedIn: (result: PrivyLoginResult) => void;
 }) {
   const [flow, dispatch] = useReducer(privyFlowReduce, IDLE_FLOW);
   const { ready, authenticated } = usePrivy();
-  const { wallets } = useWallets();
 
   // `onComplete` serves two shapes of login. Same-page (modal / passkey /
   // email OTP): the flow is in `privy_login`, so PRIVY_OK advances it. OAuth
@@ -313,17 +340,28 @@ function LoginPanelInner({
     return () => clearTimeout(t);
   }, [oauthReturn, ready, authenticated]);
 
-  // The BUTTONS live eagerly in App.tsx (this chunk must not be needed to
-  // paint them); this panel is mounted per attempt with the chosen method and
-  // opens Privy's modal once the SDK is up. One launch per mount — a retry is
-  // a remount (the parent bumps a key), which also resets the flow cleanly.
+  // The eager SOCIAL LOGINS button in App.tsx mounts this panel; once the SDK
+  // is ready, `login()` opens Privy's OWN modal, which lists every configured
+  // method (email / Google / X). Clicks on Google/X happen INSIDE that modal
+  // — real user gestures — so the OAuth redirect launches reliably. One
+  // launch per mount; a retry is a remount (the parent bumps a key).
+  //
+  // Already authenticated is the documented exception: `login()` must NOT be
+  // called then (Privy's own examples disable the button in that state), and
+  // there is nothing to ask anyway — the account exists, so go straight to
+  // the wallet + signature.
   const launched = useRef(false);
   useEffect(() => {
-    if (!ready || launched.current || initialMethod === null) return;
+    if (!ready || launched.current || !openLogin) return;
     launched.current = true;
     dispatch({ type: 'START' });
-    login({ loginMethods: [initialMethod] });
-  }, [ready, initialMethod, login]);
+    if (authenticated) {
+      dispatch({ type: 'PRIVY_OK', isNewUser: false });
+      return;
+    }
+    login();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, authenticated, openLogin]);
 
   // Silent resume: our session expired but Privy's survived. Skip the modal
   // and go straight to the wallet → nonce → sign → verify pipeline. If the
@@ -345,10 +383,10 @@ function LoginPanelInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busyNow]);
 
-  // Wait for the embedded wallet (created on first login, restored on later
-  // ones). `onComplete` only fires after creation, so this is normally
-  // instant — the timeout is for the pathological case, not the normal one.
-  const embedded = getEmbeddedConnectedWallet(wallets);
+  // Wait for the embedded wallet — created during login normally, created by
+  // the ensure-hook for a user whose earlier login was interrupted between
+  // authentication and wallet creation. The timeout is the backstop.
+  const embedded = useEnsureEmbeddedWallet(flow.step === 'waiting_wallet');
   const embeddedAddress = embedded?.address ?? null;
   useEffect(() => {
     if (flow.step !== 'waiting_wallet') return;
@@ -407,18 +445,19 @@ function LoginPanelInner({
 }
 
 /**
- * The WORKING half of the login screen's email / social / passkey block. The
- * five buttons themselves are eager in App.tsx (they are just styled buttons);
- * this lazy component is mounted only when one is pressed (`initialMethod`) or
- * when a silent resume should be attempted (`resume`) — so a wallet-only
- * player never downloads the SDK. Renders only its status / error line.
+ * The WORKING half of the login screen's SOCIAL LOGINS block. The button
+ * itself is eager in App.tsx (a plain styled button); this lazy component is
+ * mounted only when it is pressed (`openLogin`), on an OAuth redirect return
+ * (`oauthReturn`), or for a silent resume (`resume`) — so a wallet-only
+ * player never downloads the SDK. Renders only its status / error line;
+ * everything else is Privy's own modal.
  *
  * A retry is a REMOUNT: the parent bumps a `key` per attempt.
  */
 export function PrivyLoginPanel(props: {
   resume: boolean;
   oauthReturn: boolean;
-  initialMethod: PrivyLoginMethod | null;
+  openLogin: boolean;
   onBusyChange?: (busy: boolean) => void;
   onSignedIn: (result: PrivyLoginResult) => void;
 }) {
@@ -450,12 +489,11 @@ function LinkPanelInner({
 }) {
   const [state, setState] = useState<LinkStep>({ step: 'auth' });
   const { ready, authenticated } = usePrivy();
-  const { wallets } = useWallets();
 
   const { login } = useLogin({
     onComplete: () => setState((s) => (s.step === 'auth' ? { step: 'waiting_wallet' } : s)),
     onError: (code) => {
-      if (code === 'exited_auth_flow') return; // stayed on 'auth'; buttons still there
+      if (code === 'exited_auth_flow') return; // stayed on 'auth'; the button is still there
       logPrivyFailure('link', code);
       setState({ step: 'error', message: privyFailureCopy(code) });
     },
@@ -468,7 +506,7 @@ function LinkPanelInner({
     }
   }, [ready, authenticated]);
 
-  const embedded = getEmbeddedConnectedWallet(wallets);
+  const embedded = useEnsureEmbeddedWallet(state.step === 'waiting_wallet');
   const embeddedAddress = embedded?.address ?? null;
   useEffect(() => {
     if (state.step !== 'waiting_wallet') return;
@@ -518,11 +556,13 @@ function LinkPanelInner({
         return (
           <>
             <p style={{ margin: '0 0 12px', fontSize: 13, lineHeight: 1.55, color: '#bab4c9' }}>
-              Sign in with the email, social account or passkey you want to attach.
+              Sign in with the email or social account you want to attach.
               Its wallet will sign a <b style={{ color: '#e8e2f2' }}>“Link this wallet”</b> message —
               free, moves no funds — and from then on that sign-in opens <i>this</i> profile.
             </p>
-            <MethodButtons disabled={!ready} onPick={(method) => login({ loginMethods: [method] })} />
+            <PanelButton disabled={!ready} onClick={login}>
+              <Mail size={15} /> SIGN IN WITH EMAIL / SOCIAL
+            </PanelButton>
           </>
         );
       case 'waiting_wallet':
@@ -541,7 +581,9 @@ function LinkPanelInner({
             <p role="alert" style={{ margin: '0 0 12px', fontSize: 13, lineHeight: 1.55, color: '#ffb8b8' }}>
               {state.message}
             </p>
-            <MethodButtons disabled={!ready} onPick={(method) => { setState({ step: 'auth' }); login({ loginMethods: [method] }); }} />
+            <PanelButton disabled={!ready} onClick={() => { setState({ step: 'auth' }); login(); }}>
+              <Mail size={15} /> TRY AGAIN
+            </PanelButton>
           </>
         );
     }

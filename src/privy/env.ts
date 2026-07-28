@@ -71,20 +71,20 @@ export const PRIVY_ENABLED: boolean = isPrivyConfigured(PRIVY_APP_ID);
 
 // ── The offered methods, SDK-free ───────────────────────────────────────────
 //
-// Lives here (eager) because the login screen renders its own buttons for
-// these BEFORE the SDK chunk exists — downloading half a megabyte of SDK to
-// paint five buttons would defeat the lazy split. The values are Privy's
-// `LoginMethod` names; `runtime.tsx` narrows them back into the SDK's type.
+// The login screen shows ONE eager "SOCIAL LOGINS" button; the methods
+// themselves are listed inside Privy's own modal, which reads them from the
+// provider config in `runtime.tsx` — which reads THIS list, so there is one
+// place to change. The values are Privy's `LoginMethod` names.
+//
+// email + google + twitter by explicit product decision (2026-07-28); apple
+// and passkey were dropped. NO `wallet` — external-wallet sign-in stays on
+// our own path. NOTE: each of these must ALSO be toggled on in the Privy
+// dashboard (Authentication → Socials); a method enabled here but off there
+// fails with `disallowed_login_method`.
 
-export type PrivyLoginMethod = 'email' | 'google' | 'apple' | 'twitter' | 'passkey';
+export type PrivyLoginMethod = 'email' | 'google' | 'twitter';
 
-export const PRIVY_LOGIN_METHODS: readonly { key: PrivyLoginMethod; label: string }[] = [
-  { key: 'email', label: 'Email' },
-  { key: 'google', label: 'Google' },
-  { key: 'apple', label: 'Apple' },
-  { key: 'twitter', label: 'X' },
-  { key: 'passkey', label: 'Passkey' },
-] as const;
+export const PRIVY_LOGIN_METHODS: readonly PrivyLoginMethod[] = ['email', 'google', 'twitter'];
 
 // ── OAuth return detection, SDK-free ────────────────────────────────────────
 //
