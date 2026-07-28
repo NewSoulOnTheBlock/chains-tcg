@@ -143,6 +143,11 @@ function privyFailureCopy(code: string): string {
       return 'Sign-in is not configured for this site address. (This origin is not on the Privy app’s allowlist.)';
     case 'allowlist_rejected':
       return 'This account is not allowed to sign in to this app.';
+    // The method is in OUR `loginMethods` but toggled off in the Privy
+    // dashboard (Authentication → Socials / Passkeys). Nothing the player can
+    // fix; the developer reading the same screen can.
+    case 'disallowed_login_method':
+      return 'This sign-in method is not enabled for this app yet. Try another one.';
     case 'oauth_user_denied':
       return 'You declined the sign-in request. Try again when you are ready.';
     case 'too_many_requests':
