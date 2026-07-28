@@ -57,7 +57,6 @@ import {
   PRIVY_ENABLED,
   PRIVY_LOGIN_METHODS,
   setPrivyHint,
-  type PrivyLoginMethod,
 } from './env.js';
 import {
   IDLE_FLOW,
