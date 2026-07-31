@@ -34,7 +34,7 @@ import {
   type OwnRankedProfile, type QueueState, type RankedLeaderboard, type RankedMatchEntry,
   type RankedStanding, type SeasonInfo,
 } from './ranked-client';
-import { connectRobinhoodChain, detectEvmWallet, shortAddr, ROBINHOOD_CHAIN } from './wallet';
+import { shortAddr } from './wallet';
 // Blockscout's host, so the token link is never a hardcoded URL.
 import { ROBINHOOD_EXPLORER_URL } from './pack-evm';
 // Card ownership is SERVER state now (`src/api/collection.ts`). `useCollection`
@@ -58,7 +58,7 @@ import {
   Wizard, Ghost, Cards, Deck as DeckIcon, Target, Gamepad, Trophy, Star,
   StarOutline, Crown, Gem, Coins, Chart, Castle, Temple, Book, Books, Globe, Moon, Orb, Medal,
   Link as LinkIcon, Chain, Warning, Info, Lock, User, Settings, Tools,
-  Mobile, Fox, Backpack, Diamond, DiamondOutline, Dot, SoundOn, SoundOff, Music,
+  Mobile, Backpack, Diamond, DiamondOutline, Dot, SoundOn, SoundOff, Music,
   Mail, GoogleG, XBrand,
   Hourglass, EnterKey, Lizard, GridView, ListView, MedalFirst,
   Hand, Dice, Icon, type IconKey,
@@ -274,38 +274,8 @@ function Login({ onSignedIn }: {
     sessionApi.setPersistence(remember ? 'local' : 'session');
   }, [remember]);
 
-  /**
-   * Connect the wallet on Robinhood Chain, then sign the server's challenge.
-   *
-   * `connectRobinhoodChain()` switches (or adds) the network and does not
-   * return until it has read `eth_chainId` back and confirmed 4663, so a user
-   * who declines the switch gets a clear error here instead of a signature over
-   * a message describing a network they are not on.
-   *
-   * The slug then comes FROM that chain id, not from a constant. It is the
-   * server's identity namespace — `core.profiles` is `UNIQUE (address, chain)`
-   * — as well as the `Chain ID:` line the user reads, and the two must agree.
-   * The `!== SIGN_IN_CHAIN` check is belt and braces: `connectRobinhoodChain()`
-   * already guarantees it, and if that ever regresses this refuses to sign
-   * rather than quietly minting a second identity for the same wallet.
-   */
-  async function signIn() {
-    setErr(''); setStage('connecting');
-    try {
-      const { address, chainId } = await connectRobinhoodChain();
-      const chain = auth.authChainForEvmChainId(chainId);
-      if (chain === null || chain !== SIGN_IN_CHAIN) {
-        throw new Error(
-          `Wrong network: your wallet is on chain ${chainId}. Switch to Robinhood Chain (${ROBINHOOD_CHAIN.chainId}) and try again.`,
-        );
-      }
-      setStage('signing');
-      await auth.signIn({ address, chain });
-      onSignedIn();
-    } catch (e) {
-      setErr(loginErrorText(e));
-    } finally { setStage('idle'); }
-  }
+  // Login is Privy-only (see the sign-in card below); the former browser-wallet
+  // sign-in path (MetaMask → Robinhood Chain → server challenge) has been removed.
 
   // ── Login-screen theme music ─────────────────────────────────────────────
   // Browsers block autoplay-with-sound until the user interacts. Strategy:
@@ -346,9 +316,7 @@ function Login({ onSignedIn }: {
   }, [muted]);
 
   const mobile = useIsMobile();
-  const evm = detectEvmWallet();
   const busy = stage !== 'idle';
-  const label = stage === 'connecting' ? 'Connecting…' : 'Confirm in your wallet…';
 
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'auto', background: '#07060f', fontFamily: F.body, color: '#F8F8F8' }}>
@@ -378,61 +346,34 @@ function Login({ onSignedIn }: {
         padding: 26, backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', boxShadow: '0 24px 70px rgba(0,0,0,0.55)',
       }}>
         <div style={{ textAlign: 'center', marginBottom: 2 }}>
-          <div style={{ color: '#b794f6', letterSpacing: 3, fontWeight: 800, fontSize: 14 }}>‹ SIGN IN WITH YOUR WALLET ›</div>
+          <div style={{ color: '#b794f6', letterSpacing: 3, fontWeight: 800, fontSize: 14 }}>‹ SIGN IN TO PLAY ›</div>
           <div style={{ color: '#9a94ad', fontSize: 12, marginTop: 4 }}>
-            You will be asked to sign a short message. It is free and moves no funds.
+            Sign in to save your collection and play online. It is free.
           </div>
         </div>
 
-        <button className="ocva-btn" disabled={busy || privyBusy}
-          onClick={() => evm.installed ? signIn() : window.open('https://metamask.io/download/', '_blank', 'noopener')}
-          style={{ width: '100%', padding: '15px', fontSize: 15, background: 'linear-gradient(135deg,#F6851B,#E2761B)', color: '#1a1408' }}>
-          <Fox size={18} /> {busy ? label : (evm.installed ? `Sign in with ${evm.label}` : 'Install MetaMask')}
-        </button>
-
-        <div style={{ fontSize: 11, color: '#8f89a3', textAlign: 'center', lineHeight: 1.55 }}>
-          Your wallet will be switched to <b style={{ color: '#c8c2d8' }}>Robinhood Chain</b> (4663).
-          The game runs on this network only.
-        </div>
-
-        <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12, color: '#9a94ad', cursor: 'pointer', padding: '6px 2px' }}>
-          <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} disabled={!!busy}
-            style={{ width: 16, height: 16, accentColor: '#8A2BE2' }} />
-          Remember me on this device
-        </label>
-        <div style={{ fontSize: 10.5, color: '#6f6a80', marginTop: -6, lineHeight: 1.45 }}>
-          Off by default: your session lives in this tab only and ends when you close it.
-        </div>
-
-        {/* Email / social / passkey — Privy. Hidden entirely (no dead space,
-            no crash) when the build has no `VITE_PRIVY_APP_ID`; wallet sign-in
-            above must work identically either way. The buttons are eager and
-            SDK-free; the SDK chunk is fetched only when one is PRESSED (or a
-            silent resume runs), so a wallet-only player never downloads it. */}
-        {PRIVY_ENABLED && (
+        {/* Login is Privy-only: email / Google / X, each backed by a Solana
+            wallet created behind the scenes. The eager button is SDK-free; the
+            Privy SDK chunk is fetched only when it is PRESSED (or a silent
+            resume runs). When the build has no `VITE_PRIVY_APP_ID`, sign-in is
+            explicitly unavailable rather than a silently empty card. */}
+        {PRIVY_ENABLED ? (
           <>
-            <div aria-hidden style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '2px 0' }}>
-              <span style={{ flex: 1, height: 1, background: 'rgba(212,175,55,0.28)' }} />
-              <span style={{ fontSize: 10.5, letterSpacing: '0.22em', color: '#9a94ad', fontWeight: 800 }}>
-                OR CONTINUE WITH
-              </span>
-              <span style={{ flex: 1, height: 1, background: 'rgba(212,175,55,0.28)' }} />
-            </div>
             <button
               type="button" disabled={busy || privyBusy}
               onClick={() => setPrivyMount((prev) => ({ openLogin: true, n: (prev?.n ?? 0) + 1 }))}
               style={{
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 9,
-                width: '100%', minHeight: 46, padding: '12px 14px', borderRadius: 10,
+                width: '100%', minHeight: 52, padding: '15px', borderRadius: 12,
                 cursor: (busy || privyBusy) ? 'default' : 'pointer',
-                fontFamily: F.body, fontWeight: 800, fontSize: 13, letterSpacing: '0.08em',
-                background: 'rgba(18,14,34,0.85)', color: '#e8e2f2',
+                fontFamily: F.body, fontWeight: 800, fontSize: 15, letterSpacing: '0.06em',
+                background: 'linear-gradient(135deg,#8A2BE2,#5b1fb0)', color: '#F8F6FF',
                 border: '1px solid rgba(212,175,55,0.35)',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+                boxShadow: '0 8px 24px rgba(138,43,226,0.35), inset 0 1px 0 rgba(255,255,255,0.12)',
                 opacity: (busy || privyBusy) ? 0.55 : 1,
               }}
             >
-              <Mail size={15} /> <GoogleG size={15} /> <XBrand size={14} /> SOCIAL LOGINS
+              <Mail size={16} /> <GoogleG size={16} /> <XBrand size={15} /> {privyBusy ? 'Signing in…' : 'SIGN IN'}
             </button>
             <div style={{ fontSize: 10.5, color: '#6f6a80', textAlign: 'center', lineHeight: 1.45 }}>
               Email, Google or X — a wallet is created for you behind the scenes,
@@ -457,7 +398,20 @@ function Login({ onSignedIn }: {
               </React.Suspense>
             )}
           </>
+        ) : (
+          <div role="alert" style={{ textAlign: 'center', fontSize: 12.5, color: '#ffb8b8', lineHeight: 1.5 }}>
+            Sign-in is temporarily unavailable. Please try again later.
+          </div>
         )}
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12, color: '#9a94ad', cursor: 'pointer', padding: '6px 2px' }}>
+          <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} disabled={!!busy}
+            style={{ width: 16, height: 16, accentColor: '#8A2BE2' }} />
+          Remember me on this device
+        </label>
+        <div style={{ fontSize: 10.5, color: '#6f6a80', marginTop: -6, lineHeight: 1.45 }}>
+          Off by default: your session lives in this tab only and ends when you close it.
+        </div>
 
         {err && (
           <div role="alert" style={{ textAlign: 'center', fontSize: 12.5, color: '#ffb8b8', marginTop: 2, lineHeight: 1.5 }}>
@@ -2152,11 +2106,14 @@ function Landing({
 
       <NavDock onCollection={goCollection} onBoosters={onBoosters} onLadder={onLadder} onMasters={onMasterquest} onProfile={onProfile} onRules={onRules} onSettings={onSettings} mobile={mobile} />
 
-      <img src="/built-on-robinhood.png?v=2" alt="Built on Robinhood" draggable={false}
+      <div aria-label="Built on Solana"
         style={{ position: mobile ? 'static' : 'absolute', zIndex: 2, left: '50%', bottom: mobile ? undefined : 70,
           transform: mobile ? 'none' : 'translateX(-50%)', margin: mobile ? '10px auto 0' : undefined, display: 'block',
-          width: mobile ? 120 : 150, height: 'auto', pointerEvents: 'none', userSelect: 'none', opacity: 0.9,
-          filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.6))' }} />
+          width: mobile ? 120 : 150, textAlign: 'center', pointerEvents: 'none', userSelect: 'none', opacity: 0.9,
+          fontFamily: F.body, fontWeight: 800, fontSize: mobile ? 10 : 11, letterSpacing: '0.18em', color: '#C7B8FF',
+          textShadow: '0 2px 8px rgba(0,0,0,0.6)' }}>
+        BUILT ON <span style={{ color: '#14F195' }}>SOLANA</span>
+      </div>
 
     </div>
   );
