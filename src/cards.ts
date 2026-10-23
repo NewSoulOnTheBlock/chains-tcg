@@ -1,16 +1,21 @@
 // src/cards.ts
-// Card catalogue + starter decks for Chains TCG.
+// Card catalogue + starter decks. Five Sproto Gremlin factions (see COLOR_META).
 
 export type Color = 'bnb' | 'sol' | 'eth' | 'robinhood' | 'base';
 
 export const COLORS: Color[] = ['bnb', 'sol', 'eth', 'robinhood', 'base'];
 
+// The five Sproto Gremlin factions. The KEYS (nb, sol, …) are the
+// original chain-era ids and are deliberately unchanged: card ids, saved decks,
+// NFT metadata and the backend all key on them. Only what players see changed.
+//   bnb → Spirit (white)   sol → Rebel (red)   eth → Jester (black)
+//   robinhood → Wealth (green)   base → Knowledge (blue)
 export const COLOR_META: Record<Color, { name: string; hex: string; ink: string; template?: string; glyph?: string }> = {
-  bnb:       { name: 'BnB',       hex: '#f3ba2f', ink: '#000', template: '/template-bnb.jpg', glyph: 'BNB' },
-  sol:       { name: 'Solana',    hex: '#9945ff', ink: '#fff', template: '/template-sol.png', glyph: 'SOL' },
-  eth:       { name: 'Ethereum',  hex: '#f5f5f5', ink: '#222', template: '/template-eth.png', glyph: 'ETH' },
-  robinhood: { name: 'Robinhood', hex: '#00C805', ink: '#000', glyph: 'HOOD' },
-  base:      { name: 'Base',      hex: '#0052FF', ink: '#fff', glyph: 'BASE' },
+  bnb:       { name: 'Spirit',    hex: '#efe6cc', ink: '#1d1a12', glyph: 'SPR' },
+  sol:       { name: 'Rebel',     hex: '#e0362c', ink: '#fff',    glyph: 'RBL' },
+  eth:       { name: 'Jester',    hex: '#7a6d8f', ink: '#fff',    glyph: 'JST' },
+  robinhood: { name: 'Wealth',    hex: '#2fae4e', ink: '#08130b', glyph: 'WLT' },
+  base:      { name: 'Knowledge', hex: '#2f6fe0', ink: '#fff',    glyph: 'KNW' },
 };
 
 export type CardType = 'node' | 'meme' | 'machine' | 'aura' | 'move';
@@ -76,10 +81,7 @@ const cmc = (id: number) => `/cards/cmc-${id}.png`;
 
 /** Image overrides keyed by card id. Cards without an entry render the chain glyph. */
 const IMAGES: Record<string, string> = {
-  // Chain nodes — larger, more artistic official logos hosted locally.
-  node_bnb: '/nodes/bnb.png',
-  node_sol: '/nodes/sol.png',
-  node_eth: '/nodes/eth.png',
+  // Nodes have no art entry: they render their faction sigil (src/chain-logos.tsx).
 
   // BnB memes
   bnb_babydoge: '/cards/babydoge.png?v=1',
@@ -304,121 +306,126 @@ function reg(...cs: CardDef[]) {
 // Nodes
 reg(N('bnb'), N('sol'), N('eth'), N('robinhood'), N('base'));
 
-// BnB — fast, cheap, aggressive memes
+// Spirit Sprotos (white) — go wide, lift the whole host, cleanse the field.
+// (Internal key `bnb`: ids are stable storage keys, see COLOR_META.)
 reg(
-  M('bnb_babydoge','bnb', 'BABYDOGE',         1, 1, 1, 'A million-zero token, a million holders.'),
-  M('bnb_broccoli','bnb', 'BROCCOLI',         1, 2, 1, "CZ's dog. Greens are bullish."),
-  M('bnb_tut',     'bnb', 'TUT',              2, 2, 2, 'Mubarak\'s turtle. Slow and steady.'),
-  M('bnb_tst',     'bnb', 'TST',              2, 3, 2, 'A test that pumped 1000x.'),
-  M('bnb_banana',  'bnb', 'BANANA',           3, 3, 3, 'Slipped past every sell wall.'),
-  M('bnb_mubarak', 'bnb', 'MUBARAK',          3, 4, 3, 'Bismillah, send it.'),
-  M('bnb_cheems',  'bnb', 'CHEEMS',           4, 4, 4, 'Bonk\'s older brother. Frens forever.'),
-  M('bnb_floki',   'bnb', 'FLOKI',            5, 6, 5, 'Viking energy, BSC liquidity.'),
+  M('bnb_babydoge','bnb', 'Candle Acolyte',   1, 1, 1, 'Lights one wick every sunrise. Never misses.'),
+  M('bnb_broccoli','bnb', 'Halo Hatchling',   1, 2, 1, 'Born glowing. Never learned how to stop.'),
+  M('bnb_tut',     'bnb', 'Choir Sproto',     2, 2, 2, 'Sings off-key, but always in unison.'),
+  M('bnb_tst',     'bnb', 'Pilgrim Sproto',   2, 3, 2, 'Walked here from the genesis block. Barefoot.'),
+  M('bnb_banana',  'bnb', 'Lantern Warden',   3, 3, 3, 'Keeps the shrine lit through the longest night.'),
+  M('bnb_mubarak', 'bnb', 'Radiant Zealot',   3, 4, 3, 'Believes louder than you doubt.'),
+  M('bnb_cheems',  'bnb', 'Seraph Sproto',    4, 4, 4, 'Six wings. Zero sell orders.'),
+  M('bnb_floki',   'bnb', 'More Light',       5, 6, 5, 'Leader of the gremlins. Asks only for more.'),
   // Machines
-  A('bnb_farm',     'bnb', 'Volume Bot',        3, 'pump_all_+1+1',         'Wash trades pump every Meme +1/+1.'),
-  A('bnb_bridge',   'bnb', 'Token Launchpad',   2, 'extra_node_per_turn',   'You may play one extra Node each turn.'),
-  A('bnb_sniper',   'bnb', 'Sniper Bot',        4, 'meme_haste',            'Your Memes have no summoning sickness.'),
-  A('bnb_mmalgo',   'bnb', 'Market Maker Algo', 3, 'pump_attackers_+1+0',   'Your attacking Memes get +1/+0.'),
+  A('bnb_farm',     'bnb', 'Shrine of Many',     3, 'pump_all_+1+1',         'Every Sproto in the light grows: your Memes get +1/+1.'),
+  A('bnb_bridge',   'bnb', 'Pilgrim Road',       2, 'extra_node_per_turn',   'You may play one extra Node each turn.'),
+  A('bnb_sniper',   'bnb', 'Dawn Bell',          4, 'meme_haste',            'Your Memes have no summoning sickness.'),
+  A('bnb_mmalgo',   'bnb', 'Banner of the Host', 3, 'pump_attackers_+1+0',   'Your attacking Memes get +1/+0.'),
   // Moves
-  X('bnb_rugpull',  'bnb', 'Rug Pull',          2, 'destroyMeme',           'Dev pulls the liquidity. Destroy target Meme.'),
-  X('bnb_airdrop',  'bnb', 'Airdrop Farm',      3, 'drawTwo',               'Farm wallets for the snapshot. Draw two cards.'),
-  X('bnb_honeypot', 'bnb', 'Honeypot',          3, 'damageAll_1',           'Every Meme on the field takes 1 damage.'),
+  X('bnb_rugpull',  'bnb', 'Exorcism',          2, 'destroyMeme',           'Cast it out. Destroy target Meme.'),
+  X('bnb_airdrop',  'bnb', 'Revelation',        3, 'drawTwo',               'The light shows two paths. Draw two cards.'),
+  X('bnb_honeypot', 'bnb', 'Blinding Dawn',     3, 'damageAll_1',           'Every Meme on the field takes 1 damage.'),
   // Aura
-  U('bnb_liquidity','bnb', 'Liquidity Injection', 2, 'aura_+2+2',           'Enchant Meme. Attached Meme gets +2/+2.'),
+  U('bnb_liquidity','bnb', 'Blessing',          2, 'aura_+2+2',             'Enchant Meme. Attached Meme gets +2/+2.'),
 );
 
-// Solana — burst, draw, fast turns
+// Rebel Sprotos (red) — burn, snipe, hit first and fast.
+// (Internal key `sol`.)
 reg(
-  M('sol_pnut',    'sol', 'PNUT',              1, 2, 1, 'Peanut the Squirrel. RIP.'),
-  M('sol_bonk',    'sol', 'BONK',              1, 1, 2, 'The OG Solana shiba.'),
-  M('sol_popcat',  'sol', 'POPCAT',            2, 2, 3, 'Pop. Pop. Pop.'),
-  M('sol_mew',     'sol', 'MEW',               2, 3, 2, 'Cat in a dogs world.'),
-  M('sol_bome',    'sol', 'BOME',              3, 3, 3, 'Book of Meme. Required reading.'),
-  M('sol_wif',     'sol', 'dogwifhat',         3, 4, 2, 'It is just a dog wif a hat.'),
-  M('sol_fartcoin','sol', 'FARTCOIN',          4, 5, 4, 'Silent but deadly.'),
-  M('sol_goat',    'sol', 'GOAT',              5, 6, 5, 'Goatseus Maximus, the AI prophet.'),
+  M('sol_pnut',    'sol', 'Spark Gremlin',     1, 2, 1, 'Small, loud, and already on fire.'),
+  M('sol_bonk',    'sol', 'Brick Tosser',      1, 1, 2, 'Aims for the windows. Hits the windows.'),
+  M('sol_popcat',  'sol', 'Riot Drummer',      2, 2, 3, 'Keeps the beat while everything burns.'),
+  M('sol_mew',     'sol', 'Graffiti Sproto',   2, 3, 2, 'Tags every wall it can reach, and some it cannot.'),
+  M('sol_bome',    'sol', 'Molotov Mixer',     3, 3, 3, 'Required ingredients: one bottle, no plan.'),
+  M('sol_wif',     'sol', 'Barricade Breaker', 3, 4, 2, 'The wall was only ever a suggestion.'),
+  M('sol_fartcoin','sol', 'Firestarter Sproto',4, 5, 4, 'Did not start the fire. Is the fire.'),
+  M('sol_goat',    'sol', 'Rebel Warlord',     5, 6, 5, 'Overthrew the last warlord. Kept the hat.'),
   // Machines
-  A('sol_priority','sol', 'MEV Bundler',       2, 'gas_discount_color',    'Your Moves cost 1 less Solana gas (min 0).'),
-  A('sol_oracle',  'sol', 'AI Trading Agent',  3, 'on_meme_etb_draw',      'When a Meme enters under you, draw a card (once per turn).'),
-  A('sol_amm',     'sol', 'AMM Router',        4, 'meme_haste',            'Your Memes have no summoning sickness.'),
-  A('sol_tgbot',   'sol', 'Telegram Bot Suite',3, 'pump_attackers_+1+0',   'Your attacking Memes get +1/+0.'),
+  A('sol_priority','sol', 'Black Market Forge', 2, 'gas_discount_color',    'Your Moves cost 1 less Rebel gas (min 0).'),
+  A('sol_oracle',  'sol', 'Pirate Radio',       3, 'on_meme_etb_draw',      'When a Meme enters under you, draw a card (once per turn).'),
+  A('sol_amm',     'sol', 'War Drums',          4, 'meme_haste',            'Your Memes have no summoning sickness.'),
+  A('sol_tgbot',   'sol', 'Burning Banner',     3, 'pump_attackers_+1+0',   'Your attacking Memes get +1/+0.'),
   // Moves
-  X('sol_zap',     'sol', 'Snipe',             1, 'damage3',               'Bot snipes the mint. Deal 3 damage to any target.'),
-  X('sol_bounce',  'sol', 'Frontrun',          2, 'bounceMeme',            'MEV reorder. Return target Meme to its owner\'s hand.'),
-  X('sol_tgpump',  'sol', 'Telegram Pump',     1, 'damage2',               'KOL signal in the group chat. Deal 2 damage anywhere.'),
+  X('sol_zap',     'sol', 'Firebomb',          1, 'damage3',               'Lit and thrown. Deal 3 damage to any target.'),
+  X('sol_bounce',  'sol', 'Scatter',           2, 'bounceMeme',            'Everybody run. Return target Meme to its owner\'s hand.'),
+  X('sol_tgpump',  'sol', 'Cheap Shot',        1, 'damage2',               'Nobody said fair. Deal 2 damage to any target.'),
   // Aura
-  U('sol_validator','sol', 'Validator Boost',  2, 'aura_haste',            'Enchant Meme. Attached Meme has no summoning sickness.'),
+  U('sol_validator','sol', 'Adrenaline',       2, 'aura_haste',            'Enchant Meme. Attached Meme has no summoning sickness.'),
 );
 
-// Robinhood — lifegain midrange, sturdy bodies, dividends
+// Wealth Sprotos (green) — lifegain midrange, sturdy bodies, compounding.
+// (Internal key `robinhood`.)
 reg(
-  M('robinhood_hood',    'robinhood', 'HOOD',     1, 1, 2, 'Payment for order flow IPO\'d the casino.'),
-  M('robinhood_ozzy',    'robinhood', 'Ozzy',     2, 1, 4, 'The Robinhood owl watches every candle.'),
-  M('robinhood_cashcat', 'robinhood', 'Cashcat',  2, 2, 3, 'Nine lives, every one of them in the money.'),
-  M('robinhood_kitty',   'robinhood', 'KITTY',    3, 3, 4, 'Roaring Kitty posts a single frame.'),
-  M('robinhood_tendies', 'robinhood', 'TENDIES',  3, 4, 3, 'Chicken tendies, secured.'),
-  M('robinhood_moon',    'robinhood', 'MOON',     4, 4, 5, 'To the moon, no brakes.'),
-  M('robinhood_yolo',    'robinhood', 'YOLO',     5, 6, 4, 'One life, all in on 0DTE calls.'),
-  M('robinhood_ape',     'robinhood', 'APE',      6, 6, 7, 'The whole ape army marches on the shorts.'),
+  M('robinhood_hood',    'robinhood', 'Coin Sprout',     1, 1, 2, 'Plant a penny. Wait.'),
+  M('robinhood_ozzy',    'robinhood', 'Vault Toad',      2, 1, 4, 'Sits on the gold. Never moves. Never needs to.'),
+  M('robinhood_cashcat', 'robinhood', 'Golden Grub',     2, 2, 3, 'Eats copper. Sheds gold.'),
+  M('robinhood_kitty',   'robinhood', 'Orchard Keeper',  3, 3, 4, 'Every tree in the grove pays rent.'),
+  M('robinhood_tendies', 'robinhood', 'Harvest Sproto',  3, 4, 3, 'Reaps what it sowed, and a little of yours.'),
+  M('robinhood_moon',    'robinhood', 'Treasure Golem',  4, 4, 5, 'Built from interest. Still compounding.'),
+  M('robinhood_yolo',    'robinhood', 'Gilded Boar',     5, 6, 4, 'Charges through the fence and the price tag.'),
+  M('robinhood_ape',     'robinhood', 'Old Money',       6, 6, 7, 'Was rich before rich had a name.'),
   // Machines
-  A('robinhood_dividend',  'robinhood', 'Dividend Reinvestment', 2, 'lifelink_all',        'Reinvested dividends heal you when your Memes deal damage.'),
-  A('robinhood_options',   'robinhood', 'Options Chain',         3, 'pump_attackers_+1+0', 'Leverage: your attacking Memes get +1/+0.'),
-  A('robinhood_fractional','robinhood', 'Fractional Shares',     3, 'on_meme_etb_draw',    'When a Meme enters under you, draw a card (once per turn).'),
-  A('robinhood_margin',    'robinhood', 'Margin Account',        3, 'pump_all_+1+1',       'Leverage the whole book: your Memes get +1/+1.'),
+  A('robinhood_dividend',  'robinhood', 'Treasury',          2, 'lifelink_all',        'The vault pays you back: you heal when your Memes deal damage.'),
+  A('robinhood_options',   'robinhood', 'Golden Spurs',      3, 'pump_attackers_+1+0', 'Your attacking Memes get +1/+0.'),
+  A('robinhood_fractional','robinhood', 'Ledger of Plenty',  3, 'on_meme_etb_draw',    'When a Meme enters under you, draw a card (once per turn).'),
+  A('robinhood_margin',    'robinhood', 'Fertile Grove',     3, 'pump_all_+1+1',       'Everything here grows: your Memes get +1/+1.'),
   // Moves
-  X('robinhood_buydip', 'robinhood', 'Buy the Dip',    2, 'gainLife4', 'Stack the discount. Gain 4 life.'),
-  X('robinhood_gamma',  'robinhood', 'Gamma Squeeze',  3, 'damage5',   'Dealers scramble to hedge. Deal 5 damage to any target.'),
-  X('robinhood_pfof',   'robinhood', 'Order Flow',     3, 'drawTwo',   'Sell the flow, read the tape. Draw two cards.'),
+  X('robinhood_buydip', 'robinhood', 'Bountiful Harvest', 2, 'gainLife4', 'The granary overflows. Gain 4 life.'),
+  X('robinhood_gamma',  'robinhood', 'Stampede',          3, 'damage5',   'The herd runs one way. Deal 5 damage to any target.'),
+  X('robinhood_pfof',   'robinhood', 'Count the Coins',   3, 'drawTwo',   'Twice, to be sure. Draw two cards.'),
   // Aura
-  U('robinhood_diamond','robinhood', 'Diamond Hands',  2, 'aura_+0+3', 'Enchant Meme. Attached Meme gets +0/+3.'),
+  U('robinhood_diamond','robinhood', 'Gold Plating',      2, 'aura_+0+3', 'Enchant Meme. Attached Meme gets +0/+3.'),
 );
 
-// Ethereum — control, removal, big finishers
+// Jester Sprotos (black) — removal, control, the last laugh.
+// (Internal key `eth`.)
 reg(
-  M('eth_andy',    'eth', 'ANDY',              1, 2, 2, 'Andy is happy. Andy is bullish.'),
-  M('eth_apu',     'eth', 'APU',               1, 1, 3, 'Apu Apustaja, helper frog.'),
-  M('eth_wojak',   'eth', 'WOJAK',             2, 2, 3, 'Feels permabullish, man.'),
-  M('eth_turbo',   'eth', 'TURBO',             2, 3, 1, 'Painted by a chatbot, listed on Binance.'),
-  M('eth_mog',     'eth', 'MOG',               3, 3, 4, 'Mog the lessers.'),
-  M('eth_shib',    'eth', 'SHIB',              3, 4, 3, 'The Dogecoin killer that became a brand.'),
-  M('eth_pepe',    'eth', 'PEPE',              5, 5, 6, 'The king of ERC-20 memes.'),
+  M('eth_andy',    'eth', 'Pocket Jester',     1, 2, 2, 'Fits in your pocket. Leaves with your wallet.'),
+  M('eth_apu',     'eth', 'Mask Collector',    1, 1, 3, 'Already has your face. Wants the rest.'),
+  M('eth_wojak',   'eth', 'Weeping Clown',     2, 2, 3, 'Laughs at funerals. Cries at weddings.'),
+  M('eth_turbo',   'eth', 'Knife Juggler',     2, 3, 1, 'Drops one every show. On purpose.'),
+  M('eth_mog',     'eth', 'Grinning Sproto',   3, 3, 4, 'The smile goes all the way around.'),
+  M('eth_shib',    'eth', 'Court Fool',        3, 4, 3, 'Tells the king the truth. Then poisons him.'),
+  M('eth_pepe',    'eth', 'The Last Laugh',    5, 5, 6, 'It was always going to be him.'),
   // NFT-linked meme — ETB zaps opp + draws a card (Sproto Gremlin NFT mint)
   ME('eth_sproto_gremlin', 'eth', 'Sproto Gremlin', 2, 2, 2, 'etb_zap_2_and_draw',
      'When ~ enters the field, deal 2 damage to your opponent and draw a card.'),
   // Machines
-  A('eth_eip1559', 'eth', 'Smart Contract Suite', 3, 'gas_discount_color', 'Optimized calldata — your Moves cost 1 less Ethereum gas (min 0).'),
-  A('eth_temple',  'eth', 'Dapp Ecosystem',    4, 'pump_all_+1+1',         'Network effects: your Memes get +1/+1.'),
-  A('eth_l2',      'eth', 'Layer 2 Rollup',    4, 'meme_haste',            'Sequencer ships fast — your Memes have no summoning sickness.'),
-  A('eth_yield',   'eth', 'Yield Aggregator',  3, 'pump_attackers_+1+0',   'Your attacking Memes get +1/+0.'),
+  A('eth_eip1559', 'eth', 'Trick Deck',        3, 'gas_discount_color',    'Every card a trick: your Moves cost 1 less Jester gas (min 0).'),
+  A('eth_temple',  'eth', 'Carnival of Masks', 4, 'pump_all_+1+1',         'The show goes on: your Memes get +1/+1.'),
+  A('eth_l2',      'eth', 'Trapdoor Stage',    4, 'meme_haste',            'Enter laughing: your Memes have no summoning sickness.'),
+  A('eth_yield',   'eth', 'Jack-in-the-Box',   3, 'pump_attackers_+1+0',   'Your attacking Memes get +1/+0.'),
   // Moves
-  X('eth_smite',   'eth', 'FUD Tweet',         3, 'damage5',               'KOL drops a thread. Deal 5 damage to any target.'),
-  X('eth_heal',    'eth', 'DCA In',            2, 'gainLife4',             'Stack the dip. Gain 4 life.'),
-  X('eth_exploit', 'eth', 'Exploit Disclosure',2, 'destroyMachine',        'White-hat dev kills the contract. Destroy target Machine.'),
+  X('eth_smite',   'eth', 'Punchline',         3, 'damage5',               'Timing is everything. Deal 5 damage to any target.'),
+  X('eth_heal',    'eth', 'Fake Death',        2, 'gainLife4',             'Get up once the crowd leaves. Gain 4 life.'),
+  X('eth_exploit', 'eth', 'Sabotage',          2, 'destroyMachine',        'Loosen one bolt. Destroy target Machine.'),
   // Aura
-  U('eth_shield',  'eth', 'Smart Contract Shield', 2, 'aura_+0+3',         'Enchant Meme. Attached Meme gets +0/+3.'),
+  U('eth_shield',  'eth', 'Mirror Mask',       2, 'aura_+0+3',             'Enchant Meme. Attached Meme gets +0/+3.'),
 );
 
-// Base — card-advantage aggro, cheap swarm, onchain summer
+// Knowledge Sprotos (blue) — card advantage, tricks, cheap swarm.
+// (Internal key `base`.)
 reg(
-  M('base_degen',   'base', 'DEGEN',    1, 2, 1, 'Tip your way to the top.'),
-  M('base_toshi',   'base', 'TOSHI',    1, 1, 2, 'Coinbase\'s cat mascot, onchain native.'),
-  M('base_brett',   'base', 'BRETT',    2, 3, 2, 'Pepe\'s blue friend, all in on Base.'),
-  M('base_miggles', 'base', 'MIGGLES',  2, 2, 2, 'The Base cat that would not sit down.'),
-  M('base_keycat',  'base', 'KEYCAT',   3, 3, 3, 'Cat on a keyboard, typing the bull case.'),
-  M('base_normie',  'base', 'NORMIE',   3, 4, 2, 'Onboarded from the Coinbase app.'),
-  M('base_doginme', 'base', 'DOGINME',  4, 4, 4, 'Based dog energy.'),
-  M('base_based',   'base', 'BASED',    5, 5, 5, 'Stay based, stay onchain.'),
+  M('base_degen',   'base', 'Ink Imp',           1, 2, 1, 'Writes faster than it reads.'),
+  M('base_toshi',   'base', 'Page Turner',       1, 1, 2, 'Lost in the same book since the first block.'),
+  M('base_brett',   'base', 'Scroll Runner',     2, 3, 2, 'Delivers the message before you send it.'),
+  M('base_miggles', 'base', 'Apprentice Sproto', 2, 2, 2, 'Knows one spell. Uses it constantly.'),
+  M('base_keycat',  'base', 'Rune Scribe',       3, 3, 3, 'Every mark means something. Most mean "mine".'),
+  M('base_normie',  'base', 'Owl Familiar',      3, 4, 2, 'Knows what you are thinking. Disapproves.'),
+  M('base_doginme', 'base', 'Tower Sage',        4, 4, 4, 'Read every book in the tower. Wrote half of them.'),
+  M('base_based',   'base', 'The Archivist',     5, 5, 5, 'Remembers everything. Forgives nothing overdue.'),
   // Machines
-  A('base_summer', 'base', 'Onchain Summer',   3, 'pump_all_+1+1',       'The whole ecosystem pumps: your Memes get +1/+1.'),
-  A('base_frames', 'base', 'Farcaster Frames', 3, 'on_meme_etb_draw',    'When a Meme enters under you, draw a card (once per turn).'),
-  A('base_wallet', 'base', 'Smart Wallet',     2, 'extra_node_per_turn', 'Gasless onboarding: play one extra Node each turn.'),
-  A('base_onramp', 'base', 'Coinbase Onramp',  4, 'meme_haste',          'Instant fiat rails: your Memes have no summoning sickness.'),
+  A('base_summer', 'base', 'Great Library',  3, 'pump_all_+1+1',       'Everyone studies: your Memes get +1/+1.'),
+  A('base_frames', 'base', 'Crystal Ball',   3, 'on_meme_etb_draw',    'When a Meme enters under you, draw a card (once per turn).'),
+  A('base_wallet', 'base', 'Star Chart',     2, 'extra_node_per_turn', 'Plot the course: play one extra Node each turn.'),
+  A('base_onramp', 'base', 'Portal Circle',  4, 'meme_haste',          'Step through ready: your Memes have no summoning sickness.'),
   // Moves
-  X('base_tip',     'base', 'Tip DEGEN',   3, 'drawTwo',      'Allowance drops in the channel. Draw two cards.'),
-  X('base_bridge',  'base', 'Base Bridge', 2, 'bounceMeme',   'Bridge it back. Return target Meme to its owner\'s hand.'),
-  X('base_airdrop', 'base', 'Airdrop Szn', 3, 'damageAll_1',  'Points go live. Every Meme on the field takes 1 damage.'),
+  X('base_tip',     'base', 'Study Session', 3, 'drawTwo',      'One more chapter. Draw two cards.'),
+  X('base_bridge',  'base', 'Banish',        2, 'bounceMeme',   'Not gone, just elsewhere. Return target Meme to its owner\'s hand.'),
+  X('base_airdrop', 'base', 'Arcane Storm',  3, 'damageAll_1',  'Every Meme on the field takes 1 damage.'),
   // Aura
-  U('base_staybased','base', 'Stay Based', 2, 'aura_+3+0',    'Enchant Meme. Attached Meme gets +3/+0.'),
+  U('base_staybased','base', 'Spellblade',   2, 'aura_+3+0',    'Enchant Meme. Attached Meme gets +3/+0.'),
 );
 
 // ── Starter decks ────────────────────────────────────────────────────────────

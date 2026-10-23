@@ -995,7 +995,7 @@ export function ChainsBoard(props: Props) {
             marginBottom: 6,
           }}>Choose your deck</div>
           <div style={{ fontSize: 12, color: '#cdbf99', marginBottom: 10 }}>
-            The match has begun. Pick a chain to play with — your deck will be shuffled and dealt.
+            The match has begun. Pick a Sproto faction to play with — your deck will be shuffled and dealt.
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {COLORS.map(c => {

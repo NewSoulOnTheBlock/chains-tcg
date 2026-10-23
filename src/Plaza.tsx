@@ -40,19 +40,19 @@ const W = COLS * TILE;
 const H = ROWS * TILE;
 
 const COLOR_HEX: Record<Color, string> = {
-  bnb: '#f0b90b', sol: '#9945ff', eth: '#e6e6e6', robinhood: '#00C805', base: '#0052FF',
+  bnb: '#efe6cc', sol: '#e0362c', eth: '#7a6d8f', robinhood: '#2fae4e', base: '#2f6fe0',
 };
 
 const NPCS: NPC[] = [
-  { x: 3,  y: 3,  color: 'bnb', name: 'BNB Bull',     blurb: 'Orange means fast gas. Flood the board with cheap memes — pressure wins before they stabilize.' },
-  { x: 18, y: 3,  color: 'sol', name: 'Sol Degen',    blurb: 'Purple plays combos. Save Moves for one explosive turn — set up, then snap the table in half.' },
-  { x: 3,  y: 10, color: 'robinhood', name: 'Robinhood Floor', blurb: 'Green grinds value. Bank dividends and diamond-hand big bodies until your lifegain outlasts them.' },
-  { x: 18, y: 10, color: 'eth', name: 'Eth Cathedral',blurb: 'White is control. Bigger nodes, bigger memes. Trade evenly until your late-game crushes theirs.' },
-  { x: 10, y: 12, color: 'base', name: 'Base Camp',    blurb: 'Blue floods wide and refills the hand. Ride onchain summer — draw engines keep the pressure endless.' },
+  { x: 3,  y: 3,  color: 'bnb', name: 'Spirit Shrine', blurb: 'White goes wide. Fill the board with the faithful and lift the whole host at once.' },
+  { x: 18, y: 3,  color: 'sol', name: 'Rebel Barricade', blurb: 'Red hits first. Burn, snipe and swing early — end it before they can build.' },
+  { x: 3,  y: 10, color: 'robinhood', name: 'Wealth Vault', blurb: 'Green grinds value. Heal off every hit and grow big bodies until your life total outlasts them.' },
+  { x: 18, y: 10, color: 'eth', name: 'Jester Carnival', blurb: 'Black is control. Remove what matters, trade evenly, then let the last laugh close it out.' },
+  { x: 10, y: 12, color: 'base', name: 'Knowledge Tower', blurb: 'Blue refills the hand. Draw engines and bounce tricks keep you a step ahead.' },
 ];
 
 const COLOR_LABEL: Record<Color, string> = {
-  bnb: 'BNB', sol: 'Sol', eth: 'Eth', robinhood: 'HOOD', base: 'Base',
+  bnb: 'Spirit', sol: 'Rebel', eth: 'Jester', robinhood: 'Wealth', base: 'Knowledge',
 };
 
 export function Plaza({
@@ -150,22 +150,22 @@ export function Plaza({
     for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x * TILE, 0); ctx.lineTo(x * TILE, H); ctx.stroke(); }
     for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y * TILE); ctx.lineTo(W, y * TILE); ctx.stroke(); }
 
-    // Chain-room labels in corners.
+    // Faction-room labels in corners.
     ctx.font = '700 12px Inter, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.fillText('BNB BAZAAR',     TILE,           TILE * 1.5);
-    ctx.fillText('SOLANA BEACH',   W - TILE * 7,   TILE * 1.5);
-    ctx.fillText('ROBINHOOD FLOOR', TILE,          H - TILE * 0.5);
-    ctx.fillText('ETH CATHEDRAL',  W - TILE * 7,   H - TILE * 0.5);
+    ctx.fillText('SPIRIT SHRINE',  TILE,           TILE * 1.5);
+    ctx.fillText('REBEL BARRICADE', W - TILE * 7,  TILE * 1.5);
+    ctx.fillText('WEALTH VAULT',   TILE,           H - TILE * 0.5);
+    ctx.fillText('JESTER CARNIVAL', W - TILE * 7,  H - TILE * 0.5);
     ctx.textAlign = 'center';
-    ctx.fillText('BASE CAMP', W / 2, H - TILE * 0.3);
+    ctx.fillText('KNOWLEDGE TOWER', W / 2, H - TILE * 0.3);
     ctx.textAlign = 'start';
 
     // NPC tiles.
     for (const n of NPCS) {
       ctx.fillStyle = COLOR_HEX[n.color];
       ctx.fillRect(n.x * TILE + 4, n.y * TILE + 4, TILE - 8, TILE - 8);
-      ctx.fillStyle = n.color === 'base' || n.color === 'sol' ? '#fff' : '#000';
+      ctx.fillStyle = n.color === 'bnb' || n.color === 'robinhood' ? '#000' : '#fff';
       ctx.font = '700 12px Inter, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(COLOR_LABEL[n.color], n.x * TILE + TILE / 2, n.y * TILE + TILE / 2 + 4);

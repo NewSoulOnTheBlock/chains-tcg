@@ -12,11 +12,17 @@ describe('On-Chain Virtual Arena chain registry', () => {
     expect(CARDS.node_xrp).toBeUndefined();
   });
 
-  it('defines Robinhood and Base color metadata', () => {
-    expect(COLOR_META.robinhood).toMatchObject({ name: 'Robinhood', hex: '#00C805', glyph: 'HOOD' });
-    expect(COLOR_META.base).toMatchObject({ name: 'Base', hex: '#0052FF', glyph: 'BASE' });
-    expect(CARDS.node_robinhood).toMatchObject({ name: 'Robinhood Node', type: 'node', color: 'robinhood' });
-    expect(CARDS.node_base).toMatchObject({ name: 'Base Node', type: 'node', color: 'base' });
+  it('presents the five Sproto Gremlin factions on the stable chain-era keys', () => {
+    expect(COLOR_META.bnb).toMatchObject({ name: 'Spirit', glyph: 'SPR' });
+    expect(COLOR_META.sol).toMatchObject({ name: 'Rebel', glyph: 'RBL' });
+    expect(COLOR_META.eth).toMatchObject({ name: 'Jester', glyph: 'JST' });
+    expect(COLOR_META.robinhood).toMatchObject({ name: 'Wealth', glyph: 'WLT' });
+    expect(COLOR_META.base).toMatchObject({ name: 'Knowledge', glyph: 'KNW' });
+    expect(CARDS.node_robinhood).toMatchObject({ name: 'Wealth Node', type: 'node', color: 'robinhood' });
+    expect(CARDS.node_base).toMatchObject({ name: 'Knowledge Node', type: 'node', color: 'base' });
+    // No card should still be NAMED after a chain-era memecoin.
+    const names = Object.values(CARDS).map(c => c.name).join('|');
+    expect(names).not.toMatch(/\b(BONK|PEPE|BRETT|FLOKI|dogwifhat|HOOD|BnB|Solana|Ethereum|Robinhood|Base)\b/);
   });
 
   it('gives every chain the full pool shape (8 memes + 4 machines + 3 moves + 1 aura)', () => {

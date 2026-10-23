@@ -648,12 +648,12 @@ const RULES_NAV: { id: RulesSectionId; label: string; icon: IconKey }[] = [
 
 const RULES_SEARCH_INDEX: { id: RulesSectionId; text: string }[] = [
   { id: 'goal',       text: 'goal life 20 reduce opponent zero win last player standing' },
-  { id: 'setup',      text: 'setup chain bnb solana ethereum robinhood base 60 card deck draw 7 hand 20 life mulligan first player no draw' },
+  { id: 'setup',      text: 'setup faction sproto spirit rebel jester wealth knowledge white red black green blue 60 card deck draw 7 hand 20 life mulligan first player no draw' },
   { id: 'cards',      text: 'card types node meme machine move land creature artifact enchantment spell instant power toughness permanent one-shot' },
   { id: 'gas',        text: 'gas mana cost tap node color pool drain end of turn empty mixed' },
   { id: 'turn',       text: 'turn phase untap draw main combat attack block damage end discard summoning sick haste' },
   { id: 'advanced',   text: 'advanced summoning sickness haste blockers simultaneous damage graveyard discard max hand 7 discard down' },
-  { id: 'example',    text: 'example turn 1 play purple node tap gain gas cast pepe warrior end' },
+  { id: 'example',    text: 'example turn 1 play red rebel node tap gain gas cast spark gremlin end' },
   { id: 'cheatsheet', text: 'ui click node tap card hand play meme attack blocker end turn button' },
 ];
 
@@ -993,7 +993,7 @@ function RulesPage({ onBack }: { onBack: () => void }) {
 
 const SECTION_SUMMARY: Record<RulesSectionId, string> = {
   goal:       'Reduce your opponent\'s life from 20 -> 0. Last player standing wins.',
-  setup:      '5 chains. 60-card deck. Start at 20 life with 7 cards.',
+  setup:      '5 Sproto factions. 60-card deck. Start at 20 life with 7 cards.',
   cards:      'Nodes, Memes, Machines, Moves — your full toolkit.',
   gas:        'Tap Nodes to fuel your spells. Gas drains every turn.',
   turn:       'Untap -> Draw -> Main -> Combat -> End.',
@@ -1081,15 +1081,9 @@ function renderSectionBody(id: RulesSectionId, highlight: (s: string) => React.R
     case 'setup':
       return (
         <div>
-          <p>{highlight('Each player picks one of 5 chains, shuffles their 60-card deck, draws 7 cards, and starts at 20 life.')}</p>
+          <p>{highlight('Each player picks one of 5 Sproto factions, shuffles their 60-card deck, draws 7 cards, and starts at 20 life.')}</p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '14px 0' }}>
-            {[
-              { n: 'BnB',        c: '#f3ba2f' },
-              { n: 'Solana',     c: '#9945ff' },
-              { n: 'Avalanche',  c: '#e84142' },
-              { n: 'Ethereum',   c: '#cfd8dc' },
-              { n: 'XRP',        c: '#8a8a8a' },
-            ].map(x => (
+            {COLORS.map(k => ({ n: COLOR_META[k].name, c: COLOR_META[k].hex })).map(x => (
               <div key={x.n} style={{
                 padding: '8px 14px', borderRadius: 999,
                 background: `${x.c}22`, color: x.c, border: `1px solid ${x.c}66`,
@@ -1098,7 +1092,7 @@ function renderSectionBody(id: RulesSectionId, highlight: (s: string) => React.R
             ))}
           </div>
           <ul style={{ marginLeft: 18 }}>
-            <li>{highlight('60-card deck in your chain color.')}</li>
+            <li>{highlight('60-card deck in your faction color.')}</li>
             <li>{highlight('Draw 7 cards. Start at 20 life.')}</li>
             <li>{highlight('Max hand size 7 — discard down at end of turn.')}</li>
             <li>{highlight('The first player skips their turn-1 draw.')}</li>
@@ -1340,9 +1334,9 @@ function TurnTimeline({ highlight }: { highlight: (s: string) => React.ReactNode
 
 function ExampleTurn({ highlight }: { highlight: (s: string) => React.ReactNode }) {
   const steps = [
-    { t: 'Play Purple Node',         d: 'You start your turn. You spend your free Node drop and play a Solana Node onto the battlefield.' },
+    { t: 'Play Red Node',            d: 'You start your turn. You spend your free Node drop and play a Rebel Node onto the battlefield.' },
     { t: 'Tap Node for 1 Purple Gas',d: 'Click your untapped Node. It rotates and adds 1 Purple Gas to your pool.' },
-    { t: 'Cast a Meme',              d: 'You spend 1 Purple Gas to cast a cheap Meme like Pepe Warrior. It enters summoning sick — it can\'t attack this turn.' },
+    { t: 'Cast a Meme',              d: 'You spend 1 Rebel Gas to cast a cheap Meme like Spark Gremlin. It enters summoning sick — it can\'t attack this turn.' },
     { t: 'End Turn',                 d: 'No combat this turn. Unspent Gas evaporates, and you pass to the opponent.' },
   ];
   const [i, setI] = useState(0);
@@ -1438,17 +1432,17 @@ const RB_CHAPTERS: RBChapter[] = [
     ) },
   { id: 'setup', num: '02', title: 'Setup', icon: 'swords', accent: RB.violet,
     summary: 'Choose a 60-card deck, draw 7 cards, and begin at 20 life.',
-    keywords: ['deck', '60', 'draw', 'hand', 'mulligan', 'chain'], search: 'setup chain bnb solana ethereum robinhood base 60 card deck draw 7 hand 20 life first player no draw',
+    keywords: ['deck', '60', 'draw', 'hand', 'mulligan', 'faction'], search: 'setup faction sproto spirit rebel jester wealth knowledge 60 card deck draw 7 hand 20 life first player no draw',
     content: (h) => (
       <div>
-        <p>{h('Each player picks one of 5 chains, shuffles their 60-card deck, draws 7 cards, and starts at 20 life.')}</p>
+        <p>{h('Each player picks one of 5 Sproto factions, shuffles their 60-card deck, draws 7 cards, and starts at 20 life.')}</p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '14px 0' }}>
           {COLORS.map((c) => (
             <span key={c} style={{ padding: '7px 14px', borderRadius: 999, background: `${COLOR_META[c].hex}22`, color: COLOR_META[c].hex, border: `1px solid ${COLOR_META[c].hex}66`, fontWeight: 700, fontSize: 13 }}>{COLOR_META[c].name}</span>
           ))}
         </div>
         <ul style={{ marginLeft: 18, lineHeight: 1.8 }}>
-          <li>{h('60-card deck in your chain color.')}</li>
+          <li>{h('60-card deck in your faction color.')}</li>
           <li>{h('Draw 7 cards. Start at 20 life.')}</li>
           <li>{h('Max hand size 7 — discard down at end of turn.')}</li>
           <li>{h('The first player skips their turn-1 draw.')}</li>
@@ -1511,7 +1505,7 @@ const RB_CHAPTERS: RBChapter[] = [
     ) },
   { id: 'example-turn', num: '08', title: 'Example Turn', icon: 'gamepad', accent: RB.blue,
     summary: 'Walk through Turn 1 step-by-step.',
-    keywords: ['example', 'walkthrough', 'turn 1'], search: 'example turn 1 play purple node tap gain gas cast pepe warrior end walkthrough',
+    keywords: ['example', 'walkthrough', 'turn 1'], search: 'example turn 1 play red rebel node tap gain gas cast spark gremlin end walkthrough',
     content: (h) => <ExampleTurn highlight={h} /> },
   { id: 'ui-cheat-sheet', num: '09', title: 'UI Cheat Sheet', icon: 'keyboard', accent: RB.gold,
     summary: 'Quick clicks for the in-match UI.',
@@ -3202,7 +3196,7 @@ function CollectionTab({ walletAddress, mobile }: { walletAddress: string | null
           {needsSync ? (
             <>Your collection has not been read from the chain yet. <b>Scan the chain</b> to load the cards your wallet holds — Basic Nodes are always free.</>
           ) : (
-            <>You own <b style={{ color: HUB.goldHi }}>{totalOwned}</b> cards ({uniqueOwned} unique). Every collection includes 20 of each chain Node for free — open <b>Boosters</b> to unlock the rest.{connected ? ` Mints land in ${shortAddr(walletAddress!)}.` : ''}</>
+            <>You own <b style={{ color: HUB.goldHi }}>{totalOwned}</b> cards ({uniqueOwned} unique). Every collection includes 20 of each faction Node for free — open <b>Boosters</b> to unlock the rest.{connected ? ` Mints land in ${shortAddr(walletAddress!)}.` : ''}</>
           )}
         </span>
         <button onClick={() => { void syncCollection(); }} disabled={loading}
@@ -3296,7 +3290,7 @@ function AchievementsTab({ prof, ranked, deck, mobile }: { prof: Profile | null;
 function ChainChips({ value, onChange }: { value: Color | 'all'; onChange: (c: Color | 'all') => void }) {
   return (
     <>
-      <span style={{ alignSelf: 'center', fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: HUB.muted, marginRight: 4 }}>CHAIN</span>
+      <span style={{ alignSelf: 'center', fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: HUB.muted, marginRight: 4 }}>FACTION</span>
       <HubChip label="ALL" selected={value === 'all'} onClick={() => onChange('all')} />
       {COLORS.map((c) => (
         /* Logo replaces the plain accent dot; decorative, the chip is labelled. */
@@ -3711,7 +3705,7 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
             <select value={sort} onChange={(e) => setSort(e.target.value as any)} aria-label="Sort cards"
               style={{ padding: '9px 10px', borderRadius: 9, background: HUB.surface, border: `1px solid ${HUB.border}`, color: HUB.text, fontSize: 12.5 }}>
               <option value="name">SORT: NAME</option><option value="cost">SORT: COST</option>
-              <option value="chain">SORT: CHAIN</option><option value="type">SORT: TYPE</option>
+              <option value="chain">SORT: FACTION</option><option value="type">SORT: TYPE</option>
             </select>
             <div style={{ display: 'flex', borderRadius: 9, overflow: 'hidden', border: `1px solid ${HUB.border}` }}>
               <button onClick={() => setView('grid')} aria-label="Grid view" aria-pressed={view === 'grid'} style={{ padding: '8px 11px', background: view === 'grid' ? HUB.purple : HUB.surface, color: '#fff', border: 'none', cursor: 'pointer', display: 'grid', placeItems: 'center' }}><GridView size={15} /></button>
@@ -5429,7 +5423,7 @@ function StarterDeckPicker({ busy, onPick }: { busy: boolean; onPick: (c: Color)
         color: LOBBY_TOKENS.gold, display: 'flex', alignItems: 'center', gap: 9,
       }}><DeckIcon size={16} /> FREE STARTER DECKS</div>
       <div style={{ fontSize: 12.5, color: LOBBY_TOKENS.muted, margin: '7px 0 12px', lineHeight: 1.6 }}>
-        Pick a chain to play casual right away — no boosters needed. You can
+        Pick a Sproto faction to play casual right away — no boosters needed. You can
         build your own deck later; this just becomes your active one.
       </div>
       <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))' }}>
@@ -6937,7 +6931,7 @@ function SoloSetupModal({
           </div>
 
           <div style={{ fontSize: 11, opacity: 0.7 }}>
-            Single-player uses a custom deck built only from cards you own — booster pulls plus your 20 starter Nodes of each chain.
+            Single-player uses a custom deck built only from cards you own — booster pulls plus your 20 starter Nodes of each faction.
           </div>
         </div>
 

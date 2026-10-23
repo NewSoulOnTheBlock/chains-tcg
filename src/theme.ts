@@ -27,13 +27,14 @@ export const color = {
   // Semantic.
   success: '#37d399',
   danger: '#ff6b6b',
-  // Chain identity (matches COLOR_META in cards.ts).
+  // Faction identity (matches COLOR_META in cards.ts): Spirit, Rebel, Jester,
+  // Wealth, Knowledge on the stable chain-era keys.
   chain: {
-    bnb: '#f3ba2f',
-    sol: '#9945ff',
-    eth: '#c8ccd8',
-    robinhood: '#00C805',
-    base: '#0052FF',
+    bnb: '#efe6cc',
+    sol: '#e0362c',
+    eth: '#7a6d8f',
+    robinhood: '#2fae4e',
+    base: '#2f6fe0',
   },
 } as const;
 

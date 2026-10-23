@@ -1,71 +1,96 @@
 // src/chain-logos.tsx
-// Chain logo artwork + the <ChainLogo> renderer that replaces the text glyphs
-// ('BNB' / 'SOL' / 'ETH' / 'HOOD' / 'BASE') across the UI.
+// Faction sigils + the <ChainLogo> renderer used as the faction / gas symbol
+// across the UI (card cost pips, node art, deck tiles, filters).
+//
+// The game's five factions are the Sproto Gremlin types — Spirit (white),
+// Rebel (red), Jester (black), Wealth (green), Knowledge (blue) — on the stable
+// chain-era keys `bnb | sol | eth | robinhood | base` (see COLOR_META in
+// src/cards.ts). The component keeps its old name so every call site works
+// unchanged.
 //
 // ─── Why this lives here and NOT in COLOR_META (src/cards.ts) ────────────────
-// src/cards.ts is vendored byte-for-byte into
-//   new-backend/services/game/src/game/cards.ts
-// and re-synced with a plain `cp` (see that file's header). Adding a `logo`
-// field to COLOR_META would silently drift the backend copy on the next sync.
-// Logos are pure presentation and the game service has no business knowing
-// about them, so the mapping is keyed by `Color` in this client-only module and
-// cards.ts is left untouched.
+// src/cards.ts is vendored into new-backend/services/game/src/game/cards.ts and
+// re-synced with a plain `cp`. Sigils are pure presentation and the game
+// service has no business knowing about them, so they are keyed by `Color` in
+// this client-only module.
 //
-// ─── Artwork notes (measured from the supplied files, not guessed) ───────────
-// The five client assets are 2000-3258px originals rendered at 16-84 CSS px, so
-// public/chains/opt/ holds 64px and 192px WebP derivatives (see the header of
-// this repo's public/chains/ originals, which are kept untouched).
-//
-// Four of the five are free-standing marks on transparent surrounds. The
-// Robinhood file was the odd one out: a 400x400 7-entry palette PNG with NO
-// alpha channel, a perfectly flat #CCFF00 lime plate (verified: all 1600 border
-// pixels identical) and a near-black #1C180D feather. The lime keys out exactly,
-// and the derivative here IS keyed — but a bare near-black feather would be
-// invisible on every surface in this UI, which are all dark. So the medallion
-// below carries Robinhood's lime as its plate colour: the asset is now
-// structurally identical to the other four, and the brand's own black-on-lime
-// lockup is preserved.
-//
-// The medallion also fixes a problem that affects all five: every glyph site
-// paints `linear-gradient(160deg, meta.hex, #0a1020)` behind the mark, i.e. the
-// chain's own colour. A gold BNB diamond on a gold plate washes out. Giving all
-// five the same obsidian medallion (lime for Robinhood) means each mark has a
-// controlled backdrop no matter what is painted behind it.
+// ─── These are PLACEHOLDER sigils ───────────────────────────────────────────
+// Simple inline SVG marks so the factions read correctly today. Swap in real
+// Sproto Gremlin art per faction by replacing the `mark` for that key (an
+// <image href="…"> inside the same 24×24 viewBox works).
 
-import React, { useState } from 'react';
+import React from 'react';
 import { COLOR_META, type Color } from './cards';
 
-/** Neutral plate for the four marks that carry their own colour. */
-const OBSIDIAN = '#0b0f1c';
-
-type LogoSpec = {
-  /** 64px derivative — used for medallions rendered at <= 32 CSS px. */
-  sm: string;
-  /** 192px derivative — used above that (covers 96 CSS px at 2x). */
-  lg: string;
-  /**
-   * Optical padding, as a fraction of the medallion. Diamonds (BNB, ETH) touch
-   * their bounding box corner-to-corner and read small, so they get less; the
-   * Base disc fills its box and reads large, so it gets more.
-   */
-  inset: number;
+type SigilSpec = {
   /** Plate painted behind the mark. */
   plate: string;
-  /** Colour for the glyph-text fallback drawn on that plate. */
+  /** Colour the mark is drawn in. */
   ink: string;
+  /** The mark itself, drawn in a 24×24 viewBox using `currentColor`. */
+  mark: React.ReactNode;
 };
 
-export const CHAIN_LOGOS: Record<Color, LogoSpec> = {
-  bnb:       { sm: '/chains/opt/bnb-64.webp',       lg: '/chains/opt/bnb-192.webp',       inset: 0.10, plate: OBSIDIAN,   ink: '#f3ba2f' },
-  sol:       { sm: '/chains/opt/sol-64.webp',       lg: '/chains/opt/sol-192.webp',       inset: 0.14, plate: OBSIDIAN,   ink: '#b98bff' },
-  eth:       { sm: '/chains/opt/eth-64.webp',       lg: '/chains/opt/eth-192.webp',       inset: 0.10, plate: OBSIDIAN,   ink: '#c8ccd8' },
-  // Lime plate = the keyed-out background of the supplied asset, reinstated as
-  // a CSS colour so the near-black feather stays legible. See header.
-  robinhood: { sm: '/chains/opt/robinhood-64.webp', lg: '/chains/opt/robinhood-192.webp', inset: 0.04, plate: '#ccff00', ink: '#12100a' },
-  base:      { sm: '/chains/opt/base-64.webp',      lg: '/chains/opt/base-192.webp',      inset: 0.12, plate: OBSIDIAN,   ink: '#5b8cff' },
+export const FACTION_SIGILS: Record<Color, SigilSpec> = {
+  // Spirit — a rayed sun.
+  bnb: {
+    plate: '#f4ecd4', ink: '#8a6a16',
+    mark: (
+      <>
+        <circle cx="12" cy="12" r="4.2" fill="currentColor" />
+        {Array.from({ length: 8 }).map((_, i) => (
+          <rect key={i} x="11.1" y="2" width="1.8" height="4.2" rx="0.9" fill="currentColor"
+            transform={`rotate(${i * 45} 12 12)`} />
+        ))}
+      </>
+    ),
+  },
+  // Rebel — a flame.
+  sol: {
+    plate: '#2a0d0b', ink: '#ff5a3c',
+    mark: (
+      <path fill="currentColor" d="M12 2.5c.6 3.1-1.2 4.9-2.6 6.6C8 10.8 7 12.4 7 14.6 7 18.1 9.3 21 12.4 21c3.2 0 5.6-2.6 5.6-6.1 0-2.5-1.2-4.2-2.4-5.5.1 1.4-.4 2.6-1.5 3.3.3-3.7-.9-7-2.1-10.2Zm.3 11.2c.9 1.1 1.8 2.1 1.8 3.6 0 1.4-.9 2.4-2 2.4s-2-1-2-2.3c0-1.5 1.2-2.5 2.2-3.7Z" />
+    ),
+  },
+  // Jester — a three-pointed cap with bells.
+  eth: {
+    plate: '#141018', ink: '#c9b8e8',
+    mark: (
+      <>
+        <path fill="currentColor" d="M3 17.5 6.2 7.2 9.6 13 12 5l2.4 8 3.4-5.8L21 17.5Z" />
+        <rect x="3.5" y="17.6" width="17" height="2.6" rx="1.1" fill="currentColor" />
+        <circle cx="6.2" cy="6" r="1.6" fill="currentColor" />
+        <circle cx="12" cy="3.9" r="1.6" fill="currentColor" />
+        <circle cx="17.8" cy="6" r="1.6" fill="currentColor" />
+      </>
+    ),
+  },
+  // Wealth — a coin with a sprout.
+  robinhood: {
+    plate: '#0c2414', ink: '#4fd36d',
+    mark: (
+      <>
+        <circle cx="12" cy="15" r="6.2" fill="none" stroke="currentColor" strokeWidth="2" />
+        <circle cx="12" cy="15" r="2.6" fill="currentColor" />
+        <path fill="currentColor" d="M12 8.8V5.6c0-1.6 1.4-3 3.4-3.1-.1 2-1.5 3.4-3.4 3.4M12 6.2c0-1.5-1.3-2.8-3.1-2.9.1 1.8 1.4 3 3.1 3" />
+        <rect x="11.2" y="5" width="1.6" height="4" rx="0.8" fill="currentColor" />
+      </>
+    ),
+  },
+  // Knowledge — an open eye.
+  base: {
+    plate: '#0b1730', ink: '#6aa2ff',
+    mark: (
+      <>
+        <path fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"
+          d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12Z" />
+        <circle cx="12" cy="12" r="3.4" fill="currentColor" />
+      </>
+    ),
+  },
 };
 
-/** The text that was rendered before logos existed — still the error fallback. */
+/** Short text glyph for a faction (SPR / RBL / JST / WLT / KNW). */
 export function chainGlyph(color: Color): string {
   const meta = COLOR_META[color];
   return meta.glyph ?? meta.name[0] ?? '?';
@@ -78,25 +103,22 @@ export function ChainLogo({
   /** Medallion edge length in CSS px. */
   size: number;
   /**
-   * Accessible name. Leave empty (the default) wherever the chain name is
-   * already present as text next to the logo — otherwise a screen reader
-   * announces it twice. Pass a real name only where the logo is the sole
-   * carrier of chain identity.
+   * Accessible name. Leave empty (the default) wherever the faction name is
+   * already present as text next to the sigil — otherwise a screen reader
+   * announces it twice. Pass a real name only where the sigil is the sole
+   * carrier of faction identity.
    */
   alt?: string;
   title?: string;
   style?: React.CSSProperties;
 }) {
-  const [failed, setFailed] = useState(false);
-  const spec = CHAIN_LOGOS[color];
-  const pad = Math.round(size * spec.inset);
-  const inner = Math.max(1, size - pad * 2);
-  const glyph = chainGlyph(color);
+  const spec = FACTION_SIGILS[color];
+  const inner = Math.max(1, Math.round(size * 0.74));
 
   const shell: React.CSSProperties = {
     width: size, height: size, flex: 'none',
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-    background: spec.plate,
+    background: spec.plate, color: spec.ink,
     borderRadius: Math.max(3, Math.round(size * 0.24)),
     // Matches the gold-trimmed card chrome used across Board.tsx.
     boxShadow: 'inset 0 0 0 1px rgba(229,184,75,0.28), inset 0 1px 0 rgba(255,255,255,0.10), 0 1px 2px rgba(0,0,0,0.55)',
@@ -104,32 +126,13 @@ export function ChainLogo({
     ...style,
   };
 
-  if (failed) {
-    // Image unavailable — fall back to the original text glyph, in the same
-    // box, so nothing reflows.
-    return (
-      <span aria-hidden={alt ? undefined : true} title={title} style={{
-        ...shell,
-        color: spec.ink, fontWeight: 900,
-        fontSize: Math.max(6, Math.round(size * (glyph.length > 3 ? 0.26 : 0.30))),
-        letterSpacing: 0.5, lineHeight: 1,
-      }}>{glyph}</span>
-    );
-  }
-
   return (
     <span style={shell} title={title}>
-      <img
-        src={size <= 32 ? spec.sm : spec.lg}
-        alt={alt}
-        width={inner}
-        height={inner}
-        loading="lazy"
-        decoding="async"
-        draggable={false}
-        onError={() => setFailed(true)}
-        style={{ width: inner, height: inner, objectFit: 'contain', display: 'block', pointerEvents: 'none' }}
-      />
+      <svg viewBox="0 0 24 24" width={inner} height={inner} role={alt ? 'img' : undefined}
+        aria-label={alt || undefined} aria-hidden={alt ? undefined : true}
+        style={{ display: 'block', pointerEvents: 'none' }}>
+        {spec.mark}
+      </svg>
     </span>
   );
 }

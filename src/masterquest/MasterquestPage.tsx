@@ -31,21 +31,21 @@ import {
   clearProgress, type Progress,
 } from './progress';
 
-// ── Chain -> colour palette (matches the rest of the game) ──────────────────
+// ── Faction -> colour palette (matches COLOR_META in cards.ts) ──────────────
 const CHAIN_HEX: Record<Color, string> = {
-  bnb:       '#f3ba2f', // yellow
-  sol:       '#9945ff', // violet
-  eth:       '#e8eaf6', // white-ish
-  robinhood: '#00C805', // green
-  base:      '#0052FF', // blue
+  bnb:       '#efe6cc', // Spirit — white
+  sol:       '#e0362c', // Rebel — red
+  eth:       '#7a6d8f', // Jester — black
+  robinhood: '#2fae4e', // Wealth — green
+  base:      '#2f6fe0', // Knowledge — blue
 };
 
 const CHAIN_LABEL: Record<Color, string> = {
-  bnb:       'Yellow Court',
-  sol:       'Violet Conclave',
-  eth:       'Pale Senate',
-  robinhood: 'Green Exchange',
-  base:      'Blue Vanguard',
+  bnb:       'Spirit Sprotos',
+  sol:       'Rebel Sprotos',
+  eth:       'Jester Sprotos',
+  robinhood: 'Wealth Sprotos',
+  base:      'Knowledge Sprotos',
 };
 
 const ACT_LABEL: Record<keyof typeof ACTS, string> = {
@@ -579,7 +579,7 @@ function ChainPill({ chain }: { chain: Color }) {
       padding: '2px 9px', borderRadius: 999,
       fontSize: 11, fontWeight: 800,
       background: CHAIN_HEX[chain],
-      color: chain === 'eth' ? '#222' : '#fff',
+      color: chain === 'bnb' ? '#222' : '#fff',
       border: '1px solid rgba(0,0,0,0.4)',
     }}>{CHAIN_LABEL[chain]}</span>
   );
