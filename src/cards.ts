@@ -118,7 +118,7 @@ const IMAGES: Record<string, string> = {
   eth_apu:      '/cards/apu.webp?v=1',
   eth_wojak:    '/cards/wojak.png?v=2',
   eth_turbo:    '/cards/turbo.png?v=1',
-  eth_mog:      '/cards/mog.png?v=2',
+  eth_mog:      '/cards/hoba.jpg?v=1',
   eth_shib:     '/cards/carbonara.jpg?v=1',
   eth_pepe:     '/cards/pepe.png?v=1',
 
@@ -385,7 +385,7 @@ reg(
   M('eth_apu',     'eth', 'Mask Collector',    1, 1, 3, 'Already has your face. Wants the rest.'),
   M('eth_wojak',   'eth', 'Weeping Clown',     2, 2, 3, 'Laughs at funerals. Cries at weddings.'),
   M('eth_turbo',   'eth', 'Knife Juggler',     2, 3, 1, 'Drops one every show. On purpose.'),
-  M('eth_mog',     'eth', 'Grinning Sproto',   3, 3, 4, 'The smile goes all the way around.'),
+  M('eth_mog',     'eth', 'Hoba Carpenter',    3, 3, 4, 'Measures once. Builds twice. Laughs at both.'),
   M('eth_shib',    'eth', 'Carbonara Mussolini', 3, 4, 3, '"The Stink Badger Empire is reawakening!"'),
   M('eth_pepe',    'eth', 'The Last Laugh',    5, 5, 6, 'It was always going to be him.'),
   // NFT-linked meme — ETB zaps opp + draws a card (Sproto Gremlin NFT mint)
