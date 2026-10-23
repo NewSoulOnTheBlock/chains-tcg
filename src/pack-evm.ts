@@ -55,11 +55,13 @@ export function robinhoodTxUrl(hash: string): string {
  * (`/wager/boosters/*`), which report `mintingEnabled: false` and never issue
  * an NFT — see `src/boosters-api.ts`. These are two different products.
  */
-export const PACK_MINTING_AVAILABLE = true as const;
+// OFF while packs move to Solana / $GORE (see docs/solana-migration.md). The
+// Boosters page shows COMING SOON and `open()` refuses to mint.
+export const PACK_MINTING_AVAILABLE: boolean = false;
 
 /** Shown if the flag above is ever turned off. */
 export const PACK_MINTING_UNAVAILABLE_MESSAGE =
-  'Booster packs are temporarily unavailable.';
+  'Booster packs are on their way. Minting opens soon.';
 
 export const CARD_PACK = ((import.meta.env.VITE_CARD_PACK as string) ||
   '0x57200fb533b33823f8bd2ac8f3649e3b643830b3') as Address;

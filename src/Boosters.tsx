@@ -174,6 +174,9 @@ export function BoostersPage({ onBack }: { onBack: () => void }) {
   }
 
   async function open() {
+    // Hard stop: no mint can start while packs are switched off, whatever
+    // path reaches this function.
+    if (!PACK_MINTING_AVAILABLE) return;
     if (pending) return; // prevent duplicate submissions
     setErrBox(null);
     // Recheck requirements immediately before submitting.
@@ -612,13 +615,15 @@ function PurchasePanel(props: {
           <div style={{ fontWeight: 700, fontSize: 14 }}>Genesis Booster</div>
         </div>
 
-        <Row label="PACK PRICE" value={`${priceEth} ETH`} />
-        <Row label="NETWORK" value={<span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-          <span style={{ fontWeight: 700 }}>Robinhood Chain</span>
-          <span style={{ fontSize: 11, color: C.textLo }}>Chain {ROBINHOOD_CHAIN_ID}</span>
-        </span>} />
-        <div style={{ height: 1, background: C.border }} />
-        <Row label="TOTAL" accent value={`${priceEth} ETH`} big />
+        {PACK_MINTING_AVAILABLE && <>
+          <Row label="PACK PRICE" value={`${priceEth} ETH`} />
+          <Row label="NETWORK" value={<span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+            <span style={{ fontWeight: 700 }}>Robinhood Chain</span>
+            <span style={{ fontSize: 11, color: C.textLo }}>Chain {ROBINHOOD_CHAIN_ID}</span>
+          </span>} />
+          <div style={{ height: 1, background: C.border }} />
+          <Row label="TOTAL" accent value={`${priceEth} ETH`} big />
+        </>}
 
         {/* Primary action — reflects the live state machine. */}
         {/* The purchase path is gated: the backend has no read endpoint for
@@ -712,22 +717,19 @@ function Row({ label, value, accent, big }: { label: string; value: React.ReactN
  */
 function ComingSoonNotice() {
   return (
-    <div style={{
-      padding: '16px 18px', borderRadius: R.md,
-      background: C.bg1, border: `1px dashed ${C.accent}66`,
+    <div role="status" style={{
+      padding: '26px 18px', borderRadius: R.md, textAlign: 'center',
+      background: C.bg1, border: `1px dashed ${C.gold}88`,
     }}>
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 9,
-        fontFamily: F.serif, fontWeight: 700, fontSize: 13.5, letterSpacing: '0.16em',
-        textTransform: 'uppercase', color: C.accentHi,
-      }}><Warning size={15} /> Packs coming soon</div>
-      <div style={{ fontSize: 12.5, color: C.textMid, marginTop: 8, lineHeight: 1.6 }}>
+        fontFamily: F.display, fontWeight: 800, fontSize: 30, letterSpacing: '0.18em',
+        color: C.goldHi, textShadow: `0 0 18px ${C.gold}66`,
+      }}>COMING SOON</div>
+      <div style={{ fontSize: 13, color: C.textMid, marginTop: 10, lineHeight: 1.6 }}>
         {PACK_MINTING_UNAVAILABLE_MESSAGE}
       </div>
-      <div style={{ fontSize: 12.5, color: C.textLo, marginTop: 8, lineHeight: 1.6 }}>
-        Booster tickets on the new backend do not mint an NFT yet either, so
-        nothing here would arrive in your wallet. The card list and pull rates
-        below are real and final — you just cannot buy in yet.
+      <div style={{ fontSize: 12, color: C.textLo, marginTop: 6, lineHeight: 1.6 }}>
+        You can still browse the card list and pull rates.
       </div>
     </div>
   );
