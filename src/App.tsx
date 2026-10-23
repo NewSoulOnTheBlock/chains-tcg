@@ -6390,7 +6390,7 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
   useEffect(() => {
     if (isFull && !enterOnce.current) {
       enterOnce.current = true;
-      const t = setTimeout(() => setEntered(true), 1700);
+      const t = setTimeout(() => setEntered(true), MATCH_LOADING_MS);
       return () => clearTimeout(t);
     }
   }, [isFull]);
@@ -6518,6 +6518,22 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
   const p1 = players[1]?.name;
   const opponentJoined = isFull;
 
+  // Both seats filled: the EGREGORE "MATCH LOADING" screen plays for the
+  // MATCH_LOADING_MS interstitial, then the board mounts (branch above).
+  if (opponentJoined) {
+    const oppName = players[youAt === 0 ? 1 : 0]?.name ?? 'Opponent';
+    return (
+      <>
+        <MatchLoadingScreen
+          me={{ name: myName, avatar: avatars[myName] ?? null }}
+          opp={{ name: oppName, avatar: avatars[oppName] ?? null }}
+          onLeave={() => { setLeaveErr(''); setConfirmLeave(true); }}
+        />
+        {renderLeaveDialog(false)}
+      </>
+    );
+  }
+
   return (
     <div style={{ position: 'fixed', inset: 0, height: '100dvh', overflow: mobile ? 'auto' : 'hidden',
       color: HUB.text, fontFamily: HUB_SANS, display: 'flex', flexDirection: 'column' }}>
@@ -6616,6 +6632,88 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
       </div>
 
       {renderLeaveDialog(false)}
+    </div>
+  );
+}
+
+/** How long the MATCH LOADING screen shows before the board mounts. */
+const MATCH_LOADING_MS = 1700;
+
+/**
+ * The EGREGORE "MATCH LOADING" screen (public/match-loading.jpg, 1778×885).
+ *
+ * The art already draws every frame — title, both portrait rings, name and
+ * status plates, VS, progress track, LEAVE MATCH button. This component lays
+ * the LIVE parts over those drawn slots. The stage keeps the art's exact
+ * aspect ratio and is scaled to fit the viewport (blurred copy behind as the
+ * letterbox), so every overlay is positioned in percentages of the art and
+ * stays aligned at any size; text sizes use container-query units (cqw).
+ * Slot coordinates were measured off the 1778×885 source.
+ */
+function MatchLoadingScreen({ me, opp, onLeave }: {
+  me: { name: string; avatar: string | null };
+  opp: { name: string; avatar: string | null };
+  onLeave: () => void;
+}) {
+  const ART = '/match-loading.jpg?v=1';
+  const W = 1778, H = 885;
+  const pct = (px: number, of: number) => `${(px / of) * 100}%`;
+  const box = (x: number, y: number, w: number, h: number): React.CSSProperties => ({
+    position: 'absolute', left: pct(x, W), top: pct(y, H), width: pct(w, W), height: pct(h, H),
+  });
+
+  const portrait = (cx: number, who: { name: string; avatar: string | null }, ring: string) => (
+    <div style={{ ...box(cx - 64, 470 - 64, 128, 128), borderRadius: '50%', overflow: 'hidden',
+      display: 'grid', placeItems: 'center', background: 'radial-gradient(circle at 50% 35%, #161a30, #07080f)',
+      boxShadow: `0 0 0 2px ${ring}55` }}>
+      {who.avatar
+        ? <img src={who.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        : <span style={{ fontFamily: HUB_SERIF, fontWeight: 800, fontSize: '3.6cqw', color: ring,
+            textShadow: `0 0 14px ${ring}` }}>{who.name.slice(0, 1).toUpperCase() || '?'}</span>}
+    </div>
+  );
+  const plate = (x: number, y: number, w: number, h: number, text: string, size: string, color: string) => (
+    <div style={{ ...box(x, y, w, h), display: 'grid', placeItems: 'center', padding: '0 0.6cqw',
+      fontFamily: HUB_SERIF, fontWeight: 700, fontSize: size, color, letterSpacing: '0.08em',
+      overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', lineHeight: 1 }}>
+      <span style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>
+    </div>
+  );
+
+  return (
+    <div role="status" aria-live="polite" aria-label={`Match loading: ${me.name} versus ${opp.name}`}
+      style={{ position: 'fixed', inset: 0, background: '#04050a', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+      <style>{`
+        @keyframes mls-fill { from { width: 0%; } to { width: 100%; } }
+        @media (prefers-reduced-motion: reduce) { .mls-fill { animation: none !important; width: 100% !important; } }
+      `}</style>
+      {/* Letterbox: the same art, blurred, so non-2:1 screens are not bare. */}
+      <div aria-hidden style={{ position: 'absolute', inset: -40, background: `url(${ART}) center / cover no-repeat`,
+        filter: 'blur(28px) brightness(0.45)' }} />
+
+      <div style={{ position: 'relative', width: `min(100vw, calc(100dvh * ${W} / ${H}))`, aspectRatio: `${W} / ${H}`,
+        containerType: 'inline-size' }}>
+        <img src={ART} alt="" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', userSelect: 'none' }} />
+
+        {/* You — the blue (left) seat. Opponent — the red (right) seat. */}
+        {portrait(621, me, '#3fa9ff')}
+        {portrait(1157, opp, '#ff4a3a')}
+        {plate(500, 555, 258, 30, me.name, '1.25cqw', '#e8f3ff')}
+        {plate(1036, 555, 258, 30, opp.name, '1.25cqw', '#ffe9e4')}
+        {plate(530, 622, 222, 26, 'YOU', '0.85cqw', '#7cc4ff')}
+        {plate(1066, 622, 222, 26, 'OPPONENT', '0.85cqw', '#ff8a7a')}
+
+        {/* Progress: cover the art's baked-in fill, then fill over the real wait. */}
+        <div style={{ ...box(470, 757, 840, 22), borderRadius: 999, background: '#07080d', overflow: 'hidden' }}>
+          <div className="mls-fill" style={{ height: '100%', borderRadius: 999,
+            background: 'linear-gradient(180deg, #ffe08a, #e2a52c 55%, #a8721a)', boxShadow: '0 0 12px rgba(255,190,70,0.6)',
+            animation: `mls-fill ${MATCH_LOADING_MS}ms ease-out forwards` }} />
+        </div>
+
+        {/* The drawn LEAVE MATCH button, made real. */}
+        <button onClick={onLeave} aria-label="Leave match"
+          style={{ ...box(1577, 15, 178, 50), background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 10 }} />
+      </div>
     </div>
   );
 }
