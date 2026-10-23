@@ -1,8 +1,8 @@
 // src/masterquest/progress.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// Memetic Masterquest — campaign progress, persisted to localStorage.
+// Sproto Masterquest — campaign progress, persisted to localStorage.
 //
-// Tracks which of the 15 Sacred Sites Sorendo has cleared, which is currently
+// Tracks which of the 15 Sacred Sites the player has cleared, which is currently
 // available, and which read-throughs of the interludes have been completed.
 // ─────────────────────────────────────────────────────────────────────────────
 

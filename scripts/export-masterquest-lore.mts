@@ -10,6 +10,7 @@ import {
   PROLOGUE, ACTS, SITES, EPILOGUE, INTERLUDES, mapPosOf,
   type SacredSite,
 } from '../src/masterquest/lore.js';
+import { COLOR_META } from '../src/cards.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -18,7 +19,7 @@ const OUT = join(__dirname, '..', 'public', 'lore', 'masterquest.md');
 const ACT_LABEL: Record<string, string> = {
   awakening:  'Act I — The Awakening',
   pilgrimage: 'Act II — The Pilgrimage',
-  coronation: 'Act III — The Coronation',
+  coronation: 'Act III — The Ascent',
 };
 
 function siteSection(s: SacredSite): string {
@@ -31,7 +32,7 @@ function siteSection(s: SacredSite): string {
 
 > *${s.region}*
 
-**Chain:** ${s.chain.toUpperCase()} · **Act:** ${ACT_LABEL[s.act]} · **Map position:** (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)})
+**Clan:** ${COLOR_META[s.chain].name} Sprotos · **Act:** ${ACT_LABEL[s.act]} · **Map position:** (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)})
 
 ${s.description}
 
@@ -57,9 +58,9 @@ ${s.reward}
 `;
 }
 
-const md = `# Memetic Masterquest
+const md = `# Sproto Masterquest
 
-*Cycle I — Sorendo the Unhoused*
+*Cycle I — Sproto Zero, the Unclanned*
 
 ## Prologue
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SITES, ACTS, TOTAL_SITES, INTERLUDES, sitesByAct, sitesByChain, MAP_VIEWBOX } from './lore';
 
-describe('Memetic Masterquest lore', () => {
+describe('Sproto Masterquest lore', () => {
   it('has exactly 15 sacred sites', () => {
     expect(TOTAL_SITES).toBe(15);
   });

@@ -1,6 +1,6 @@
 // src/masterquest/MasterquestPage.tsx
 // ─────────────────────────────────────────────────────────────────────────────
-// Memetic Masterquest — campaign mode UI.
+// Sproto Masterquest — campaign mode UI.
 //
 // Renders a 100×100 SVG map of all 15 Sacred Sites arranged in three
 // concentric rings (one per Act), with travel paths between consecutive
@@ -150,7 +150,7 @@ export function MasterquestPage({
   if (activeDuel) {
     return (
       <SoloClient
-        playerName={myName || 'Sorendo'}
+        playerName={myName || 'Sproto Zero'}
         difficulty={activeDuel.site.rival.difficulty}
         mode="casual"
         playerDeckColor="sol"
@@ -179,7 +179,7 @@ export function MasterquestPage({
       }}>
         <button onClick={onBack} style={btnSecondary}><ArrowLeft size={14} /> Back</button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontWeight: 900, fontSize: 18, letterSpacing: 2 }}>
-          <MapIcon size={20} /> MEMETIC MASTERQUEST
+          <MapIcon size={20} /> SPROTO MASTERQUEST
         </div>
         <button onClick={handleResetCampaign} style={{ ...btnSecondary, fontSize: 11, opacity: 0.6 }}>
           <Refresh size={12} /> reset
@@ -193,7 +193,7 @@ export function MasterquestPage({
       }}>
         <div style={{ fontSize: 13, letterSpacing: 1, opacity: 0.85 }}>
           {complete
-            ? <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}><Diamond size={9} /> THE FIVE-CHAIN CROWN IS YOURS <Diamond size={9} /></span>
+            ? <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}><Diamond size={9} /> THE EGREGORE CROWN IS YOURS <Diamond size={9} /></span>
             : `Sites cleared: ${progress.cleared.length} / 15${cur ? ` · Next: ${SITES.find(s => s.id === cur)?.name}` : ''}`}
         </div>
         {complete && !showEpilogue && (
@@ -262,9 +262,9 @@ function MapSvg({
         borderRadius: 10, border: '1px solid #3a2f6a',
         boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
       }}
-      aria-label="Memetic Masterquest map"
+      aria-label="Sproto Masterquest map"
     >
-      {/* Painted Map of the Aetherweb (drawn first, everything else overlays) */}
+      {/* Painted campaign map (drawn first, everything else overlays) */}
       <image href="/masterquest-map.png?v=1" x={0} y={0} width={VW} height={VH}
         preserveAspectRatio="xMidYMid slice" />
 
@@ -337,7 +337,7 @@ function MapSvg({
         );
       })}
 
-      {/* Sorendo avatar floating above the current site */}
+      {/* Player avatar floating above the current site */}
       {cur && (() => {
         const here = positioned.find(({ s }) => s.id === cur);
         if (!here) return null;
@@ -406,7 +406,7 @@ function modalShell(children: React.ReactNode, onClose?: () => void) {
 function PrologueModal({ onClose }: { onClose: () => void }) {
   return modalShell(<>
     <div style={{ fontSize: 12, opacity: 0.6, letterSpacing: 2 }}>PROLOGUE</div>
-    <h2 style={{ marginTop: 4, marginBottom: 14, fontSize: 22 }}>Sorendo the Unhoused</h2>
+    <h2 style={{ marginTop: 4, marginBottom: 14, fontSize: 22 }}>Sproto Zero, the Unclanned</h2>
     <PreservedText text={PROLOGUE} />
     <div style={{ marginTop: 18, textAlign: 'right' }}>
       <button onClick={onClose} style={btnPrimary}>Begin the Quest <ArrowRight size={15} /></button>
@@ -417,7 +417,7 @@ function PrologueModal({ onClose }: { onClose: () => void }) {
 function EpilogueModal({ onClose }: { onClose: () => void }) {
   return modalShell(<>
     <div style={{ fontSize: 12, opacity: 0.6, letterSpacing: 2, color: '#ffe066' }}>EPILOGUE</div>
-    <h2 style={{ marginTop: 4, marginBottom: 14, fontSize: 22 }}>The Five-Chain Crown</h2>
+    <h2 style={{ marginTop: 4, marginBottom: 14, fontSize: 22 }}>The Egregore Crown</h2>
     <PreservedText text={EPILOGUE} />
     <div style={{ marginTop: 18, textAlign: 'right' }}>
       <button onClick={onClose} style={btnPrimary}>Close</button>
@@ -547,7 +547,7 @@ function PostFightModal({
     <div style={{ marginTop: 22, textAlign: 'right' }}>
       <button onClick={onTravelOnward} style={btnPrimary}>
         {site.id === 'cipher_peak'
-          ? <><Diamond size={11} /> Reforge the Aetherweb</>
+          ? <><Diamond size={11} /> Wake the Egregore</>
           : <>Travel Onward <ArrowRight size={15} /></>}
       </button>
     </div>

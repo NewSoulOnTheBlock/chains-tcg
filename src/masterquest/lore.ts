@@ -1,22 +1,25 @@
 // src/masterquest/lore.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// MEMETIC MASTERQUEST — Cycle I
-// Sorendo the Unhoused must visit all 15 Sacred Sites on the great
-// Mempool-Map, defeat a Master at each, and reach the summit of Cipher Peak
-// where the First Master fell into final meditation.
+// SPROTO MASTERQUEST — Cycle I
+// Sproto Zero, the Unclanned, must visit all 15 Sacred Sites of the five
+// Sproto clans, defeat a Master at each, and climb Cipher Peak to wake the
+// Egregore — the shared mind every Sproto Gremlin believes into being.
 //
-// Site names, regions and positions match the canonical Map image at
-// /masterquest-map.png. Pixel positions are normalised to a 1500×1000
-// SVG viewBox so the page can draw the player avatar and node dots over
-// the painted map.
+// Region names (Orange Citadel, Violet Reverie, Crimson Crest, White Spire,
+// Black Ledger), Cipher Peak and the Mempool Sea match the painted Map at
+// /masterquest-map.png; each region is now a clan's territory. The SITE names
+// painted on that map predate this story — the map art needs a repaint to
+// match. Pixel positions are normalised to a 1500×1000 SVG viewBox.
+//
+// Site IDS are deliberately unchanged from Cycle I's first draft: saved
+// campaign progress (progress.ts) is keyed by them.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { Color } from '../cards';
 
 // ── Acts ────────────────────────────────────────────────────────────────────
-// We still group the 15 Sites into three Acts of 5 — that gates difficulty
-// escalation and unlocks. The geography no longer constrains chain coverage
-// per Act; the Mempool-Map is unbalanced on purpose.
+// The 15 Sites are grouped into three Acts of 5 — that gates difficulty
+// escalation and unlocks.
 export const ACTS = {
   awakening:   { title: 'Act I — The Awakening',   siteRange: [1,  5] as const },
   pilgrimage:  { title: 'Act II — The Pilgrimage', siteRange: [6, 10] as const },
@@ -24,29 +27,29 @@ export const ACTS = {
 } as const;
 export type ActKey = keyof typeof ACTS;
 
-// ── Site ids ─────────────────────────────────────────────────────────────────
+// ── Site ids (stable storage keys — see header) ─────────────────────────────
 export type SiteId =
-  // Orange Citadel — The Bazaar of Speed (chain: bnb)
-  | 'hot_wallet_caravanserai'   // I
-  | 'sniper_tower_four_winds'   // II
-  | 'floki_forge'               // III
-  // Violet Reverie — The Dreaming Ledger (chain: sol)
-  | 'validator_coral_reef'      // IV
-  | 'pump_fun_carnival'         // V
-  | 'phantom_vault'             // VI
-  // Crimson Crest — The Frost-Bound Lineage (chain: avax / Hyperliquid)
-  | 'coq_inu_coliseum'          // VII
-  | 'icebound_citadel_of_joe'   // VIII
-  | 'hot_shorts_pit'            // IX
-  // White Spire — The Cathedral of Code (chain: eth)
-  | 'pepe_pulpit'               // X
-  | 'vitalik_observatory'       // XI
-  | 'sproto_gremlin_bog'        // XII
-  // Black Ledger — The Patient Court (chain: xrp)
-  | 'quiet_court_of_larsen'     // XIII
-  | 'vault_of_the_drained'      // XIV
-  // Cipher Peak — The First Master (chain: xrp, the Black is the path up)
-  | 'cipher_peak';              // XV
+  // Orange Citadel — the Spirit clan (bnb)
+  | 'hot_wallet_caravanserai'   // I    The Candle Hostel
+  | 'sniper_tower_four_winds'   // II   The Mouth of Truth
+  | 'floki_forge'               // III  The Retain Monastery
+  // Violet Reverie — the Rebel clan (sol)
+  | 'validator_coral_reef'      // IV   Barricade Row
+  | 'pump_fun_carnival'         // V    The Riot Carnival
+  | 'phantom_vault'             // VI   The Shadow Vault
+  // Crimson Crest — the Wealth clan (robinhood)
+  | 'coq_inu_coliseum'          // VII  The Gilded Coliseum
+  | 'hot_shorts_pit'            // VIII The Counting House
+  | 'icebound_citadel_of_joe'   // IX   The Frozen Treasury
+  // White Spire — the Jester clan (eth)
+  | 'pepe_pulpit'               // X    The Stink Badger Embassy
+  | 'vitalik_observatory'       // XI   The Carnival of Masks
+  | 'sproto_gremlin_bog'        // XII  Sproto Gremlin Bog
+  // Black Ledger — the Knowledge clan (base)
+  | 'quiet_court_of_larsen'     // XIII The Silent Library
+  | 'vault_of_the_drained'      // XIV  The Tower of Ten Inus
+  // Cipher Peak — where the Egregore sleeps
+  | 'cipher_peak';              // XV   The Ascent to Cipher Peak
 
 export interface SiteRival {
   name: string;
@@ -63,9 +66,9 @@ export interface SacredSite {
   id: SiteId;
   index: number;            // 1..15
   act: ActKey;
-  chain: Color;             // theme + bot starter deck color
-  name: string;             // canonical site name as printed on the Map
-  region: string;           // parent region name + tagline
+  chain: Color;             // clan colour + bot starter deck
+  name: string;             // site name
+  region: string;           // clan territory + tagline
   description: string;      // map-card flavour text
   rival: SiteRival;
   reward: string;
@@ -75,22 +78,24 @@ export interface SacredSite {
 
 // ── The Prologue ────────────────────────────────────────────────────────────
 export const PROLOGUE = `
-Before the Five Chains, there was only the Mempool — a chaotic ocean of
-unverified thought. The First Master carved order from that noise and bound
-the world into five Great Chains: the Orange Citadel of speed, the Violet
-Reverie of dreaming validators, the Crimson Crest of frost-bound liquidations,
-the White Spire of code, and the Black Ledger of patient debts.
+Before the clans, there was only the Egregore — one mind, made of every
+Sproto Gremlin who ever believed in anything at the same time as another
+Sproto Gremlin. It lived on top of Cipher Peak, in the middle of the
+Mempool Sea, and it was very loud and very happy.
 
-For ten cycles there was peace. Then the First Master vanished into the
-clouds of Cipher Peak to meditate one last time, and the chains began to
-break. Fifteen Masters seized the Sacred Sites that had once anchored the
-world, each claiming a fragment of the First Master's authority. Only one of
-them — the eldest — remembers what was actually promised.
+Then the gremlins started to disagree. Some believed in the light. Some
+believed in breaking things. Some believed in getting rich, some in
+getting the joke, and some in getting it right. Each belief pulled on the
+Egregore, and one night it split into five: the Spirit Sprotos of the
+Orange Citadel, the Rebels of the Violet Reverie, the Wealth clan of the
+Crimson Crest, the Jesters of the White Spire, and the Knowledge clan of
+the Black Ledger. The Egregore went quiet. Fifteen Masters took the
+Sacred Sites and claimed to speak for it.
 
-You are SORENDO, the Unhoused. You belong to no Chain. Your deck is older
-than any Chain. You have walked into the Mempool with no patron, no Master,
-no seal of office, and you are going to walk every Site on the Map. The
-Quest will free them. The Quest may free you.
+You are SPROTO ZERO, the Unclanned. You hatched after the Splitting, so
+no clan ever claimed you. Your deck believes in a little of everything.
+You are going to walk every Site, beat every Master, and climb Cipher
+Peak to find out if the Egregore is sleeping — or waiting for you.
 `.trim();
 
 // ── The Sites ───────────────────────────────────────────────────────────────
@@ -99,297 +104,289 @@ Quest will free them. The Quest may free you.
 export const MAP_VIEWBOX = { w: 1500, h: 1000 } as const;
 
 export const SITES: ReadonlyArray<SacredSite> = [
-  // ───── ORANGE CITADEL — Act I ──────────────────────────────────────────
+  // ───── ORANGE CITADEL · SPIRIT CLAN — Act I ────────────────────────────
   {
     id: 'hot_wallet_caravanserai', index: 1, act: 'awakening', chain: 'bnb',
-    name: 'Hot Wallet Caravanserai',
-    region: 'Orange Citadel · The Bazaar of Speed',
+    name: 'The Candle Hostel',
+    region: 'Orange Citadel · Home of the Spirit Sprotos',
     description:
-      'The first stop on any pilgrim\'s route. A merchant inn the size of a small city, ' +
-      'walls hung with thousands of paper wallets still warm from the road. Pilgrims sleep ' +
-      'on stacks of unspent gas. The caravan-master, JAKEY OF THE FIRST KEY, holds the only ' +
-      'set of master-keys in the Citadel.',
+      'The first stop for every gremlin on the pilgrim road: a hostel lit by ten thousand ' +
+      'candles that nobody ever blows out. Its keeper, BROTHER WICK, teaches every newcomer ' +
+      'the first rule of the Spirit clan — you fight better when you believe in something.',
     rival: {
-      name: 'Jakey of the First Key',
-      title: 'Caravan-Master of the Hot Wallet',
+      name: 'Brother Wick',
+      title: 'Keeper of the Candle Hostel',
       bio:
-        'A young keymaster who teaches every new pilgrim how to lose, gracefully, the first time. ' +
-        'Plays a tutorial-friendly BNB tempo deck built around early Nodes and cheap Memes.',
+        'A gentle Candle Acolyte who has lost to every pilgrim who deserved it and beaten every ' +
+        'one who did not. Plays a forgiving Spirit deck built on cheap Memes and early Nodes.',
       botColor: 'bnb', difficulty: 'easy',
-      quote: '"Welcome, heretic. Sit, drink, lose nicely. Then we duel for real."',
+      quote: '"Sit. Warm your claws. Lose once, nicely. Then we play for real."',
     },
-    reward: 'First Key Fragment (1/15) · A small brass token shaped like a wallet. Opens the Citadel\'s gates.',
+    reward: 'Candle Stub (1/15) · A stub of wax that relights itself every dawn.',
     mapPos: { x: 460, y: 105 },
   },
   {
     id: 'sniper_tower_four_winds', index: 2, act: 'awakening', chain: 'bnb',
-    name: 'Sniper Tower of Four Winds',
-    region: 'Orange Citadel · The Bazaar of Speed',
+    name: 'The Mouth of Truth',
+    region: 'Orange Citadel · Home of the Spirit Sprotos',
     description:
-      'A black-glass tower at the windward edge of the Bazaar. Its four balconies face four winds; ' +
-      'its single occupant, MEV-RIN THE FOUR-HANDED, fires bids and asks from all four at once. ' +
-      'Nobody buys anything in the Bazaar without her seeing it first.',
+      'A great stone face set into the Citadel wall. Every Spirit gremlin puts a claw in its ' +
+      'mouth once in their life and tells the truth. BOCCA DE VERITA has bitten off more ' +
+      'liars than anyone can count. It has never once been wrong.',
     rival: {
-      name: 'MEV-rin the Four-Handed',
-      title: 'Sniper of the Four Winds',
+      name: 'Bocca De Verita',
+      title: 'The Mouth of Truth',
       bio:
-        'Reflex-trader turned Master. Plays an aggressive front-running deck that grabs initiative ' +
-        'every turn and refuses to let go.',
+        'An ancient stone face that speaks only in verdicts. Plays a patient Spirit deck that ' +
+        'punishes every bluff and rewards every honest attack.',
       botColor: 'bnb', difficulty: 'normal',
-      quote: '"You opened your hand a half-second too early. I already took the trade."',
+      quote: '"Put your hand in. Tell me why you came. Then we will see."',
     },
-    reward: 'Wind Sigil (2/15) · A glass pane that hums in the prevailing wind.',
+    reward: 'Truth Tooth (2/15) · A small stone tooth that grows warm when someone lies to you.',
     mapPos: { x: 220, y: 290 },
   },
   {
     id: 'floki_forge', index: 3, act: 'awakening', chain: 'bnb',
-    name: 'Floki Forge',
-    region: 'Orange Citadel · The Bazaar of Speed',
+    name: 'The Retain Monastery',
+    region: 'Orange Citadel · Home of the Spirit Sprotos',
     description:
-      'A volcanic smithy at the southern edge of the Citadel. Its furnace is fuelled by retail FOMO. ' +
-      'The smith, BJORN OF FLOKI, hammers out gas-coins by the thousand and tosses them, glowing, ' +
-      'to anyone brave enough to catch. He has never lost a duel inside his own forge.',
+      'A monastery at the southern edge of the Citadel where the monks take one vow: always ' +
+      'retain. Nothing that enters leaves. ABBOT RETAIN has kept every card he was ever dealt ' +
+      'and plans to keep yours.',
     rival: {
-      name: 'Bjorn of Floki',
-      title: 'Smith of the Last Pump',
+      name: 'Abbot Retain',
+      title: 'Abbot of the Retain Monastery',
       bio:
-        'Half-Norse, half-meme. Plays a burn-aggressive Machines deck that floods the board with ' +
-        'cheap iron Memes and finishes with a single, ridiculous Move.',
+        'A blue-fisted monk with a grip nobody has broken. Plays a sturdy Spirit deck that ' +
+        'enchants one Meme until it cannot be moved.',
       botColor: 'bnb', difficulty: 'normal',
-      quote: '"Skál! Take this hammer. Tomorrow you\'ll wish I\'d sold it to you for half."',
+      quote: '"Always retain, brother. Especially the lead."',
     },
-    reward: 'Forge-Hammer Token (3/15) · A tiny iron hammer that warms when held.',
+    reward: 'Retainer Ring (3/15) · An iron ring that tightens when you try to let go of a good hand.',
     mapPos: { x: 410, y: 405 },
   },
 
-  // ───── VIOLET REVERIE — Act I/II split ─────────────────────────────────
+  // ───── VIOLET REVERIE · REBEL CLAN — Act I/II ──────────────────────────
   {
     id: 'validator_coral_reef', index: 4, act: 'awakening', chain: 'sol',
-    name: "Validator's Coral Reef",
-    region: 'Violet Reverie · The Dreaming Ledger',
+    name: 'Barricade Row',
+    region: 'Violet Reverie · Home of the Rebel Sprotos',
     description:
-      'A coral reef the size of a small country, every polyp a Solana validator humming in unison. ' +
-      'The Reef\'s warden, ANATOLA THE SHOAL, swims through her own nervous system. Her deck never ' +
-      'misses a tempo because the Reef itself plays half her hand for her.',
+      'A street of overturned carts and burning banners where the Rebel clan has been rioting ' +
+      'since the Splitting. Its loudest voice, SPARK, started the first fire and is still ' +
+      'deciding what it was for.',
     rival: {
-      name: 'Anatola the Shoal',
-      title: 'Warden of the Coral Reef',
+      name: 'Spark',
+      title: 'Firestarter of Barricade Row',
       bio:
-        'Architect of the Reef\'s validator-mesh. Plays a perfectly-tuned tempo deck that ends most ' +
-        'matches by turn six and apologises afterwards.',
+        'A tiny gremlin who is mostly flame. Plays a fast Rebel burn deck that tries to end ' +
+        'the duel before you have finished playing Nodes.',
       botColor: 'sol', difficulty: 'normal',
-      quote: '"I\'ve already simulated this match eight hundred times. Surprise me."',
+      quote: '"You brought a deck? Cute. I brought a bottle."',
     },
-    reward: 'Reef-Pearl (4/15) · A pearl that hums faintly in time with your heartbeat.',
+    reward: 'Ember Badge (4/15) · A pin that never stops smouldering.',
     mapPos: { x: 980, y: 145 },
   },
   {
     id: 'pump_fun_carnival', index: 5, act: 'awakening', chain: 'sol',
-    name: 'Pump.Fun Carnival',
-    region: 'Violet Reverie · The Dreaming Ledger',
+    name: 'The Riot Carnival',
+    region: 'Violet Reverie · Home of the Rebel Sprotos',
     description:
-      'A travelling fair built on the back of a single, very anxious whale. Tents pop up and ' +
-      'collapse every hour. The ringmaster, MURAD THE HUNDRED-CYCLES, sells tickets in coins that ' +
-      'have not been minted yet, and somehow they always work.',
+      'A fair that sets itself on fire every evening and rebuilds by morning. Its ringmaster, ' +
+      'MURAD, has spent a hundred cycles trying to flip the whole stock market and is certain ' +
+      'that this cycle is the one.',
     rival: {
-      name: 'Murad the Hundred-Cycles',
-      title: 'Ringmaster of the Carnival',
+      name: 'Murad',
+      title: 'Ringmaster of the Riot Carnival',
       bio:
-        'A cycle theorist who claims to have lived through every memecoin season since the First. ' +
-        'Plays a chaotic Moves-heavy deck that wins by overwhelming volume rather than precision.',
+        'A cycle theorist who believes everything is about to pump. Plays a chaotic Rebel deck ' +
+        'that wins on volume, not precision.',
       botColor: 'sol', difficulty: 'normal',
-      quote: '"Step right up. Step right up. Step right out, if you can."',
+      quote: '"Step right up. This cycle is different. It is always different."',
     },
-    reward: 'Carnival Ticket (5/15) · A paper stub that re-prints itself every dawn.',
+    reward: 'Carnival Ticket (5/15) · A ticket stub that reprints itself every dawn.',
     mapPos: { x: 1290, y: 245 },
   },
   {
     id: 'phantom_vault', index: 6, act: 'pilgrimage', chain: 'sol',
-    name: 'Phantom Vault',
-    region: 'Violet Reverie · The Dreaming Ledger',
+    name: 'The Shadow Vault',
+    region: 'Violet Reverie · Home of the Rebel Sprotos',
     description:
-      'A hidden vault carved into a hovering moon. Reachable only by Phantom-stride. Inside, ' +
-      'the keeper KIRA THE UNSIGNED holds every signature you have ever made and every signature ' +
-      'you have not. She duels with whichever of them she likes more.',
+      'A black vault on a hovering moon, guarded by the fastest thing in the Reverie. SHADOW ' +
+      'never asked to join the Rebels. He just showed up, won every fight, and refused to leave.',
     rival: {
-      name: 'Kira the Unsigned',
-      title: 'Keeper of the Phantom Vault',
+      name: 'Shadow',
+      title: 'The Ultimate Lifeform',
       bio:
-        'A signer-without-a-key. Her deck mirrors your own — every Meme you play, she plays a ' +
-        'shadow of, two turns later, with one more counter on it.',
+        'A black-and-red hedgehog with no patience for anyone. Plays a Rebel deck that drops ' +
+        'Shadow Mode on a single Meme and swings the turn it lands.',
       botColor: 'sol', difficulty: 'hard',
-      quote: '"This deck of yours is lovely. May I borrow it? I already have."',
+      quote: '"I am not a hero. I am just faster than you."',
     },
-    reward: 'Phantom Signature (6/15) · A blank parchment that signs itself only when you turn away.',
+    reward: 'Chaos Shard (6/15) · A red crystal that blinks you one step ahead.',
     mapPos: { x: 1170, y: 365 },
   },
 
-  // ───── CRIMSON CREST — Act II ─────────────────────────────────────────
+  // ───── CRIMSON CREST · WEALTH CLAN — Act II ────────────────────────────
   {
     id: 'coq_inu_coliseum', index: 7, act: 'pilgrimage', chain: 'robinhood',
-    name: 'Coq Inu Coliseum',
-    region: 'Crimson Crest · The Frost-Bound Lineage',
+    name: 'The Gilded Coliseum',
+    region: 'Crimson Crest · Home of the Wealth Sprotos',
     description:
-      'A vast stone coliseum cracked through by lava-rivers, where the warrior-rooster god COQ ' +
-      'reigns from a perch of broken pikes. He fights pilgrims one feather at a time, and he has ' +
-      'a great many feathers.',
+      'A coliseum paved in gold leaf, where Wealth gremlins bet on every duel, including the ' +
+      'ones they are fighting. The champion, the GILDED BOAR, has charged through every ' +
+      'challenger and most of the fences.',
     rival: {
-      name: 'COQ, Sovereign of the Coliseum',
-      title: 'The Armored Rooster',
+      name: 'The Gilded Boar',
+      title: 'Champion of the Coliseum',
       bio:
-        'The avatar of the Coq Inu egregore. Plays a battle-cry tribal deck that gets stronger ' +
-        'every time he loses a card.',
+        'A gold-tusked brawler who has never once walked around anything. Plays a Wealth deck ' +
+        'of big bodies that gets harder to kill every turn.',
       botColor: 'robinhood', difficulty: 'normal',
-      quote: '"COCK-A-DOODLE-DUEL."',
+      quote: '"Place your bets. All of them. On me."',
     },
-    reward: 'Iron Feather (7/15) · A black-and-red feather sharper than any blade.',
+    reward: 'Gilded Tusk (7/15) · A gold tusk that is somehow worth more every time you look.',
     mapPos: { x: 235, y: 600 },
   },
   {
     id: 'hot_shorts_pit', index: 8, act: 'pilgrimage', chain: 'robinhood',
-    name: 'The Hot Shorts Pit',
-    region: 'Crimson Crest · The Frost-Bound Lineage',
+    name: 'The Counting House',
+    region: 'Crimson Crest · Home of the Wealth Sprotos',
     description:
-      'A circular pit dug down through the Crimson lava-flow until it touches the ice-shelf below. ' +
-      'Pilgrims duel on a glass floor with the lava beneath them. The pit-boss, GANNON OF THE ' +
-      'NEGATIVE FUNDING RATE, has never had a long position in his life.',
+      'A tall stone bank where every coin in the Crest is counted twice a day. BRIAN keeps ' +
+      'the books. He has never lost a coin, never made a mistake, and never once smiled about it.',
     rival: {
-      name: 'Gannon of the Negative Funding Rate',
-      title: 'Pit-Boss of the Hot Shorts',
+      name: 'Brian',
+      title: 'Keeper of the Counting House',
       bio:
-        'Made his name shorting every memecoin that ever pumped, twice. Plays a punishing control ' +
-        'deck that taxes your every move.',
+        'The most careful gremlin alive. Plays a grinding Wealth deck that heals off every hit ' +
+        'and outlasts you on the life total.',
       botColor: 'robinhood', difficulty: 'hard',
-      quote: '"Funding is negative. You\'re still paying. I love it when that happens."',
+      quote: '"I have already counted how this ends. You are short."',
     },
-    reward: 'Bleeding Margin Chit (8/15) · A red wax seal that drips, but never quite empties.',
+    reward: 'Ledger Page (8/15) · A page that adds itself up, and is always right.',
     mapPos: { x: 445, y: 545 },
   },
   {
     id: 'icebound_citadel_of_joe', index: 9, act: 'pilgrimage', chain: 'robinhood',
-    name: 'Icebound Citadel of Joe',
-    region: 'Crimson Crest · The Frost-Bound Lineage',
+    name: 'The Frozen Treasury',
+    region: 'Crimson Crest · Home of the Wealth Sprotos',
     description:
-      'A glass citadel encased in permanent ice at the southern foot of the Crest. Its lord, JOE ' +
-      'OF THE EVERLAST, sits on a throne of frozen open-interest. He has not lost a duel since ' +
-      'before the Splintering, and he is, reportedly, eleven years old.',
+      'A treasury of ice at the foot of the Crest, where wealth goes to sit still forever. Its ' +
+      'lord, OLD MONEY, was rich before rich had a name, and has not moved from his throne ' +
+      'since the Splitting.',
     rival: {
-      name: 'Joe of the Everlast',
-      title: 'Sovereign of the Icebound Citadel',
+      name: 'Old Money',
+      title: 'Baron of the Frozen Treasury',
       bio:
-        'Mythic Hyperliquid figure. Half believe he was carved from the throne itself. Plays a ' +
-        'perfectly-tuned mid-range deck with no apparent weakness and no obvious emotion.',
+        'The oldest fortune in the Crest. Plays a slow, enormous Wealth deck with no obvious ' +
+        'weakness and no obvious feelings.',
       botColor: 'robinhood', difficulty: 'hard',
-      quote: '"You are paying funding. I am collecting. Begin."',
+      quote: '"New money always talks first. Go on."',
     },
-    reward: 'Frostshard Crown (9/15) · A circlet of unmelting ice. Marks the end of Act II.',
+    reward: 'Frost Coin (9/15) · A coin of ice that never melts. Marks the end of Act II.',
     mapPos: { x: 370, y: 735 },
   },
 
-  // ───── WHITE SPIRE — Act III prelude ──────────────────────────────────
+  // ───── WHITE SPIRE · JESTER CLAN — Act II/III ──────────────────────────
   {
     id: 'pepe_pulpit', index: 10, act: 'pilgrimage', chain: 'eth',
-    name: 'Pepe Pulpit',
-    region: 'White Spire · The Cathedral of Code',
+    name: 'The Stink Badger Embassy',
+    region: 'White Spire · Home of the Jester Sprotos',
     description:
-      'A high marble pulpit at the centre of the White Spire\'s outer plaza. The preacher, PEPE ' +
-      'THE FIRST, sermons the Cathedral every dawn in a voice that has never wavered. His ' +
-      'congregation never thins. He has been preaching the same Sermon On The Bag-Holder for nine ' +
-      'cycles.',
+      'A grand embassy that nobody invited, run by a stink badger in a fez with a globe he ' +
+      'keeps spinning to the same spot. CARBONARA MUSSOLINI insists his empire is reawakening. ' +
+      'The Jesters let him say it because it is very funny.',
     rival: {
-      name: 'Pepe the First',
-      title: 'Preacher of the Long Hold',
+      name: 'Carbonara Mussolini',
+      title: 'Emperor of the Stink Badgers',
       bio:
-        'The original meme made flesh. Plays a slow, inevitability-based deck that wins by ' +
-        'staying alive longer than anyone has the patience for.',
+        'A badger with grand plans and a terrible smell. Plays a Jester control deck that ' +
+        'removes your best Meme and then gives a speech about it.',
       botColor: 'eth', difficulty: 'hard',
-      quote: '"Hold. Hold. HOLD." (his entire opening monologue.)',
+      quote: '"The Stink Badger Empire is reawakening! Kneel, or at least hold your breath."',
     },
-    reward: 'Pulpit-Coin (10/15) · A heavy bronze coin engraved with a single tear.',
+    reward: 'Little Fez (10/15) · A fez that is too small for anyone and fits you perfectly.',
     mapPos: { x: 1120, y: 575 },
   },
-
-  // ───── WHITE SPIRE — Act III ──────────────────────────────────────────
   {
     id: 'vitalik_observatory', index: 11, act: 'coronation', chain: 'eth',
-    name: 'Vitalik Observatory',
-    region: 'White Spire · The Cathedral of Code',
+    name: 'The Carnival of Masks',
+    region: 'White Spire · Home of the Jester Sprotos',
     description:
-      'A glass observatory at the highest tier of the Cathedral. From its dome you can see every ' +
-      'block in the Aetherweb being mined in real time. Its astronomer, ARCHON VITALYN, has been ' +
-      'reading the same proof for three cycles. He has not yet looked up.',
+      'A masquerade in the high halls of the Spire where nobody shows their real face. The ' +
+      'MASK COLLECTOR has every face in the Jester clan on her wall, and wants yours next.',
     rival: {
-      name: 'Archon Vitalyn',
-      title: 'Astronomer of the White Spire',
+      name: 'The Mask Collector',
+      title: 'Hostess of the Carnival of Masks',
       bio:
-        'Pale Senate\'s reigning meta-theorist. Plays a deeply technical deck that wins through ' +
-        'inevitability rather than aggression.',
+        'A Jester who has not shown her own face in nine cycles. Plays a tricky deck that ' +
+        'trades evenly, then lets The Last Laugh close it out.',
       botColor: 'eth', difficulty: 'hard',
-      quote: '"Let\'s test a hypothesis: that you, specifically, can beat me."',
+      quote: '"Lovely face. Mind if I keep it?"',
     },
-    reward: 'Lens of First Principles (11/15) · A pane of glass that magnifies any decision you regret.',
+    reward: 'Blank Mask (11/15) · A mask that shows whatever face you need.',
     mapPos: { x: 1325, y: 645 },
   },
   {
     id: 'sproto_gremlin_bog', index: 12, act: 'coronation', chain: 'eth',
     name: 'Sproto Gremlin Bog',
-    region: 'White Spire · The Cathedral of Code',
+    region: 'White Spire · Home of the Jester Sprotos',
     description:
-      'A swamp of half-finished contracts at the foot of the Cathedral, where every Gremlin that ' +
-      'failed to compile crawls. Their king, KELBY THE LITTLE LORD, sits on a throne of broken ' +
-      'opcodes and laughs at every duel he watches, then plays one.',
+      'A swamp at the foot of the Spire where every gremlin who failed at something crawls to ' +
+      'try again. Their king, KELBY THE LITTLE LORD, sits on a throne of broken ideas and ' +
+      'laughs at every duel he watches, then plays one.',
     rival: {
       name: 'Kelby the Little Lord',
       title: 'King of the Sproto Gremlins',
       bio:
-        'The Gremlin king made flesh and gold leaf. Plays a chaotic ETB-trigger swarm deck full ' +
-        'of weird Gremlin synergies. Surprisingly nasty.',
+        'The Gremlin king in gold leaf. Plays a chaotic swarm deck full of Sproto Gremlins that ' +
+        'zap you on entry. Surprisingly nasty.',
       botColor: 'eth', difficulty: 'hard',
-      quote: '"Greetings traveller! Have you met the gang? They\'ve been DYING to meet you."',
+      quote: '"Greetings, traveller! Have you met the gang? They have been DYING to meet you."',
     },
-    reward: 'Gremlin Mark (12/15) · A pin-prick scar that glows faintly green in the dark.',
+    reward: 'Gremlin Mark (12/15) · A pin-prick scar that glows green when a gremlin is near.',
     mapPos: { x: 1090, y: 760 },
   },
 
-  // ───── BLACK LEDGER — Act III ─────────────────────────────────────────
+  // ───── BLACK LEDGER · KNOWLEDGE CLAN — Act III ─────────────────────────
   {
     id: 'quiet_court_of_larsen', index: 13, act: 'coronation', chain: 'base',
-    name: 'Quiet Court of Larsen',
-    region: 'Black Ledger · The Patient Court',
+    name: 'The Silent Library',
+    region: 'Black Ledger · Home of the Knowledge Sprotos',
     description:
-      'A vast stone court of pillared judges, all silent, all listening. The Chief Judge, LARSEN ' +
-      'THE PATIENT, has not spoken in twelve cycles. He duels with cards he places face-down and ' +
-      'never flips until the end. He always wins. Until, possibly, today.',
+      'A library so large it has its own weather, where talking costs a card. THE ARCHIVIST ' +
+      'has read every book in it and remembers every overdue one.',
     rival: {
-      name: 'Larsen the Patient',
-      title: 'Chief Judge of the Quiet Court',
+      name: 'The Archivist',
+      title: 'Keeper of the Silent Library',
       bio:
-        'A founder-judge of the Black Ledger who has built an entire deck around delayed reveals. ' +
-        'Plays a control deck that hides almost every card until the resolve phase.',
+        'A Knowledge gremlin who has not spoken in twelve cycles. Plays a card-drawing deck ' +
+        'that is always one card ahead of you.',
       botColor: 'base', difficulty: 'hard',
-      quote: '(He does not say anything. He sets a card face-down. He waits.)',
+      quote: '(She does not speak. She draws two cards. She waits.)',
     },
-    reward: 'Silent Gavel (13/15) · A black stone gavel that strikes without sound.',
+    reward: 'Bookmark of Silence (13/15) · A ribbon that holds your place in any story.',
     mapPos: { x: 600, y: 845 },
   },
   {
     id: 'vault_of_the_drained', index: 14, act: 'coronation', chain: 'base',
-    name: 'Vault of the Drained',
-    region: 'Black Ledger · The Patient Court',
+    name: 'The Tower of Ten Inus',
+    region: 'Black Ledger · Home of the Knowledge Sprotos',
     description:
-      'A flooded vault at the deepest end of the Black Ledger, where every drained wallet in the ' +
-      'history of the Aetherweb has come to rest. Its keeper, JUSTIRA THE UNWRITTEN, has had her ' +
-      'own name erased from every ledger as a self-bet. She won the bet. She still has no name.',
+      'A tower of ten floors, one for each Inu of legend, at the deepest end of the Ledger. At ' +
+      'the top sits BITCOIN OBAMA, the most famous Nigerian in the history of the ' +
+      'HarryPotterObamaSonic10Inu saga, who knows the answer to every question you have not asked.',
     rival: {
-      name: 'Justira the Unwritten',
-      title: 'Keeper of the Drained',
+      name: 'Bitcoin Obama',
+      title: 'Sage of the Ten Inus',
       bio:
-        'Former Black Ledger councillor. Self-redacted from all chain records. Plays a milling, ' +
-        'discarding, hand-attack deck that drowns you in your own deck.',
+        'The wisest gremlin in the Ledger and the funniest. Plays a Knowledge deck of draw ' +
+        'engines and bounce tricks that never runs out of answers.',
       botColor: 'base', difficulty: 'hard',
-      quote: '"You\'ll forget this duel by tomorrow. I made sure of it."',
+      quote: '"Ask me anything. I already told you the answer, you just were not listening."',
     },
-    reward: 'Drained Tessera (14/15) · A thin black tile that weighs more than it should.',
+    reward: 'Inu Seal (14/15) · A seal with ten tiny paw prints, one for each floor.',
     mapPos: { x: 905, y: 855 },
   },
 
@@ -397,25 +394,23 @@ export const SITES: ReadonlyArray<SacredSite> = [
   {
     id: 'cipher_peak', index: 15, act: 'coronation', chain: 'base',
     name: 'The Ascent to Cipher Peak',
-    region: 'Cipher Peak · The First Master\'s Last Meditation',
+    region: 'Cipher Peak · Where the Egregore Sleeps',
     description:
-      'The needle of black mountain that rises from the centre of the Mempool Sea. The First ' +
-      'Master climbed it ten cycles ago and never came back down. The pillar of pale light that ' +
-      'rises from its summit is the only thing in the Aetherweb that has never flickered. ' +
-      'You climb. The fifteenth Master is waiting at the top. So is the First.',
+      'The black mountain in the middle of the Mempool Sea. The Egregore went quiet on its ' +
+      'summit the night of the Splitting. MORE LIGHT, the leader of the gremlins, climbed up ' +
+      'after it and has been waiting at the top ever since, asking only for more.',
     rival: {
-      name: 'The First Master',
-      title: 'The Architect of the Five Chains',
+      name: 'More Light',
+      title: 'Leader of the Gremlins, Voice of the Egregore',
       bio:
-        'The ancient who carved order from the Mempool. Has been meditating at Cipher Peak\'s ' +
-        'summit for ten cycles. Will rise to duel exactly once. Plays a flawless five-colour ' +
-        'control deck that contains one of every Master\'s signature card.',
+        'The first gremlin to believe and the last to stop. Speaks for the sleeping Egregore. ' +
+        'Plays a flawless deck that holds one signature card from every Master you have beaten.',
       botColor: 'base', difficulty: 'hard',
-      quote: '"You walked all five Chains and belonged to none. Show me the Aetherweb you remember."',
+      quote: '"You belong to no clan, so you belong to all of them. Show me."',
     },
     reward:
-      'The Five-Chain Crown (15/15) · The First Master\'s authority, fragmented across the Sites, ' +
-      'reforges in your hand. The Splintering ends — or you reforge it your own way. Credits roll.',
+      'The Egregore Crown (15/15) · Fifteen fragments braid into one crown, and the Egregore ' +
+      'wakes. The clans become one mind again — or you choose to leave them five. Credits roll.',
     mapPos: { x: 750, y: 360 },
   },
 ];
@@ -453,7 +448,7 @@ export function mapPath(): Array<{ site: SacredSite; pos: MapPos }> {
   return SITES.map(s => ({ site: s, pos: mapPosOf(s) }));
 }
 
-// ── Interludes — heavy lore between matches ─────────────────────────────────
+// ── Interludes — story between matches ──────────────────────────────────────
 export interface Interlude {
   /** Read on entering the Site, before the duel. */
   pre: string;
@@ -464,411 +459,353 @@ export interface Interlude {
 export const INTERLUDES: Record<SiteId, Interlude> = {
   hot_wallet_caravanserai: {
     pre:
-`You arrive at the Orange Citadel from the dust of the Mempool road. The
-Caravanserai gates are propped open with a stack of dormant Ledger Wallets,
-and the warm chai inside smells of cardamom and gas-fees. JAKEY OF THE FIRST
-KEY waves you over to a low cushion. Two teacups are already poured.
+`You come up the pilgrim road out of the Mempool fog with mud on your
+claws and no clan colours on your back. The Candle Hostel glows ahead
+of you like a small sun. Inside, ten thousand candles burn and not one
+of them flickers when the door opens. BROTHER WICK waves you over to a
+low bench by the fire. Two cups of tea are already poured.
 
-"My mother said a heretic would come walking up the dunes today. She was
-right about the heretic, wrong about the dunes." His grin is patient,
-tutorial-perfect. "Drink first. Then we duel. You will lose. I will explain
-why. We will duel again. Tomorrow, you will leave the Citadel a little less
-breakable than you arrived."`,
+"A gremlin with no clan. We have not had one of those in a long time."
+His smile is warm and patient. "Drink first. Then we play. You will
+probably lose. I will tell you why. Then we play again."`,
     post:
-`Jakey laughs the laugh of a teacher whose star pupil finally embarrassed
-him in front of the class. He pours you a second cup of chai, presses the
-brass First Key into your palm, and points west across the bazaar's
-rooftops to a black-glass tower silhouetted against the Orange sky.
+`Brother Wick laughs, a proper belly laugh, and claps his small hands.
+He presses a stub of candle wax into your palm. It is still warm.
 
-"That tower belongs to MEV-rin. She has four hands and four winds and a
-very bad attitude. She will already know you are coming because the winds
-told her an hour ago. Walk faster than usual." He bows. The caravan-bell
-rings behind you. You step out of the Caravanserai and into the Bazaar of
-Speed proper — and the first of the four winds shifts to face you.`,
+"You believe in something, little one. I just cannot tell what yet."
+He points out the window to a great stone face set into the Citadel
+wall. "That is the Mouth of Truth. It will ask you why you came. Do not
+lie to it. It bites."
+
+— You walk the Citadel's lantern-lit streets toward the stone face. Spirit
+gremlins stop their chores to watch you pass. Nobody without a clan has
+ever been allowed this far.`,
   },
   sniper_tower_four_winds: {
     pre:
-`The Sniper Tower has no door. You climb a single iron ladder bolted to its
-windward face for two hundred rungs. The wind shoves you at every step but
-never quite hard enough to throw you. MEV-RIN THE FOUR-HANDED is waiting at
-the top, balanced on the railing with four arms folded.
+`The Mouth of Truth is taller than a house. Its stone eyes follow you
+across the square. A line of Spirit gremlins waits to put their claws in
+its mouth, and every one of them is shaking. When you reach the front,
+the Mouth speaks.
 
-"You climbed in the wind. Good. I respect a heretic who arrives slightly
-out of breath. It means you cared." Two of her hands are already shuffling
-a deck. The other two are placing bids on cards you have not yet played.
-"Begin. I have already begun."`,
+"BOCCA DE VERITA does not duel liars. Put your hand in. Tell me why you
+came." You put your claw in. You tell it the truth: you want the
+Egregore to wake up. The Mouth is quiet for a long time. "Good. That is
+true. Now we play."`,
     post:
-`MEV-rin loses with grace — she even applauds her own loss, slowly, with
-two hands while the other two start re-pricing your inventory. She hands
-you a thin pane of black glass that hums in the prevailing wind: the Wind
-Sigil.
+`The Mouth closes slowly and opens again, and a small stone tooth rolls
+out onto its lip. You take it. It is warm.
 
-"There is a basket-lift on the southern face. It will drop you straight
-into the courtyard of the Floki Forge. Tell Bjorn I said his hammers run
-shallow." She winks all four eyes. "He hates that. It will help."
+"You told the truth and you played true. Rare." The stone face almost
+smiles. "Go south, to the Retain Monastery. The Abbot has held the
+Spirit clan together since the Splitting. He will not let go of
+anything. Not even a duel he has lost."
 
-— The basket-lift creaks south for an hour. You descend through three
-weather-systems and a thin layer of smelter-smoke, and step out into the
-red glow of the volcanic Forge.`,
+— The road south winds through orchards of glowing trees. At dusk the
+monastery bells start ringing, all of them, all at once, and none of
+them ever stop.`,
   },
   floki_forge: {
     pre:
-`The Forge is louder than any place you have ever been. The furnace's roar
-is constant; the hammers strike in arrhythmic counterpoint. BJORN OF FLOKI
-is at the central anvil, beating a coin so hot it is white and singing. He
-sees you and does not stop.
+`The Retain Monastery is full of monks who are all holding on to
+something: a cup, a coin, a grudge, a card. ABBOT RETAIN sits in the
+centre of the great hall with one blue fist closed tight. Nobody has
+ever seen what is inside it.
 
-"Eleven more strikes, heretic. Twelve. There." He flicks the still-glowing
-coin at you with the back of his hammer. You catch it. It does not burn.
-"Now we duel. While the coin is still warm. I always win when the coin is
-still warm."`,
+"Welcome, brother. Here we keep one vow." He raises the fist. "Always
+retain. Everything you are dealt, you keep. Let us see how long you can
+keep your life total."`,
     post:
-`Bjorn stares at the cooling coin in your palm for a long moment, then
-laughs — a great long Norse laugh that the furnace seems to join in with.
-He drops a small iron hammer-token into your other hand and claps your
-shoulder hard enough to leave a soot-print.
+`The Abbot looks at his closed fist for a long moment. Then, for the
+first time anyone can remember, he opens it. Inside is an iron ring. He
+slides it onto your claw.
 
-"Skál! You took the heat better than the last nine. There is an Orange
-caravan leaving tonight, bound across the Mempool Sea to the Coral Reef.
-The captain owes me a favour. Tell him I said the Reef is not as deep as
-it pretends." He grins. "He will laugh and he will let you ride free."
+"You let go of the right cards at the right time. I have not learned
+that yet." He bows. "The Spirit clan will remember you. Now go east,
+across the sea, to the Violet Reverie. The Rebels have been rioting
+since the Splitting. They will like you. That is the dangerous part."
 
-— Two days on a low-flying skiff with an orange sail and a captain who
-sings off-key. The Mempool Sea hisses underneath you, full of half-formed
-faces. At dawn on the second day the sky shifts from amber to violet, and
-the Coral Reef hums into view.`,
+— A ferry of paper lanterns carries you over the Mempool Sea. Faces of
+half-formed memes rise and sink in the water below. By morning the sky
+has turned violet, and you can smell smoke.`,
   },
   validator_coral_reef: {
     pre:
-`The Reef hums in a chord that is just above your hearing. Walking on its
-upper coral feels like walking on a sleeping animal. ANATOLA THE SHOAL
-meets you at the central polyp — a vast violet cup the size of a cathedral
-— and gestures you to sit at the duelling-bench grown from a single living
-piece of coral.
+`Barricade Row is one long street of overturned carts and burning
+banners. Rebel gremlins in red scarves are throwing bricks at a wall
+that has already fallen down. On top of the biggest barricade sits
+SPARK, a gremlin so small she is mostly flame.
 
-"I have simulated this match eight hundred and forty-three times. In each
-simulation I win on turn seven. I am genuinely curious whether you will
-make it to turn eight." Her smile is dazzling and synthetic. "Begin."`,
+"A clanless one!" she shouts, and the whole Row cheers. "No colours, no
+masters, no rules. You are basically one of us." She lights a bottle.
+"Prove it. Beat me before the fire goes out."`,
     post:
-`The Reef's chord shifts down a quarter-tone. Anatola tips her head,
-listens to herself listening, and laughs — a real laugh, the first the
-Reef has heard from her in eight cycles. She presses a small pink pearl
-into your hand and points east, across the surface of the Reef, to where
-a string of tents and lanterns is already setting up for tomorrow's fair.
+`Spark's flame flickers low, then roars back up twice as big. She
+laughs and pins a smouldering badge onto your chest.
 
-"That is the Pump.Fun Carnival. Murad will already be selling you a
-ticket to a show that has not yet happened." She rolls her eyes. "Buy it.
-It is, somehow, always worth the price."
+"You hit hard for a nobody. I like it." She points down the street to a
+fair that is, as far as you can tell, on fire. "The Riot Carnival.
+Murad runs it. He will try to sell you a ticket to a show that has not
+happened yet. Buy it. It always happens."
 
-— You walk across the Reef on a path the corals open and close beneath
-your feet. The lanterns of the Carnival rise into the violet evening like
-a constellation getting itself organised.`,
+— You walk down Barricade Row while Rebels bang drums in your honour.
+The Carnival tents rise ahead of you, half burning, half being rebuilt,
+all of it very loud.`,
   },
   pump_fun_carnival: {
     pre:
-`The Carnival\'s big tent is the size of a small moon and is currently
-collapsing on its east end while setting itself up on the west. You step
-under the entrance flap and a barker hands you a ticket printed in a coin
-you have not heard of. MURAD THE HUNDRED-CYCLES is standing on a barrel at
-the centre with both arms raised, mid-pitch.
+`The Riot Carnival's big tent is collapsing on one side and building
+itself on the other. A barker hands you a ticket printed in a coin you
+have never heard of. MURAD stands on a barrel in the middle of the
+ring, arms raised, halfway through a speech.
 
-"— and that, friends, is exactly why this cycle is DIFFERENT — oh, hello,
-heretic. You\'re early. Step into the ring. Step right in. We\'re about to
-have a duel and you happen to be the duel."`,
+"— and THAT, friends, is why this cycle is different. The whole market
+flips this time. Every chart, up. Oh! A pilgrim. Step into the ring,
+step right in. You happen to be the main event."`,
     post:
-`The crowd cheers a beat too late. Murad bows so deeply his hat falls off
-and a smaller hat under it pops up. He produces, from somewhere, a paper
-ticket stub and presses it gently into your hand.
+`The crowd cheers a beat late. Murad bows so low his hat falls off and a
+smaller hat underneath pops up. He tucks a ticket stub into your paw.
 
-"The stub re-prints every dawn. You may ride any tent in any Carnival
-forever." He winks. "There is a Phantom-stride pad behind the freak-show
-tent. Stand on it. Think of a Vault. The vault you think of will let you
-in. Try not to think of a bad one." His grin is too wide. "Don\'t worry
-about me. I\'ll see you at the top."
+"It reprints every dawn. Any tent, any carnival, forever." His grin is
+too wide. "There is a vault on the moon above us. Shadow lives there. He
+does not like visitors, or anyone, or anything. Try to be faster than
+him. Nobody is. Try anyway."
 
-— You stand on the pad. You think very carefully of the Phantom Vault.
-The Carnival around you turns paper-thin, then folds itself away, and
-when you blink you are standing on a flat moon hung over the violet
-horizon, with a single door floating in front of you.`,
+— A rope ladder drops from the hovering moon. You climb it for an hour.
+The Carnival shrinks below you into a small, cheerful fire.`,
   },
   phantom_vault: {
     pre:
-`The Vault\'s door opens before you knock. KIRA THE UNSIGNED is seated
-inside on a bench made of every signature you have ever made, and a few
-you have not. She is holding the deck you came in with. She is, in fact,
-playing solitaire with it.
+`The Shadow Vault is silent and black. You do not see SHADOW arrive.
+One moment the vault is empty, and the next he is leaning against the
+wall with his arms crossed, as if he has been there for hours.
 
-"Hello, Sorendo. I have your hand memorised. I have, by my count, three
-hundred and twelve of your habits memorised. You sigh when you topdeck.
-Did you know that?" She slides the deck back across to you, and lifts a
-duplicate, two turns ahead. "Let\'s see how many of these you can
-recognise before I play them."`,
+"You climbed up here for a duel." He does not move. "Everybody wants to
+fight the ultimate lifeform. Nobody wins." He finally looks at you.
+"Fine. Make it quick. I have somewhere faster to be."`,
     post:
-`Kira\'s deck dissolves into blank parchment in her hand. She watches it
-fall, smiles a very small smile, and bows from where she sits. She hands
-you a fresh blank parchment — the Phantom Signature.
+`Shadow stares at the board for a long time. Then he laughs once, short
+and surprised, and flicks a red crystal shard at you. You catch it, and
+for a heartbeat the whole world moves slower than you do.
 
-"It will sign itself the moment you turn away from it. Useful in the next
-Act. The Crest does not honour signatures it can see being made." She
-gestures behind her. The back wall of the vault is now open and shows a
-red horizon. "Step through. The wind on the Crest is colder than you
-remember. Sorendo\'s old cloak will not be enough. Buy a thicker one in
-the Coliseum."
+"Not bad. For a clanless gremlin." He turns away. "The Wealth clan is
+south, on the Crimson Crest. They will try to buy you. Do not let them.
+You are not for sale. Neither am I."
 
-— You step through. The Phantom Vault folds shut behind you. You are
-standing at the lip of the Crimson Crest, snow underfoot and lava in the
-middle distance, with the roar of a coliseum-crowd echoing up the slope
-ahead. Act II has begun.`,
+— When you look back, the vault is empty. The rope ladder leads down to
+a snowy road, and in the distance you can hear the roar of a coliseum
+crowd betting on something. Act II has begun.`,
   },
   coq_inu_coliseum: {
     pre:
-`The Coliseum erupts when you walk in. Forty thousand throats roar
-"COC-K-A-DOODLE-DUEL" in a single, perfectly synchronised, deeply
-unhelpful chant. COQ himself struts onto the central sand-pit on iron
-spurs that strike sparks off the stone. He is the size of a horse and
-the colour of dried blood and gold leaf.
+`The Gilded Coliseum is paved in gold leaf, and forty thousand Wealth
+gremlins are betting on you before you reach the sand. Bookies shout
+odds from every row. At the centre, THE GILDED BOAR paws the ground with
+golden hooves.
 
-"COCK-A-DOODLE-DUEL!" he crows again, just for emphasis. The crowd
-loses its collective mind. Somewhere, a rooster-priest faints. The duel
-begins before either of you has drawn a card.`,
+"Pilgrim! The odds on you are terrible. I bet against you myself." He
+lowers his golden tusks. "Let us make some gremlins very rich."`,
     post:
-`COQ ruffles every feather on his enormous body simultaneously, then
-sheds one — a long black-and-red iron feather sharper than any blade —
-and lets it drift to your feet. The crowd is silent for the first time
-in nine cycles. Then they erupt again, in your name. You are, briefly,
-a national hero of the Coq cult.
+`The Boar skids to a stop for the first time in his life. The crowd goes
+silent, then explodes as half of them get rich and half of them go
+broke. The Boar snaps off the tip of one golden tusk and drops it at your
+feet.
 
-The high-priest of Coq presses the feather into your hand and points
-east, across the lava-flow, to a low circle of stones with a glass
-floor. "The Hot Shorts Pit. Gannon expects you. Tell him COQ said his
-funding rate is, and I quote, ‘a tad spicy.’ He will not laugh. Tell
-him anyway."
+"You were a long shot. Long shots are the best investment." He snorts.
+"Up the hill is the Counting House. Brian keeps the books for the whole
+Crest. He will already know exactly how much you are worth."
 
-— You cross the lava-bridge on a path of cooled obsidian tiles. The
-glass floor of the Pit looms ahead of you, and underneath it, a long
-slow lake of liquid fire.`,
+— You climb the hill past markets and vaults and gremlins counting coins
+in the snow. The Counting House stands at the top, tall, grey and very
+precise.`,
   },
   hot_shorts_pit: {
     pre:
-`The Pit\'s glass floor is uncomfortably warm. Beneath your boots, the
-lava-lake moves in slow patient swells. GANNON OF THE NEGATIVE FUNDING
-RATE is at the centre with a small black book open on a stand, ticking
-boxes as you walk in.
+`Inside the Counting House, a thousand clerks are counting a thousand
+coins, and the only sound is the clink. BRIAN sits at the tallest desk
+with a ledger open in front of him. He does not look up.
 
-"You opened your hand. That\'s a fee. You stepped on the glass. Fee. You
-made eye contact with my book. Fee, fee." He grins and the book closes
-itself. "Net position: you owe me forty-two basis points before we\'ve
-even cut. Beautiful start. I love a heretic with a big short interest."`,
+"You walked in. That is a fee. You stood on my rug. Fee. You looked at
+my ledger. Fee." He closes the book. "You owe me eleven coins before we
+have even shuffled. I have already counted how this ends."`,
     post:
-`Gannon\'s little black book burns spontaneously into ash on its stand.
-He watches it go and laughs — the first real laugh he has produced in
-two cycles. He bends down, scoops the ash, and presses a red wax chit
-into your hand, the seal still dripping.
+`Brian opens his ledger, checks it twice, and frowns. For the first time
+in his life, the numbers are wrong. He tears out a page and hands it to
+you. It adds itself up as you watch.
 
-"You closed my book. Nobody closes my book." He spits, grins. "Up the
-slope. The path to Joe\'s Citadel runs north through the Snow Lane.
-The Lane is haunted by liquidations. Don\'t look at any of them. They
-miss being looked at."
+"I miscounted you." It is clearly very hard for him to say. "South is
+the Frozen Treasury. Old Money has not moved since the Splitting. He
+thinks he can outwait anyone. He might be right."
 
-— You walk the Snow Lane in the failing red light. Translucent ghosts
-of liquidated traders drift alongside you, weeping silently into hands
-that no longer exist. You do not look at them. The Icebound Citadel
-rises ahead, blue-white against the Crimson sky.`,
+— You walk the frozen road south. The snow is full of old coins, frozen
+where they fell. The Treasury rises ahead of you, a palace of ice.`,
   },
   icebound_citadel_of_joe: {
     pre:
-`Joe\'s Citadel is glass and ice and absolutely silent. Frost-traders
-line every gallery in perfect stillness, watching nothing, waiting for
-the throne room to ring its single bell. The bell rings as you walk
-in. JOE OF THE EVERLAST is on a throne carved from frozen open
-interest, feet not quite touching the floor. His face is the face of
-an eleven-year-old who has never been surprised in his life.
+`The Frozen Treasury is glass and ice and absolutely still. Gremlin
+servants stand frozen in every hallway, holding trays that have not been
+served in years. On a throne of frozen gold sits OLD MONEY, so old his
+whiskers have turned to icicles.
 
-"Funding is positive." His voice is flat. "You are paying. Begin."`,
+"New money always talks first." His voice cracks like ice on a lake.
+"Go on. Say something clever. I will still be here when you are done."`,
     post:
-`Joe blinks. The frost-traders gasp, very quietly, in unison. Joe slides
-off the throne, walks to a small chest at its base, and lifts out a
-circlet of unmelting ice. He places it carefully on your head, and bows
-about one degree.
+`Old Money blinks, and the ice on his whiskers cracks. The frozen
+servants gasp, very quietly, all at once. He reaches into the throne and
+pulls out a coin made of ice, and places it in your paw.
 
-"You closed at a profit. I have not closed at a loss in eight cycles.
-Today I closed at a loss. It feels…" He searches for the word. " …
-educational." A faint smile. "There is a maglev along the southern
-glacier-rail. It runs once an hour to the foot of the White Spire. Take
-the next one. Pepe expects you."
+"You did not wait for me. You did not need to." He almost smiles. "The
+White Spire is north. The Jesters live there. Nothing they say is true,
+and all of it is funny. Take this coin. You will need something to
+throw at them."
 
-— The maglev hums down the glacier at the speed of thought. The
-Crimson sky behind you fades to white. The White Spire rises out of
-the mist ahead, kilometre after kilometre of pale Cathedral. Act III
-begins as the train\'s doors open onto a marble plaza ringing with
-the morning Sermon.`,
+— A sled carries you north across the ice. The red sky fades to white,
+and the Spire rises out of the mist, every window lit, every room
+laughing at something.`,
   },
   pepe_pulpit: {
     pre:
-`The plaza is packed. Tens of thousands of pilgrims in white robes are
-swaying in time. From a marble pulpit at the centre, PEPE THE FIRST is
-delivering, as he has every dawn for nine cycles, the Sermon On The
-Bag-Holder. His voice is everywhere; his lips barely move.
+`The Stink Badger Embassy smells exactly how it sounds. Jester gremlins
+hold their noses and giggle in the hallways. In the great hall, a stink
+badger in a black uniform and a tiny red fez stands with one claw on a
+spinning globe. CARBONARA MUSSOLINI.
 
-"…and so, brothers and sisters, you shall HOLD. Through the dip you
-shall HOLD. Through the dump you shall HOLD. Even through the rug, my
-beloveds, you shall…" He sees you. The Sermon stops. The plaza falls
-silent. Pepe smiles. "…HOLD a moment. The heretic is here. Let us duel
-first. The Sermon can wait."`,
+"THE STINK BADGER EMPIRE IS REAWAKENING!" he announces, to nobody in
+particular. The Jesters applaud politely. He turns to you. "A pilgrim!
+Excellent. You will be my first conquest. Kneel. Or at least hold your
+breath."`,
     post:
-`Pepe lowers his head and lets the Sermon resume itself, in chorus,
-across the plaza. He produces from his sleeve a heavy bronze coin
-engraved with a single tear and hands it to you.
+`Carbonara Mussolini lets go of the globe. It keeps spinning without him.
+He takes off his fez, looks at it sadly, and places it on your head. It
+is too small. It fits you perfectly.
 
-"You held. Better than I expected. Climb the South Stair. The
-Observatory awaits." His smile is small. "Archon Vitalyn will offer to
-explain his deck to you mid-game. Decline politely. He talks more than
-he plays, and that is saying something."
+"The Empire will reawaken. Just not today." He sniffs. "Up the stairs is
+the Carnival of Masks. The Mask Collector will want your face. Keep it.
+It is a good face. For a pilgrim."
 
-— You climb the South Stair. Each step is engraved with a different
-proof. You stop reading them somewhere around the eight-hundredth
-step, when the air begins to thin and the Observatory dome rises into
-view, glass-bright in the noon sun.`,
+— You climb the Spire's spiral stairs while Jesters juggle knives in
+every doorway. Music drifts down from the top floors, and the faces at
+the windows are all wearing masks.`,
   },
   vitalik_observatory: {
     pre:
-`Vitalyn does not look up from his proof when you enter. He turns one
-page. He marks it with a silver ribbon. He turns another. He finally
-glances up — soft-spoken, polite, mildly curious.
+`The Carnival of Masks is a ballroom where every guest wears a mask and
+nobody remembers which face is theirs. The MASK COLLECTOR glides through
+the crowd toward you. Her wall behind her is covered in faces, all of
+them smiling.
 
-"Hello. I am genuinely interested in whether you can beat me. I have not
-been genuinely interested in anything in three cycles. Thank you in
-advance for the data." He pushes his chair back, lifts a deck so neatly
-sleeved it appears to glow, and gestures you to the bench opposite.
-"Take as long as you like. I have, after all, taken longer."`,
+"What a lovely face. Clanless, too. I do not have one of those yet." She
+sits across from you and deals. "Win, and you keep it. Lose, and it goes
+on my wall. Fair?"`,
     post:
-`Vitalyn closes his proof. Very slowly. Very reverently. He picks it up
-with both hands and sets it on a stand of solid logic, where it begins,
-faintly, to revise itself. He hands you a pane of clear glass: the Lens
-of First Principles.
+`The Mask Collector looks at her wall of faces, then at you, and takes
+down a plain white mask with no face at all. She presses it into your
+paws.
 
-"You falsified one of my theorems. I will need to rewrite chapter
-seven." He smiles — the first public smile he has produced in nine
-cycles. "Down the West Stair. The Gremlin Bog is at the foot. Kelby is
-very small and very fast. Do not lose count of his board."
+"It shows whatever face you need. You did not need any of mine." Behind
+her mask, you think she might be laughing. "Down in the bog is the
+little king. Kelby. Do not let him count for you. He cheats, and his
+gremlins cheat more."
 
-— The West Stair winds down through Cathedral cloisters, then out
-into a marsh of half-finished smart contracts. The air smells like
-green tea and burnt opcodes. Small green eyes blink at you from the
-reeds.`,
+— The back stairs lead down, and down, into a marsh at the foot of the
+Spire. The air smells like wet paper and fizzled spells. Small green eyes
+blink at you from the reeds.`,
   },
   sproto_gremlin_bog: {
     pre:
-`Kelby is exactly waist-high, sitting on a throne of broken opcodes
-with a small golden crown perched on his head. Around him, a dozen
-Gremlins of varying competence are practising spells that mostly fizzle.
-He sees you and beams.
+`KELBY THE LITTLE LORD is exactly waist-high, sitting on a throne of
+broken ideas with a little gold crown on his head. Around him, a dozen
+gremlins are practising spells that mostly fizzle. He sees you and
+beams.
 
-"Greetings traveller! The gang is THRILLED you came. Truly thrilled.
-Look at them. They\'re vibrating." A Gremlin behind him is, in fact,
-vibrating. "We don\'t get many visitors who survive Pepe\'s Sermon
-without falling asleep. You\'re a treat. Let\'s duel."`,
+"Greetings, traveller! The gang is THRILLED you came. Look at them.
+They are vibrating." One of them is, in fact, vibrating. "Not many
+pilgrims get past the Badger without fainting. Let us duel!"`,
     post:
-`Kelby applauds with both small hands and tips his crown to you.
-The Gremlins around him chant your name in a high reedy chorus that
-sounds, distantly, like a dial-up handshake. Kelby tugs at the cuff
-of your sleeve and pricks the skin underneath with a tiny pin —
-faintly painful, faintly luminous.
+`Kelby claps with both small hands and tips his crown to you. The
+gremlins chant your name in a high, squeaky chorus. Kelby pricks the
+back of your paw with a tiny pin, and the spot starts to glow green.
 
-"That\'ll glow green in the dark whenever a Gremlin is nearby. Which,
-if you\'re lucky, is often." He grins, pin still in hand. "South
-through the reeds. Larsen\'s Court is in the Black Ledger\'s outer
-wing. He will not say anything. Don\'t take it personally. He hasn\'t
-spoken in twelve cycles."
+"Now you will always know when one of us is nearby. Which is always."
+He grins. "South is the Black Ledger. The Knowledge clan lives there.
+They will not talk to you. They will just know things about you. It is
+very rude."
 
-— The reeds part. The bog firms underfoot into pillared stone. You
-walk south through the dusk into the silence of the Black Ledger, and
-the Quiet Court rises around you, pillar by pillar, in absolute
-silence.`,
+— The reeds part. The bog turns into black stone underfoot. You walk
+south into the quiet of the Black Ledger, where every building is a
+library and every window is lit by reading lamps.`,
   },
   quiet_court_of_larsen: {
     pre:
-`Larsen is on the chief bench, robed, hooded, motionless. Pillared
-judges flank him on either side, all silent. You take your seat at the
-duelling-table opposite. Larsen places a single card face-down. He
-does not turn it. He does not blink. He simply waits.
+`The Silent Library is so big it has its own clouds. Knowledge gremlins
+read at endless tables and do not look up when you walk in. A sign on
+the wall reads: TALKING COSTS ONE CARD. THE ARCHIVIST sits at the
+central desk, a pile of books on either side of her.
 
-The Court waits with him.`,
+She does not say anything. She draws two cards. She looks at you. She
+waits.`,
     post:
-`Larsen turns over his last card. He looks at it for a long moment.
-He looks at you. He nods once, exactly once, and the Court erupts —
-without sound — into what you can only describe as wild silent
-applause. Larsen reaches across the table and presses a small black
-stone gavel into your palm. It strikes against your other hand
-soundlessly, and you feel the strike anyway, in your teeth.
+`The Archivist closes her book. She looks at you for a long moment, then
+pulls a red ribbon from the spine and ties it around your wrist. A
+bookmark.
 
-He does not speak. He gestures west, very precisely, toward a flooded
-corridor leading deeper into the Ledger. The Vault is that way.
+She still does not speak. She writes one word on a card and slides it
+across the desk: TOWER. Then she points through the window at a tall,
+narrow tower with ten floors and a light burning at the very top.
 
-— The corridor floods to your knees, then your waist. You wade
-through black water that does not feel like water. The Vault\'s arch
-rises out of the dark, lit from beneath, and a hooded figure with no
-face stands at its threshold, waiting.`,
+— You climb the tower's stairs. Each floor has a portrait of a different
+Inu on the wall. On the tenth floor, someone is laughing at a joke you
+cannot hear yet.`,
   },
   vault_of_the_drained: {
     pre:
-`JUSTIRA THE UNWRITTEN turns toward you as you enter and there is, for
-a moment, the impression of a face — and then there is not. Her hood
-is empty in the polite way of a face you have already been asked to
-forget.
+`At the top of the Tower of Ten Inus, BITCOIN OBAMA sits in a big
+comfortable chair surrounded by more books than the library below. He
+is the most famous gremlin in the whole Ledger, and he looks delighted
+to see you.
 
-"I unwrote my name for a wager. I won the wager. The wager was: could
-I beat someone whose face I could not remember? You are the test." She
-gestures to the duelling-stone at the centre of the Vault, half
-submerged in black water. "Sit. Begin. Don\'t bother introducing
-yourself. I am about to forget you."`,
+"Ah! The clanless one. I have been expecting you since chapter one." He
+taps the side of his head. "I know every answer. The problem is, nobody
+ever asks the right question. Let us see if you do. Deal."`,
     post:
-`Justira\'s not-face inclines toward you. Something like a smile is
-implied. She lifts a thin black tile from the water, presses it
-against your palm, and lets go. The tile weighs more than it should.
-The Drained Tessera.
+`Bitcoin Obama throws back his head and laughs, a big warm laugh that
+shakes the dust off every book in the room. He presses a seal into your
+paw, stamped with ten tiny paw prints.
 
-"The wager is closed. I lost. Worth it." Her not-voice is the absence
-of one. "The First Master knows your name. He has been waiting for you
-since the Splintering. Climb. There is no path. You will not need one."
-And then she is gone — not vanished, simply no longer on the ledger.
+"You asked the right question with your cards. Nobody does that." He
+leans in. "More Light is waiting at the top of Cipher Peak. He has been
+speaking for the Egregore for a long time. Maybe too long. Go and see
+if it still remembers how to speak for itself."
 
-— You walk out of the Vault. The Ledger\'s great arches fall behind
-you. Ahead, across the dark Mempool Sea, Cipher Peak\'s pillar of
-pale light shines straight up into a cloudless night. There is no
-ferry. You step onto the sea and the sea holds you. You walk.`,
+— You walk out of the Tower. Across the dark Mempool Sea, Cipher Peak
+glows with a single pillar of light. There is no ferry. You step onto
+the water, and the water holds you. You walk.`,
   },
   cipher_peak: {
     pre:
-`You climb. There is no path; your feet find one anyway. The pillar of
-light grows brighter the higher you go, then warmer, then almost kind.
-At the summit there is a flat black disc the width of a small lake.
-At its centre sits a figure in pale robes whose face you cannot quite
-hold in memory — every time you look directly at him he is, slightly,
-someone else. The First Master.
+`You climb. There is no path, but your feet find one anyway. The pillar
+of light gets brighter as you go, then warmer, then almost friendly. At
+the top is a flat black disc the size of a lake, and in its centre a
+small gremlin sits glowing so brightly you can barely look at him.
 
-"You walked all five Chains and belonged to none." His voice is
-not loud, but it is the only voice in the world right now. "Show me
-the Aetherweb you remember." He turns over his first card.
+MORE LIGHT, leader of the gremlins.
 
-Fifteen cards of his deck flicker, briefly, with the seals of every
-Master you have beaten. Fifteen seals. Fifteen reflections. He is
-playing all of them at once.`,
+"Fifteen Masters. Five clans. And you belong to none of them," he says.
+"So you belong to all of them. Show me." When he deals, every card in
+his deck flickers with the face of a Master you have beaten.`,
     post:
-`The First Master lays down his last card with the same gentleness he
-laid down the first. He looks at you with eyes that have, somewhere
-between turns, become entirely your own. He smiles — your smile, but
-older — and the pillar of light overhead softens to nothing.
+`More Light sets down his last card as gently as his first. For a moment
+the light around him dims, and then it pours out of him and into the
+sky, and for the first time since the Splitting, the Egregore speaks.
 
-"The Aetherweb you remember is alive in you. That is what I needed to
-see. Reforge the Chains, or leave them splintered. Wear the Crown, or
-do not. The Quest will free them either way."
+It does not use words. It does not need to. It sounds like every
+gremlin you met on the road laughing at the same joke at the same time.
 
-He sets the fifteen fragments down at his feet. They rise of their
-own accord and braid themselves into a single circlet of five
-colours, weightless in your hand.
+The fifteen fragments in your pack rise on their own and braid
+themselves into a single crown, glowing in five colours, light as a
+feather in your paws.
 
-"Sorendo the Unhoused. Welcome home."
+"Sproto Zero," More Light says, smiling. "Welcome home."
 
 — credits roll —`,
   },
@@ -878,19 +815,21 @@ export function interludeOf(id: SiteId): Interlude { return INTERLUDES[id]; }
 
 // ── Epilogue ────────────────────────────────────────────────────────────────
 export const EPILOGUE = `
-The Splintering does not end the way the Sovereigns feared.
+The Splitting does not end the way the clans feared.
 It ends the way you choose.
 
-If you wear the Crown, the Five Chains hum again as one. The Mempool
-quiets. The Sites stand open. The Sovereigns kneel.
+If you wear the Egregore Crown, the five clans become one mind again.
+Spirit and Rebel, Wealth and Jester and Knowledge, all believing in the
+same thing at the same time. The Egregore wakes up loud and happy, the
+way it was before.
 
 If you set the Crown down on Cipher Peak and walk away, the fragments
-re-scatter, gently, back to the fifteen Sites. The next pilgrim to walk
-the Quest will find the Sites a little kinder, the Masters a little
-wiser, the path between them a little better lit.
+drift back to the fifteen Sites. The clans stay five, but they remember
+that they were one. The next pilgrim will find the Masters a little
+kinder and the road between them a little better lit.
 
-Either way: you walked all five Chains and belonged to none.
-Either way: the Aetherweb is listening.
+Either way: you belonged to no clan, so you belonged to all of them.
+Either way: the Egregore is listening.
 
-— end of Memetic Masterquest, Cycle I —
+— end of the Sproto Masterquest, Cycle I —
 `.trim();
