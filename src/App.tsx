@@ -6514,125 +6514,46 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
   }
 
   const youAt = seat.seat;
-  const p0 = players[0]?.name;
-  const p1 = players[1]?.name;
   const opponentJoined = isFull;
 
-  // Both seats filled: the EGREGORE "MATCH LOADING" screen plays for the
-  // MATCH_LOADING_MS interstitial, then the board mounts (branch above).
-  if (opponentJoined) {
-    const oppName = players[youAt === 0 ? 1 : 0]?.name ?? 'Opponent';
-    return (
-      <>
-        <MatchLoadingScreen
-          me={{ name: myName, avatar: avatars[myName] ?? null }}
-          opp={{ name: oppName, avatar: avatars[oppName] ?? null }}
-          onLeave={() => { setLeaveErr(''); setConfirmLeave(true); }}
-        />
-        {renderLeaveDialog(false)}
-      </>
-    );
-  }
-
+  // One screen for both phases, on the EGREGORE "MATCH LOADING" art:
+  //   • waiting — you on the left, an open seat on the right, a looping
+  //     progress shimmer, and the invite strip under the art;
+  //   • loading — both seats filled; the bar fills over MATCH_LOADING_MS and
+  //     then the board mounts (branch above).
+  const oppName = opponentJoined ? (players[youAt === 0 ? 1 : 0]?.name ?? 'Opponent') : null;
   return (
-    <div style={{ position: 'fixed', inset: 0, height: '100dvh', overflow: mobile ? 'auto' : 'hidden',
-      color: HUB.text, fontFamily: HUB_SANS, display: 'flex', flexDirection: 'column' }}>
-      <style>{`
-        @keyframes ml-spin { to { transform: rotate(360deg); } }
-        @keyframes ml-spin-rev { to { transform: rotate(-360deg); } }
-        @keyframes ml-pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
-        @keyframes ml-dash { to { stroke-dashoffset: -40; } }
-        @keyframes ml-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-        @media (prefers-reduced-motion: reduce) {
-          .ml-anim { animation: none !important; }
-        }
-      `}</style>
-      <MatchChamberBackdrop />
-
-      {/* Top chrome */}
-      <div style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-        padding: mobile ? '12px 14px' : '16px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-          <HubEmblem size={30} />
-          <div style={{ lineHeight: 1 }}>
-            <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 17, letterSpacing: '0.14em', color: HUB.goldHi }}>EGREGORE</div>
-          </div>
-        </div>
-        {!mobile && <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, letterSpacing: '0.32em', fontSize: 13, color: HUB.goldHi, textShadow: `0 0 16px ${HUB.gold}66`,
-          display: 'flex', alignItems: 'center', gap: 12 }}><DiamondOutline size={9} /> MATCH LOBBY <DiamondOutline size={9} /></div>}
-        <button onClick={() => setConfirmLeave(true)} style={{ padding: '9px 16px', minHeight: 44, borderRadius: 9, background: 'transparent', flex: 'none',
-          border: `1px solid ${HUB.gold}`, color: HUB.goldHi, cursor: 'pointer', fontWeight: 800, letterSpacing: '0.06em', fontSize: 12, whiteSpace: 'nowrap' }}>LEAVE MATCH</button>
-      </div>
-
-      {/* Centered panel */}
-      <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, display: 'grid', placeItems: 'center', padding: mobile ? '8px 12px 28px' : '4px 20px 20px' }}>
-        <div style={{ position: 'relative', width: 'min(1140px, 100%)', maxHeight: '100%', overflow: mobile ? 'visible' : 'auto',
-          borderRadius: 16, padding: mobile ? '22px 16px' : '30px 40px 26px',
-          background: 'linear-gradient(180deg, rgba(11,14,28,0.86), rgba(7,9,18,0.9))',
-          border: `1px solid ${HUB.gold}55`, boxShadow: `0 30px 90px rgba(3,4,12,0.7), 0 0 60px rgba(142,77,255,0.18), inset 0 0 0 1px rgba(255,255,255,0.02)`,
-          backdropFilter: 'blur(8px)' }}>
-          {(['tl', 'tr', 'bl', 'br'] as const).map((k) => <ChamberCorner key={k} pos={k} />)}
-
-          <div style={{ textAlign: 'center' }}>
-            <h1 style={{ margin: 0, fontFamily: HUB_SERIF, fontWeight: 700, letterSpacing: '0.04em',
-              fontSize: mobile ? 34 : 'clamp(40px, 5vw, 60px)', lineHeight: 1.02,
-              background: `linear-gradient(180deg, #f7e6b0, ${HUB.gold} 55%, #a67c2e)`, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
-              textShadow: `0 2px 30px ${HUB.gold}33` }}>
-              {opponentJoined ? 'OPPONENT JOINED' : 'MATCH CREATED'}
-            </h1>
-            <div style={{ color: HUB.muted, fontSize: mobile ? 13 : 15, marginTop: 6 }}>
-              {opponentJoined ? 'Entering the arena…' : 'Your arena is ready. Invite an opponent to begin.'}
+    <>
+      <MatchLoadingScreen
+        me={{ name: myName, avatar: avatars[myName] ?? null }}
+        opp={oppName ? { name: oppName, avatar: avatars[oppName] ?? null } : null}
+        onLeave={() => { setLeaveErr(''); setConfirmLeave(true); }}
+        footer={opponentJoined ? null : (
+          <div style={{ width: 'min(1100px, 100%)', display: 'flex', flexDirection: 'column', gap: 10, fontFamily: HUB_SANS, color: HUB.text }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'stretch' }}>
+              <button onClick={copyMatchId} title="Copy match ID" style={{ display: 'inline-flex', alignItems: 'center', gap: 10,
+                padding: '10px 14px', minHeight: 44, borderRadius: 10, background: 'rgba(8,10,22,0.85)', border: `1px solid ${HUB.gold}55`, color: HUB.text, cursor: 'pointer' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', color: HUB.muted }}>MATCH ID</span>
+                <span style={{ fontFamily: F.mono, fontSize: 14, color: HUB.goldHi }}>{seat.matchID.slice(0, 8)}</span>
+                <span style={{ color: copied === 'id' ? HUB.green : HUB.muted, display: 'inline-flex' }}>{copied === 'id' ? <Check size={13} /> : <Copy size={13} />}</span>
+              </button>
+              <input readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} aria-label="Invite link"
+                style={{ flex: '1 1 260px', minWidth: 0, padding: '12px 14px', borderRadius: 10, background: 'rgba(6,8,18,0.85)',
+                  border: `1px solid ${HUB.border}`, color: HUB.cyan, fontFamily: F.mono, fontSize: 12.5, outline: 'none' }} />
+              <button onClick={copyInvite} style={{ ...hubGoldBtn(false), marginTop: 0, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 20px', fontSize: 13 }}>
+                <Copy size={14} /> {copied === 'link' ? 'LINK COPIED' : 'COPY INVITE LINK'}
+              </button>
+              <button onClick={share} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 20px', minHeight: 44, borderRadius: 10,
+                background: `linear-gradient(180deg, ${HUB.purple}, ${HUB.violet})`, color: '#fff', border: `1px solid ${HUB.violet}`, cursor: 'pointer', fontWeight: 800, letterSpacing: '0.04em', fontSize: 13 }}><ArrowUpRight size={14} /> SHARE</button>
             </div>
-
-            {/* Match ID control */}
-            <button onClick={copyMatchId} title="Copy match ID" style={{ marginTop: 14, display: 'inline-flex', alignItems: 'center', gap: 10,
-              padding: '8px 14px', borderRadius: 10, background: 'rgba(8,10,22,0.7)', border: `1px solid ${HUB.gold}44`, color: HUB.text, cursor: 'pointer' }}>
-              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', color: HUB.muted }}>MATCH ID</span>
-              <span style={{ fontFamily: F.mono, fontSize: 14, color: HUB.goldHi }}>{seat.matchID.slice(0, 8)}</span>
-              <span style={{ color: copied === 'id' ? HUB.green : HUB.muted, display: 'inline-flex' }}>{copied === 'id' ? <Check size={13} /> : <Copy size={13} />}</span>
-            </button>
-          </div>
-
-          {/* Arcane waiting portal */}
-          <ArcaneWaiting joined={opponentJoined} entering={entered} />
-
-          {/* Seats */}
-          <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'center', gap: mobile ? 12 : 22,
-            flexDirection: mobile ? 'column' : 'row', marginTop: 20 }}>
-            <SeatCard seat="P0" role="HOST" name={p0} avatar={p0 ? avatars[p0] : undefined} isYou={youAt === 0} joined mobile={mobile} />
-            <div style={{ display: 'grid', placeItems: 'center', flex: 'none' }}>
-              <VsRune mobile={mobile} />
+            <div style={{ textAlign: 'center', color: seatError ? HUB.red : HUB.muted, fontSize: 12.5 }} role={seatError ? 'alert' : undefined}>
+              {seatError || 'Share the invite link — the duel begins automatically when your opponent joins.'}
             </div>
-            <SeatCard seat="P1" role={p1 ? 'CHALLENGER' : 'OPEN'} name={p1} avatar={p1 ? avatars[p1] : undefined} isYou={youAt === 1} joined={!!p1} mobile={mobile} />
           </div>
-
-          {seatError && (
-            <div role="alert" style={{ marginTop: 16, color: HUB.red, fontSize: 13, textAlign: 'center' }}>{seatError}</div>
-          )}
-
-          {/* Invitation */}
-          {!opponentJoined && (
-            <div style={{ marginTop: 22, paddingTop: 18, borderTop: `1px solid ${HUB.border}` }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, fontFamily: HUB_SERIF, fontWeight: 700, letterSpacing: '0.16em', color: HUB.goldHi, fontSize: 14 }}><DiamondOutline size={9} /> INVITE YOUR OPPONENT <DiamondOutline size={9} /></div>
-              <div style={{ textAlign: 'center', color: HUB.muted, fontSize: 12.5, marginTop: 4 }}>Share this private link to fill the open seat.</div>
-              <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap', alignItems: 'stretch' }}>
-                <input readOnly value={inviteUrl} onFocus={(e) => e.currentTarget.select()} aria-label="Invite link"
-                  style={{ flex: '1 1 320px', minWidth: 0, padding: '12px 14px', borderRadius: 10, background: 'rgba(6,8,18,0.8)',
-                    border: `1px solid ${HUB.border}`, color: HUB.cyan, fontFamily: F.mono, fontSize: 12.5, outline: 'none' }} />
-                <button onClick={copyInvite} style={{ ...hubGoldBtn(false), marginTop: 0, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 20px', fontSize: 13 }}>
-                  <Copy size={14} /> {copied === 'link' ? 'LINK COPIED' : 'COPY INVITE LINK'}
-                </button>
-                <button onClick={share} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 20px', borderRadius: 10,
-                  background: `linear-gradient(180deg, ${HUB.purple}, ${HUB.violet})`, color: '#fff', border: `1px solid ${HUB.violet}`, cursor: 'pointer', fontWeight: 800, letterSpacing: '0.04em', fontSize: 13 }}><ArrowUpRight size={14} /> SHARE</button>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: HUB.muted, fontSize: 12, marginTop: 14 }}><DiamondOutline size={8} /> The duel will begin automatically when Player 1 joins.</div>
-            </div>
-          )}
-        </div>
-      </div>
-
+        )}
+      />
       {renderLeaveDialog(false)}
-    </div>
+    </>
   );
 }
 
@@ -6650,11 +6571,17 @@ const MATCH_LOADING_MS = 1700;
  * stays aligned at any size; text sizes use container-query units (cqw).
  * Slot coordinates were measured off the 1778×885 source.
  */
-function MatchLoadingScreen({ me, opp, onLeave }: {
+function MatchLoadingScreen({ me, opp, onLeave, footer }: {
   me: { name: string; avatar: string | null };
-  opp: { name: string; avatar: string | null };
+  /** `null` while the seat is still open (waiting for an opponent). */
+  opp: { name: string; avatar: string | null } | null;
   onLeave: () => void;
+  /** Rendered UNDER the art (the invite strip while waiting). */
+  footer?: React.ReactNode;
 }) {
+  const waiting = opp === null;
+  // Reserve vertical room for the footer so the art still fits on screen.
+  const footerRoom = footer ? 'var(--mls-footer, 150px)' : '0px';
   const ART = '/match-loading.jpg?v=1';
   const W = 1778, H = 885;
   const pct = (px: number, of: number) => `${(px / of) * 100}%`;
@@ -6662,14 +6589,14 @@ function MatchLoadingScreen({ me, opp, onLeave }: {
     position: 'absolute', left: pct(x, W), top: pct(y, H), width: pct(w, W), height: pct(h, H),
   });
 
-  const portrait = (cx: number, who: { name: string; avatar: string | null }, ring: string) => (
+  const portrait = (cx: number, who: { name: string; avatar: string | null } | null, ring: string) => (
     <div style={{ ...box(cx - 64, 470 - 64, 128, 128), borderRadius: '50%', overflow: 'hidden',
       display: 'grid', placeItems: 'center', background: 'radial-gradient(circle at 50% 35%, #161a30, #07080f)',
       boxShadow: `0 0 0 2px ${ring}55` }}>
-      {who.avatar
+      {who?.avatar
         ? <img src={who.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        : <span style={{ fontFamily: HUB_SERIF, fontWeight: 800, fontSize: '3.6cqw', color: ring,
-            textShadow: `0 0 14px ${ring}` }}>{who.name.slice(0, 1).toUpperCase() || '?'}</span>}
+        : <span className={who ? undefined : 'mls-pulse'} style={{ fontFamily: HUB_SERIF, fontWeight: 800, fontSize: '3.6cqw', color: ring,
+            textShadow: `0 0 14px ${ring}` }}>{who ? (who.name.slice(0, 1).toUpperCase() || '?') : '?'}</span>}
     </div>
   );
   const plate = (x: number, y: number, w: number, h: number, text: string, size: string, color: string) => (
@@ -6681,151 +6608,59 @@ function MatchLoadingScreen({ me, opp, onLeave }: {
   );
 
   return (
-    <div role="status" aria-live="polite" aria-label={`Match loading: ${me.name} versus ${opp.name}`}
-      style={{ position: 'fixed', inset: 0, background: '#04050a', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+    <div role="status" aria-live="polite"
+      aria-label={waiting ? `Match created: ${me.name}, waiting for an opponent` : `Match loading: ${me.name} versus ${opp.name}`}
+      style={{ position: 'fixed', inset: 0, background: '#04050a', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', gap: 14, overflow: 'auto', padding: footer ? '12px 14px' : 0 }}>
       <style>{`
         @keyframes mls-fill { from { width: 0%; } to { width: 100%; } }
-        @media (prefers-reduced-motion: reduce) { .mls-fill { animation: none !important; width: 100% !important; } }
+        @keyframes mls-sweep { from { left: -35%; } to { left: 100%; } }
+        @keyframes mls-pulse-k { 0%,100% { opacity: .45; } 50% { opacity: 1; } }
+        .mls-pulse { animation: mls-pulse-k 1.8s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .mls-fill { animation: none !important; width: 100% !important; }
+          .mls-sweep, .mls-pulse { animation: none !important; }
+        }
       `}</style>
       {/* Letterbox: the same art, blurred, so non-2:1 screens are not bare. */}
       <div aria-hidden style={{ position: 'absolute', inset: -40, background: `url(${ART}) center / cover no-repeat`,
         filter: 'blur(28px) brightness(0.45)' }} />
 
-      <div style={{ position: 'relative', width: `min(100vw, calc(100dvh * ${W} / ${H}))`, aspectRatio: `${W} / ${H}`,
-        containerType: 'inline-size' }}>
+      <div style={{ position: 'relative', flex: 'none', aspectRatio: `${W} / ${H}`, containerType: 'inline-size',
+        width: `min(${footer ? 'calc(100vw - 28px)' : '100vw'}, calc((100dvh - ${footerRoom}) * ${W} / ${H}))` }}>
         <img src={ART} alt="" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', userSelect: 'none' }} />
 
         {/* You — the blue (left) seat. Opponent — the red (right) seat. */}
         {portrait(621, me, '#3fa9ff')}
         {portrait(1157, opp, '#ff4a3a')}
         {plate(500, 555, 258, 30, me.name, '1.25cqw', '#e8f3ff')}
-        {plate(1036, 555, 258, 30, opp.name, '1.25cqw', '#ffe9e4')}
+        {plate(1036, 555, 258, 30, opp ? opp.name : 'WAITING…', '1.25cqw', opp ? '#ffe9e4' : '#ff8a7a')}
         {plate(530, 622, 222, 26, 'YOU', '0.85cqw', '#7cc4ff')}
-        {plate(1066, 622, 222, 26, 'OPPONENT', '0.85cqw', '#ff8a7a')}
+        {plate(1066, 622, 222, 26, opp ? 'OPPONENT' : 'OPEN SEAT', '0.85cqw', '#ff8a7a')}
 
-        {/* Progress: cover the art's baked-in fill, then fill over the real wait. */}
+        {/* Progress: cover the art's baked-in fill. Waiting → a looping sweep;
+            loading → a fill timed to the real wait before the board mounts. */}
         <div style={{ ...box(470, 757, 840, 22), borderRadius: 999, background: '#07080d', overflow: 'hidden' }}>
-          <div className="mls-fill" style={{ height: '100%', borderRadius: 999,
-            background: 'linear-gradient(180deg, #ffe08a, #e2a52c 55%, #a8721a)', boxShadow: '0 0 12px rgba(255,190,70,0.6)',
-            animation: `mls-fill ${MATCH_LOADING_MS}ms ease-out forwards` }} />
+          {waiting ? (
+            <div className="mls-sweep" style={{ position: 'absolute', top: 0, bottom: 0, width: '35%', borderRadius: 999,
+              background: 'linear-gradient(90deg, transparent, #e2a52c 40%, #ffe08a 50%, #e2a52c 60%, transparent)',
+              animation: 'mls-sweep 1.8s ease-in-out infinite' }} />
+          ) : (
+            <div className="mls-fill" style={{ height: '100%', borderRadius: 999,
+              background: 'linear-gradient(180deg, #ffe08a, #e2a52c 55%, #a8721a)', boxShadow: '0 0 12px rgba(255,190,70,0.6)',
+              animation: `mls-fill ${MATCH_LOADING_MS}ms ease-out forwards` }} />
+          )}
         </div>
 
         {/* The drawn LEAVE MATCH button, made real. */}
         <button onClick={onLeave} aria-label="Leave match"
           style={{ ...box(1577, 15, 178, 50), background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 10 }} />
       </div>
+      {footer && <div style={{ position: 'relative', zIndex: 1, width: '100%', display: 'flex', justifyContent: 'center' }}>{footer}</div>}
     </div>
   );
 }
 
-function MatchChamberBackdrop() {
-  return (
-    <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', inset: 0, background:
-        `radial-gradient(55% 45% at 50% 30%, rgba(142,77,255,0.16), transparent 70%),
-         radial-gradient(120% 100% at 50% 0%, #10132a 0%, #06060f 60%, #040409 100%)` }} />
-      {[[6, 40], [12, 66], [88, 44], [93, 70], [20, 82], [80, 84]].map(([l, t], i) => (
-        <div key={i} className="ml-anim" style={{ position: 'absolute', left: `${l}%`, top: `${t}%`, width: 3, height: 30,
-          background: 'linear-gradient(180deg, transparent, #b79cff, transparent)', opacity: 0.4, filter: 'blur(1px)',
-          transform: `rotate(${i % 2 ? 16 : -12}deg)`, animation: `ml-pulse ${3 + i}s ease-in-out infinite` }} />
-      ))}
-      <div style={{ position: 'absolute', inset: 0, boxShadow: 'inset 0 0 260px 70px rgba(0,0,0,0.85)' }} />
-    </div>
-  );
-}
-
-function ChamberCorner({ pos }: { pos: 'tl' | 'tr' | 'bl' | 'br' }) {
-  const base: React.CSSProperties = { position: 'absolute', width: 26, height: 26, borderColor: `${HUB.gold}aa`, borderStyle: 'solid', borderWidth: 0 };
-  const map: Record<string, React.CSSProperties> = {
-    tl: { top: 8, left: 8, borderTopWidth: 2, borderLeftWidth: 2, borderTopLeftRadius: 8 },
-    tr: { top: 8, right: 8, borderTopWidth: 2, borderRightWidth: 2, borderTopRightRadius: 8 },
-    bl: { bottom: 8, left: 8, borderBottomWidth: 2, borderLeftWidth: 2, borderBottomLeftRadius: 8 },
-    br: { bottom: 8, right: 8, borderBottomWidth: 2, borderRightWidth: 2, borderBottomRightRadius: 8 },
-  };
-  return <div aria-hidden style={{ ...base, ...map[pos] }} />;
-}
-
-function ArcaneWaiting({ joined, entering }: { joined: boolean; entering: boolean }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 18 }} role="status" aria-live="polite">
-      <div style={{ position: 'relative', width: 'min(300px, 100%)', height: 60, display: 'grid', placeItems: 'center' }}>
-        {/* orbiting rune ring */}
-        <svg viewBox="0 0 300 60" preserveAspectRatio="xMidYMid meet" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} aria-hidden>
-          <ellipse cx="150" cy="30" rx="120" ry="26" fill="none" stroke={`${HUB.violet}66`} strokeWidth="1.5" />
-          <ellipse className="ml-anim" cx="150" cy="30" rx="120" ry="26" fill="none" stroke={joined ? HUB.green : HUB.violet} strokeWidth="2"
-            strokeDasharray="6 12" style={{ animation: 'ml-dash 2.4s linear infinite', filter: `drop-shadow(0 0 6px ${joined ? HUB.green : HUB.violet})` }} />
-        </svg>
-        {/* side runes */}
-        <span className="ml-anim" style={{ position: 'absolute', left: 8, color: HUB.violet, display: 'inline-flex', animation: 'ml-float 3s ease-in-out infinite', filter: `drop-shadow(0 0 8px ${HUB.violet})` }}><Diamond size={16} /></span>
-        <span className="ml-anim" style={{ position: 'absolute', right: 8, color: HUB.gold, display: 'inline-flex', animation: 'ml-float 3.6s ease-in-out infinite', filter: `drop-shadow(0 0 8px ${HUB.gold})` }}><Diamond size={16} /></span>
-        <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: '0.14em', color: HUB.text, textAlign: 'center', padding: '0 40px' }}>
-          {entering ? 'ENTERING THE ARENA…' : joined ? 'OPPONENT JOINED' : 'WAITING FOR AN OPPONENT…'}
-        </span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-        <span className="ml-anim" style={{ width: 8, height: 8, borderRadius: '50%', background: HUB.cyan, boxShadow: `0 0 8px ${HUB.cyan}`, animation: 'ml-pulse 1.4s ease-in-out infinite' }} />
-        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.14em', color: HUB.cyan }}>LIVE</span>
-      </div>
-    </div>
-  );
-}
-
-function VsRune({ mobile }: { mobile: boolean }) {
-  const s = mobile ? 54 : 76;
-  return (
-    <div style={{ width: s, height: s, transform: 'rotate(45deg)', borderRadius: 10, display: 'grid', placeItems: 'center',
-      background: 'linear-gradient(135deg, rgba(20,16,40,0.9), rgba(40,28,80,0.9))', border: `1px solid ${HUB.gold}88`,
-      boxShadow: `0 0 24px ${HUB.violet}55` }}>
-      <span style={{ transform: 'rotate(-45deg)', fontFamily: HUB_SERIF, fontWeight: 800, fontSize: mobile ? 20 : 26, color: HUB.goldHi }}>VS</span>
-    </div>
-  );
-}
-
-function SeatCard({ seat, role, name, avatar, isYou, joined, mobile }: {
-  seat: string; role: string; name?: string; avatar?: string | null; isYou: boolean; joined: boolean; mobile: boolean;
-}) {
-  const active = joined;
-  return (
-    <div style={{ flex: mobile ? '1 1 auto' : '1 1 0', maxWidth: mobile ? '100%' : 360, minWidth: mobile ? 0 : 280,
-      position: 'relative', borderRadius: 14, padding: mobile ? '18px 16px' : '22px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-      background: active ? 'linear-gradient(180deg, rgba(18,15,38,0.9), rgba(10,9,22,0.9))' : 'rgba(10,10,22,0.5)',
-      border: active ? `1px solid ${HUB.gold}88` : `1px dashed ${HUB.violet}88`,
-      boxShadow: active ? `0 0 30px ${HUB.violet}33, inset 0 0 0 1px ${HUB.gold}33` : 'none' }}
-      className={active ? undefined : 'ml-anim'}>
-      {!active && <div aria-hidden className="ml-anim" style={{ position: 'absolute', inset: -1, borderRadius: 14, border: `1px solid ${HUB.violet}`, animation: 'ml-pulse 2s ease-in-out infinite', pointerEvents: 'none' }} />}
-      <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.14em', color: active ? HUB.goldHi : HUB.violet }}>{seat} · {role}</div>
-
-      <div style={{ position: 'relative', width: mobile ? 92 : 108, height: mobile ? 92 : 108, borderRadius: '50%', display: 'grid', placeItems: 'center',
-        background: active ? `conic-gradient(from 0deg, ${HUB.gold}, ${HUB.violet}, ${HUB.gold})` : 'transparent',
-        border: active ? 'none' : `2px dashed ${HUB.violet}88`, padding: active ? 3 : 0 }}>
-        <div style={{ width: '100%', height: '100%', borderRadius: '50%', overflow: 'hidden', display: 'grid', placeItems: 'center',
-          background: 'radial-gradient(circle at 50% 35%, #1a1636, #0a0a16)' }}>
-          {joined && name
-            ? (avatar ? <img src={avatar} alt={`${name} avatar`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              : <span style={{ fontSize: mobile ? 34 : 42, fontWeight: 800, color: HUB.violet, filter: `drop-shadow(0 0 10px ${HUB.violet})` }}>{name.slice(0, 1).toUpperCase()}</span>)
-            : <span className="ml-anim" style={{ fontSize: mobile ? 34 : 42, fontWeight: 800, color: HUB.violet, animation: 'ml-pulse 2s ease-in-out infinite' }}>?</span>}
-        </div>
-      </div>
-
-      {joined && name ? (
-        <>
-          <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: mobile ? 20 : 24, color: HUB.text, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {isYou && <span style={{ padding: '2px 10px', borderRadius: 6, background: `${HUB.violet}22`, border: `1px solid ${HUB.violet}88`, color: HUB.violet, fontSize: 10.5, fontWeight: 800, letterSpacing: '0.08em' }}>YOU</span>}
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: `${HUB.green}18`, border: `1px solid ${HUB.green}66`, color: HUB.green, fontSize: 11, fontWeight: 800 }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: HUB.green, boxShadow: `0 0 6px ${HUB.green}` }} />READY
-            </span>
-          </div>
-        </>
-      ) : (
-        <>
-          <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: mobile ? 20 : 24, color: HUB.muted }}>WAITING…</div>
-          <div style={{ fontSize: 12, color: HUB.muted }}>Opponent seat available</div>
-        </>
-      )}
-    </div>
-  );
-}
 
 // ── Root ────────────────────────────────────────────────────────────────────
 type View = 'landing' | 'profile' | 'rules' | 'lobby' | 'view-profile' | 'ranked' | 'solo' | 'boosters' | 'masterquest' | 'settings';
