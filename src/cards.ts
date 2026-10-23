@@ -99,7 +99,7 @@ const IMAGES: Record<string, string> = {
   sol_popcat:   '/cards/popcat.png?v=1',
   sol_mew:      '/cards/mew.png?v=1',
   sol_bome:     '/cards/bome.png?v=3',
-  sol_wif:      cmc(28752),
+  sol_wif:      '/cards/shadow.jpg?v=1',
   sol_fartcoin: '/cards/fartcoin.png?v=1',
   sol_goat:     cmc(33440),
 
@@ -338,7 +338,7 @@ reg(
   M('sol_popcat',  'sol', 'Riot Drummer',      2, 2, 3, 'Keeps the beat while everything burns.'),
   M('sol_mew',     'sol', 'Graffiti Sproto',   2, 3, 2, 'Tags every wall it can reach, and some it cannot.'),
   M('sol_bome',    'sol', 'Molotov Mixer',     3, 3, 3, 'Required ingredients: one bottle, no plan.'),
-  M('sol_wif',     'sol', 'Barricade Breaker', 3, 4, 2, 'The wall was only ever a suggestion.'),
+  M('sol_wif',     'sol', 'Shadow',            3, 4, 2, 'The ultimate lifeform. Never asked to be a hero.'),
   M('sol_fartcoin','sol', 'Firestarter Sproto',4, 5, 4, 'Did not start the fire. Is the fire.'),
   M('sol_goat',    'sol', 'Rebel Warlord',     5, 6, 5, 'Overthrew the last warlord. Kept the hat.'),
   // Machines
@@ -351,7 +351,7 @@ reg(
   X('sol_bounce',  'sol', 'Scatter',           2, 'bounceMeme',            'Everybody run. Return target Meme to its owner\'s hand.'),
   X('sol_tgpump',  'sol', 'Cheap Shot',        1, 'damage2',               'Nobody said fair. Deal 2 damage to any target.'),
   // Aura
-  U('sol_validator','sol', 'Adrenaline',       2, 'aura_haste',            'Enchant Meme. Attached Meme has no summoning sickness.'),
+  U('sol_validator','sol', 'Shadow Mode',      2, 'aura_haste',            'Chaos Control. Enchant Meme. Attached Meme has no summoning sickness.'),
 );
 
 // Wealth Sprotos (green) — lifegain midrange, sturdy bodies, compounding.
