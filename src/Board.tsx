@@ -1661,7 +1661,7 @@ function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: str
   if (gameover.winner !== myId) return null;
   if (dismissed) return null;
 
-  const siteUrl = (typeof window !== 'undefined' ? window.location.origin : 'https://chains-tcg.vercel.app');
+  const siteUrl = (typeof window !== 'undefined' ? window.location.origin : 'https://egregoretcg.xyz');
   const imgUrl = `${siteUrl}/share-win.jpg?v=2`;
   // Plain text only — the tweet body is a string, so no emoji/pictographs here.
   const tweetText = `I just won in EGREGORE!\n\nPlay the Sproto Gremlin card game at ${siteUrl}`;

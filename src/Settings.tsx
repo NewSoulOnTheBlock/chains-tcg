@@ -111,7 +111,7 @@ applyReducedMotion();
 // Mirrors package.json "version". Kept as a literal because the dev server is
 // long-running and changing vite.config.ts (define:) would force a restart.
 const APP_VERSION = '0.1.0';
-const APP_DOMAIN = 'chains-tcg.vercel.app';
+const APP_DOMAIN = 'egregoretcg.xyz';
 
 const S = {
   bg: '#07060f',
