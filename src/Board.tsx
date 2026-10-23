@@ -1662,22 +1662,22 @@ function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: str
   if (dismissed) return null;
 
   const siteUrl = (typeof window !== 'undefined' ? window.location.origin : 'https://chains-tcg.vercel.app');
-  const imgUrl = `${siteUrl}/share-win.jpg`;
+  const imgUrl = `${siteUrl}/share-win.jpg?v=2`;
   // Plain text only — the tweet body is a string, so no emoji/pictographs here.
   const tweetText = `I just won in EGREGORE!\n\nPlay the Sproto Gremlin card game at ${siteUrl}`;
   const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
 
   async function downloadImage() {
     try {
-      const r = await fetch('/share-win.jpg');
+      const r = await fetch('/share-win.jpg?v=2');
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = 'memetic-masters-win.jpg';
+      a.href = url; a.download = 'i-just-won-egregore.jpg';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch {
-      window.open('/share-win.jpg', '_blank');
+      window.open('/share-win.jpg?v=2', '_blank');
     }
   }
 
