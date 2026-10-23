@@ -119,7 +119,7 @@ const IMAGES: Record<string, string> = {
   eth_wojak:    '/cards/wojak.png?v=2',
   eth_turbo:    '/cards/turbo.png?v=1',
   eth_mog:      '/cards/mog.png?v=2',
-  eth_shib:     '/cards/shib.png?v=1',
+  eth_shib:     '/cards/carbonara.jpg?v=1',
   eth_pepe:     '/cards/pepe.png?v=1',
 
   // Base memes (BRETT keeps its painted art, rest emoji glyph)
@@ -386,7 +386,7 @@ reg(
   M('eth_wojak',   'eth', 'Weeping Clown',     2, 2, 3, 'Laughs at funerals. Cries at weddings.'),
   M('eth_turbo',   'eth', 'Knife Juggler',     2, 3, 1, 'Drops one every show. On purpose.'),
   M('eth_mog',     'eth', 'Grinning Sproto',   3, 3, 4, 'The smile goes all the way around.'),
-  M('eth_shib',    'eth', 'Court Fool',        3, 4, 3, 'Tells the king the truth. Then poisons him.'),
+  M('eth_shib',    'eth', 'Carbonara Mussolini', 3, 4, 3, '"The Stink Badger Empire is reawakening!"'),
   M('eth_pepe',    'eth', 'The Last Laugh',    5, 5, 6, 'It was always going to be him.'),
   // NFT-linked meme — ETB zaps opp + draws a card (Sproto Gremlin NFT mint)
   ME('eth_sproto_gremlin', 'eth', 'Sproto Gremlin', 2, 2, 2, 'etb_zap_2_and_draw',
