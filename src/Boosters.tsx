@@ -322,8 +322,7 @@ function TopBar({ onBack, connected, onRobinhood, switching, account, copied, on
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
         <Emblem size={30} />
         <div style={{ lineHeight: 1, display: 'flex', flexDirection: 'column' }}>
-          <span style={{ fontFamily: F.display, fontWeight: 700, fontSize: 11, letterSpacing: '0.18em', color: C.textMid }}>ON-CHAIN</span>
-          <span style={{ fontFamily: F.display, fontWeight: 700, fontSize: 13, letterSpacing: '0.12em', color: C.goldHi }}>VIRTUAL ARENA</span>
+          <span style={{ fontFamily: F.display, fontWeight: 700, fontSize: 16, letterSpacing: '0.14em', color: C.goldHi }}>EGREGORE</span>
         </div>
         <button onClick={onBack} style={{
           marginLeft: 10, background: 'none', border: 'none', color: C.textMid, cursor: 'pointer',

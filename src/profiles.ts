@@ -166,15 +166,55 @@ function fromDeck(d: Deck): DeckEntry {
   return { id: d.id, name: d.name, cards: d.cards, isActive: d.isActive };
 }
 
-/** Your decks. The server scopes by token, so there is no name parameter. */
+/**
+ * Starter decks saved before the factions became Sproto Gremlin types were
+ * named after the chains (`${COLOR_META[c].name} Starter` with the old names).
+ * Map them to today's `<Faction> Starter` name.
+ */
+const LEGACY_STARTER_NAMES: Record<string, string> = {
+  'BnB Starter': 'Spirit Starter',
+  'Solana Starter': 'Rebel Starter',
+  'Ethereum Starter': 'Jester Starter',
+  'Robinhood Starter': 'Wealth Starter',
+  'Base Starter': 'Knowledge Starter',
+};
+
+/** Today's name for a deck: legacy chain-named starters get their faction name. */
+export function currentDeckName(name: string): string {
+  return LEGACY_STARTER_NAMES[name] ?? name;
+}
+
+/**
+ * Your decks. The server scopes by token, so there is no name parameter.
+ *
+ * Legacy chain-named starter decks are renamed to their faction name on the
+ * server here, once, best-effort — the next load sees the new name and does
+ * nothing. If the player already has a deck by the new name (names are unique
+ * per player) the old one is shown as "<Faction> Starter (old)" instead, and a
+ * failed rename still DISPLAYS the new name so the UI is consistent either way.
+ */
 export async function listDecksApi(signal?: AbortSignal): Promise<DeckEntry[]> {
-  return (await decksApi.list(signal)).map(fromDeck);
+  const list = (await decksApi.list(signal)).map(fromDeck);
+  const taken = new Set(list.map((d) => d.name));
+  await Promise.all(list.map(async (d) => {
+    const next = currentDeckName(d.name);
+    if (next === d.name) return;
+    if (taken.has(next)) {
+      // Both an old and a new starter exist — keep them distinguishable.
+      d.name = `${next} (old)`;
+      return;
+    }
+    taken.add(next);
+    try { await decksApi.update(d.id, { name: next }, signal); } catch { /* display-only fallback below */ }
+    d.name = next;
+  }));
+  return list;
 }
 
 /** Your ACTIVE deck — the one the game service seats you with — or `null`. */
 export async function getActiveDeckApi(signal?: AbortSignal): Promise<DeckEntry | null> {
   const d = await decksApi.getActive(signal);
-  return d ? fromDeck(d) : null;
+  return d ? { ...fromDeck(d), name: currentDeckName(d.name) } : null;
 }
 
 /**

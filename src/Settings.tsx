@@ -111,7 +111,7 @@ applyReducedMotion();
 // Mirrors package.json "version". Kept as a literal because the dev server is
 // long-running and changing vite.config.ts (define:) would force a restart.
 const APP_VERSION = '0.1.0';
-const APP_DOMAIN = 'ocva.online';
+const APP_DOMAIN = 'chains-tcg.vercel.app';
 
 const S = {
   bg: '#07060f',
@@ -930,7 +930,7 @@ export function SettingsPage({
         <SectionHead icon={<Globe size={15} />} label="About" />
         <Section>
           <Row
-            title="On-Chain Virtual Arena"
+            title="EGREGORE"
             hint={<a
               href={`https://${APP_DOMAIN}`} target="_blank" rel="noreferrer"
               style={{

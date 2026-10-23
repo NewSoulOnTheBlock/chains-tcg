@@ -96,7 +96,7 @@ const PRIVY_CONFIG: PrivyClientConfig = {
   appearance: {
     theme: 'dark',
     accentColor: '#d9b45a',
-    landingHeader: 'Sign in to Chains TCG',
+    landingHeader: 'Sign in to EGREGORE',
   },
   embeddedWallets: {
     ethereum: { createOnLogin: 'users-without-wallets' },

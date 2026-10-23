@@ -334,22 +334,32 @@ function Login({ onSignedIn }: {
     if (!a) return;
     a.volume = 0.35;
     a.muted = muted;
-    const tryPlay = () => {
-      const p = a.play();
-      if (p && typeof p.then === 'function') {
-        p.then(() => setPlaying(true)).catch(() => {
-          const unlock = () => {
-            a.play().then(() => setPlaying(true)).catch(() => {});
-            window.removeEventListener('pointerdown', unlock);
-            window.removeEventListener('keydown', unlock);
-          };
-          window.addEventListener('pointerdown', unlock, { once: true });
-          window.addEventListener('keydown', unlock, { once: true });
-        });
-      }
+    // `alive` + removing `unlock` on unmount matter: a detached <audio> still
+    // plays. Without them, a player whose autoplay was blocked and who then
+    // signed in without a click (silent Privy resume) had the login theme start
+    // on their FIRST click in the hub — on top of the menu music.
+    let alive = true;
+    const unlock = () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+      if (!alive) return;
+      a.play().then(() => { if (alive) setPlaying(true); }).catch(() => {});
     };
-    tryPlay();
-    return () => { a.pause(); setPlaying(false); };
+    const p = a.play();
+    if (p && typeof p.then === 'function') {
+      p.then(() => { if (alive) setPlaying(true); }).catch(() => {
+        if (!alive) return;
+        window.addEventListener('pointerdown', unlock, { once: true });
+        window.addEventListener('keydown', unlock, { once: true });
+      });
+    }
+    return () => {
+      alive = false;
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+      a.pause();
+      setPlaying(false);
+    };
   }, []);
 
   useEffect(() => {
@@ -862,7 +872,7 @@ function RulesPage({ onBack }: { onBack: () => void }) {
           background: 'linear-gradient(180deg, #ffe28a 0%, #d4af37 55%, #8a6a16 100%)',
           WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
           filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.6))',
-        }}>ON-CHAIN VIRTUAL ARENA</div>
+        }}>EGREGORE</div>
         <div style={{
           fontFamily: RULES_HEAD, fontWeight: 600, fontSize: 20,
           letterSpacing: 12, color: RULES_TOKENS.purple, marginTop: 4,
@@ -1602,7 +1612,7 @@ function RulebookPage({ onBack }: { onBack: () => void }) {
         {/* Hero */}
         <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : '1.15fr 0.85fr', gap: 22, alignItems: 'center' }}>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.22em', color: RB.gold }}>ON-CHAIN VIRTUAL ARENA</div>
+            <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.22em', color: RB.gold }}>EGREGORE</div>
             <h1 style={{ fontFamily: RULES_HEAD, fontWeight: 800, fontSize: phone ? 40 : 'clamp(44px, 5vw, 68px)', lineHeight: 1.02, margin: '6px 0 10px',
               background: `linear-gradient(180deg, #ffe9a8, ${RB.gold} 55%, #a6802f)`, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>
               Master the Arena
@@ -1701,7 +1711,7 @@ function TutorialPreview({ muted }: { muted: boolean }) {
     <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', borderRadius: 14, overflow: 'hidden',
       border: `1px solid ${RB.border}`, boxShadow: '0 14px 40px rgba(0,0,0,0.5), 0 0 30px rgba(139,92,246,0.12)', background: '#000' }}>
       <video ref={vidRef} src="/rules-intro.mp4" poster="/intro.png" preload="metadata" playsInline controls={playing} muted={muted}
-        aria-label="On-Chain Virtual Arena tutorial video" onLoadedMetadata={(e) => setDuration(fmt((e.currentTarget as HTMLVideoElement).duration || 0))}
+        aria-label="EGREGORE tutorial video" onLoadedMetadata={(e) => setDuration(fmt((e.currentTarget as HTMLVideoElement).duration || 0))}
         onPause={() => setPlaying(false)} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
       {!playing && (
         <button onClick={play} aria-label="Play tutorial" className="rb-anim" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center',
@@ -2928,8 +2938,7 @@ function HubTopNav({ tab, setTab, onBack, onEdit, walletAddress, copied, onCopy,
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
       <HubEmblem size={28} />
       <div style={{ lineHeight: 1 }}>
-        <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 10, letterSpacing: '0.2em', color: HUB.muted }}>ON-CHAIN</div>
-        <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 13, letterSpacing: '0.1em', color: HUB.goldHi }}>VIRTUAL ARENA</div>
+        <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 16, letterSpacing: '0.14em', color: HUB.goldHi }}>EGREGORE</div>
       </div>
       <button onClick={onBack} style={{ marginLeft: 8, background: 'none', border: 'none', color: HUB.muted, cursor: 'pointer',
         fontWeight: 700, letterSpacing: '0.08em', fontSize: 12, padding: mobile ? '12px 6px' : 0, minHeight: mobile ? 44 : undefined,
@@ -6438,7 +6447,7 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
   async function copyMatchId() { try { await navigator.clipboard.writeText(seat.matchID); } catch { fallbackCopy(seat.matchID); } flashCopied('id'); }
   async function share() {
     if ((navigator as any).share) {
-      try { await (navigator as any).share({ title: 'On-Chain Virtual Arena', text: 'Join my match on On-Chain Virtual Arena', url: inviteUrl }); return; } catch { /* cancelled -> fall through */ }
+      try { await (navigator as any).share({ title: 'EGREGORE', text: 'Join my match on EGREGORE', url: inviteUrl }); return; } catch { /* cancelled -> fall through */ }
     }
     copyInvite();
   }
@@ -6530,8 +6539,7 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
           <HubEmblem size={30} />
           <div style={{ lineHeight: 1 }}>
-            <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 10, letterSpacing: '0.22em', color: HUB.muted }}>ON-CHAIN</div>
-            <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 14, letterSpacing: '0.1em', color: HUB.goldHi }}>VIRTUAL ARENA</div>
+            <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, fontSize: 17, letterSpacing: '0.14em', color: HUB.goldHi }}>EGREGORE</div>
           </div>
         </div>
         {!mobile && <div style={{ fontFamily: HUB_SERIF, fontWeight: 700, letterSpacing: '0.32em', fontSize: 13, color: HUB.goldHi, textShadow: `0 0 16px ${HUB.gold}66`,
@@ -7041,7 +7049,7 @@ function InstallPrompt() {
     }}>
       <div style={{ display: 'flex', color: '#c8a3ff' }}><Mobile size={22} /></div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, marginBottom: 2 }}>Install On-Chain Virtual Arena</div>
+        <div style={{ fontWeight: 700, marginBottom: 2 }}>Install EGREGORE</div>
         <div style={{ fontSize: 11, opacity: 0.85 }}>
           {showIos
             ? 'Tap the Share icon, then "Add to Home Screen" for fullscreen play.'

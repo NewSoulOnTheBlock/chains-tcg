@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CARDS, COLORS, COLOR_META, STARTER_DECKS, validateDeck } from './cards';
 
-describe('On-Chain Virtual Arena chain registry', () => {
+describe('EGREGORE faction registry', () => {
   it('has exactly the five-chain roster (no avax/xrp leftovers)', () => {
     expect(COLORS).toEqual(['bnb', 'sol', 'eth', 'robinhood', 'base']);
 

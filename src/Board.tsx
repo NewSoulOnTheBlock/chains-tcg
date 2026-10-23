@@ -1661,10 +1661,10 @@ function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: str
   if (gameover.winner !== myId) return null;
   if (dismissed) return null;
 
-  const siteUrl = (typeof window !== 'undefined' ? window.location.origin : 'https://ocva.online');
+  const siteUrl = (typeof window !== 'undefined' ? window.location.origin : 'https://chains-tcg.vercel.app');
   const imgUrl = `${siteUrl}/share-win.jpg`;
   // Plain text only — the tweet body is a string, so no emoji/pictographs here.
-  const tweetText = `I just won in On-Chain Virtual Arena!\n\nPlay the 5-chain onchain card game at ${siteUrl}`;
+  const tweetText = `I just won in EGREGORE!\n\nPlay the Sproto Gremlin card game at ${siteUrl}`;
   const intentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
 
   async function downloadImage() {
@@ -1708,7 +1708,7 @@ function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: str
           fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 14,
         }}>Share your win</div>
 
-        <img src={imgUrl} alt="I just won in On-Chain Virtual Arena"
+        <img src={imgUrl} alt="I just won in EGREGORE"
           style={{
             display: 'block', width: '100%', height: 'auto',
             borderRadius: 6, border: '1px solid rgba(240,179,42,0.4)',
