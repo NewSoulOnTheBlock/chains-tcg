@@ -1,7 +1,7 @@
 {
   "name": "EGREGORE",
   "short_name": "EGREGORE",
-  "description": "A Robinhood app — the 5-chain onchain card arena on Robinhood Chain.",
+  "description": "EGREGORE — an MTG-style card game of five Sproto Gremlin factions.",
   "start_url": "/",
   "scope": "/",
   "display": "browser",
