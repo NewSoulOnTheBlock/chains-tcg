@@ -89,7 +89,7 @@ const IMAGES: Record<string, string> = {
   bnb_tut:      cmc(33687),
   bnb_tst:      '/cards/tst.png?v=1',
   bnb_banana:   '/cards/banana.jpg?v=1',
-  bnb_mubarak:  '/cards/mubarak.png?v=1',
+  bnb_mubarak:  '/cards/bocca.jpg?v=1',
   bnb_cheems:   '/cards/cheems.png?v=1',
   bnb_floki:    cmc(10804),
 
@@ -314,7 +314,7 @@ reg(
   M('bnb_tut',     'bnb', 'Choir Sproto',     2, 2, 2, 'Sings off-key, but always in unison.'),
   M('bnb_tst',     'bnb', 'Pilgrim Sproto',   2, 3, 2, 'Walked here from the genesis block. Barefoot.'),
   M('bnb_banana',  'bnb', 'Lantern Warden',   3, 3, 3, 'Keeps the shrine lit through the longest night.'),
-  M('bnb_mubarak', 'bnb', 'Radiant Zealot',   3, 4, 3, 'Believes louder than you doubt.'),
+  M('bnb_mubarak', 'bnb', 'Bocca De Verita',  3, 4, 3, 'Put your hand in. Tell the truth.'),
   M('bnb_cheems',  'bnb', 'Seraph Sproto',    4, 4, 4, 'Six wings. Zero sell orders.'),
   M('bnb_floki',   'bnb', 'More Light',       5, 6, 5, 'Leader of the gremlins. Asks only for more.'),
   // Machines
