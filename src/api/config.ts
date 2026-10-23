@@ -80,10 +80,19 @@ export const API_BASE: string = normaliseBase(readEnv('VITE_API_BASE') ?? defaul
 export const RPC_URL: string = `${API_BASE}/rpc/evm`;
 
 /**
- * boardgame.io socket.io transport lives on the same gateway origin.
- * Pass this as the `server` option to the boardgame.io SocketIO transport.
+ * boardgame.io socket.io transport. Pass this as the `server` option to the
+ * SocketIO transport.
+ *
+ * It must be an ABSOLUTE gateway URL even when `API_BASE` is a same-origin
+ * proxy path (e.g. `/gw` — see vercel.json): Vercel rewrites do not carry
+ * WebSockets, so the socket connects to the gateway directly. That is safe on
+ * any origin because the client is forced onto the websocket transport (see
+ * MatchSeat in App.tsx), and browsers apply no CORS allow-list to WebSockets.
+ * `VITE_SOCKET_URL` overrides; otherwise an absolute `API_BASE` is reused.
  */
-export const SOCKET_URL: string = API_BASE;
+export const SOCKET_URL: string = normaliseBase(
+  readEnv('VITE_SOCKET_URL') ?? (/^https?:\/\//.test(API_BASE) ? API_BASE : 'https://api.ocva.online'),
+);
 
 /** Build an absolute API URL from a leading-slash path. */
 export function apiUrl(path: string): string {

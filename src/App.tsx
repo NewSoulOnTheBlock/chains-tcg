@@ -6328,7 +6328,10 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
     game: ChainsTCG,
     board: ChainsBoard,
     numPlayers: 2,
-    multiplayer: SocketIO({ server: SOCKET_URL }),
+    // Websocket only: the HTTP long-polling transport is a cross-origin fetch
+    // and fails the gateway's CORS allow-list on any domain not listed there
+    // (e.g. egregoretcg.xyz); a WebSocket is not subject to that check.
+    multiplayer: SocketIO({ server: SOCKET_URL, socketOpts: { transports: ['websocket'] } }),
     debug: false,
   }), []);
 
