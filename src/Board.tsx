@@ -2160,8 +2160,8 @@ function Playmat(props: {
       }}>
         <Diamond size={9} />
       </div>
-      {/* Built on Robinhood watermark — low-contrast, behind all cards/zones. */}
-      <img src="/built-on-robinhood.png?v=2" alt="" aria-hidden style={{
+      {/* Built on Solana watermark — low-contrast, behind all cards/zones. */}
+      <img src="/built-on-solana.svg" alt="" aria-hidden style={{
         position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
         width: 118, opacity: 0.1, zIndex: LAYER.MAT_SCRIM, pointerEvents: 'none',
       }} />

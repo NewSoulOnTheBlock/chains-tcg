@@ -36,7 +36,6 @@ import {
 } from './ranked-client';
 import { connectRobinhoodChain, detectEvmWallet, shortAddr, ROBINHOOD_CHAIN } from './wallet';
 // Blockscout's host, so the token link is never a hardcoded URL.
-import { ROBINHOOD_EXPLORER_URL } from './pack-evm';
 // Card ownership is SERVER state now (`src/api/collection.ts`). `useCollection`
 // is a subscription to the cached snapshot; `ownershipIssues` mirrors the
 // server's ranked/wager seating check. Ownership is shown in the deck builder,
@@ -81,6 +80,7 @@ const PixelTrail = React.lazy(() => import('./PixelTrail'));
 // `import()` in `logout()`). `./privy/env` is the eager, SDK-free half — the
 // app id check and the "signed in with Privy on this device" marker.
 import { PRIVY_ENABLED, getPrivyHint, isPrivyOAuthReturn, setPrivyHint } from './privy/env';
+import { ArtBackdrop, WIZARD_BATTLE_BG, DRAGON_WIZARD_BG } from './WizardBattleBackdrop';
 const PrivyLoginPanel = React.lazy(() =>
   import('./privy/runtime').then((m) => ({ default: m.PrivyLoginPanel })),
 );
@@ -234,6 +234,17 @@ function LoginEmblem({ size = 92 }: { size?: number }) {
   );
 }
 
+// Dev-only: `VITE_SKIP_LOGIN=1` in `.env.development.local` skips the login
+// screen and drops you on the hub as a local guest, for editing screens without
+// signing in. `import.meta.env.DEV` keeps it out of production builds entirely.
+// Server calls still run without a session, so anything that needs one
+// (collection, ranked, profile edits) will show its own error state.
+const SKIP_LOGIN: boolean = import.meta.env.DEV && import.meta.env.VITE_SKIP_LOGIN === '1';
+const GUEST_PROFILE: Profile = {
+  name: 'Guest', wins: 0, losses: 0, draws: 0, createdAt: Date.now(),
+  avatarUrl: null, bio: null, level: 1, walletAddress: null, walletChain: null,
+};
+
 function Login({ onSignedIn }: {
   /**
    * `suggestWalletLink` is set after a Privy sign-in that CREATED the account:
@@ -353,7 +364,7 @@ function Login({ onSignedIn }: {
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'auto', background: '#07060f', fontFamily: F.body, color: '#F8F8F8' }}>
       <audio ref={audioRef} src="/login-theme.mp3" loop preload="auto" style={{ display: 'none' }} />
-      <img src="/login-splash.png?v=2" alt="" draggable={false}
+      <img src="/egregore-bg.png?v=2" alt="" draggable={false}
         style={{ position: 'fixed', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', userSelect: 'none', zIndex: 0 }} />
       <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 1, background: mobile
         ? 'linear-gradient(180deg, rgba(7,6,15,0.10) 0%, rgba(7,6,15,0.55) 55%, rgba(7,6,15,0.96) 100%)'
@@ -368,75 +379,36 @@ function Login({ onSignedIn }: {
       }}>{muted ? <SoundOff size={18} /> : (playing ? <SoundOn size={18} /> : <Music size={18} />)}</button>
 
       <div style={mobile ? {
-        position: 'relative', zIndex: 2, marginTop: '42vh',
+        position: 'relative', zIndex: 2, marginTop: 'calc(42vh + 96px)',
         padding: '18px 16px calc(20px + env(safe-area-inset-bottom))',
         display: 'flex', flexDirection: 'column', gap: 10,
       } : {
-        position: 'absolute', zIndex: 2, left: '50%', top: '64%', transform: 'translate(-50%,-50%)',
+        position: 'absolute', zIndex: 2, left: '50%', top: 'calc(64% + 96px)', transform: 'translate(-50%,-50%)',
         width: 'min(460px, calc(100vw - 40px))', display: 'flex', flexDirection: 'column', gap: 12,
         background: 'rgba(12,10,26,0.72)', border: '1px solid rgba(150,120,255,0.22)', borderRadius: 18,
         padding: 26, backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', boxShadow: '0 24px 70px rgba(0,0,0,0.55)',
       }}>
         <div style={{ textAlign: 'center', marginBottom: 2 }}>
-          <div style={{ color: '#b794f6', letterSpacing: 3, fontWeight: 800, fontSize: 14 }}>‹ SIGN IN WITH YOUR WALLET ›</div>
+          <div style={{ color: '#b794f6', letterSpacing: 3, fontWeight: 800, fontSize: 14 }}>‹ SIGN IN ›</div>
           <div style={{ color: '#9a94ad', fontSize: 12, marginTop: 4 }}>
-            You will be asked to sign a short message. It is free and moves no funds.
+            Email, Google or X. A wallet is created for you behind the scenes.
           </div>
         </div>
 
-        <button className="ocva-btn" disabled={busy || privyBusy}
-          onClick={() => evm.installed ? signIn() : window.open('https://metamask.io/download/', '_blank', 'noopener')}
-          style={{ width: '100%', padding: '15px', fontSize: 15, background: 'linear-gradient(135deg,#F6851B,#E2761B)', color: '#1a1408' }}>
-          <Fox size={18} /> {busy ? label : (evm.installed ? `Sign in with ${evm.label}` : 'Install MetaMask')}
-        </button>
-
-        <div style={{ fontSize: 11, color: '#8f89a3', textAlign: 'center', lineHeight: 1.55 }}>
-          Your wallet will be switched to <b style={{ color: '#c8c2d8' }}>Robinhood Chain</b> (4663).
-          The game runs on this network only.
-        </div>
-
-        <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12, color: '#9a94ad', cursor: 'pointer', padding: '6px 2px' }}>
-          <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} disabled={!!busy}
-            style={{ width: 16, height: 16, accentColor: '#8A2BE2' }} />
-          Remember me on this device
-        </label>
-        <div style={{ fontSize: 10.5, color: '#6f6a80', marginTop: -6, lineHeight: 1.45 }}>
-          Off by default: your session lives in this tab only and ends when you close it.
-        </div>
-
-        {/* Email / social / passkey — Privy. Hidden entirely (no dead space,
-            no crash) when the build has no `VITE_PRIVY_APP_ID`; wallet sign-in
-            above must work identically either way. The buttons are eager and
-            SDK-free; the SDK chunk is fetched only when one is PRESSED (or a
-            silent resume runs), so a wallet-only player never downloads it. */}
-        {PRIVY_ENABLED && (
+        {/* Privy is the only sign-in path on this screen. The button is eager
+            and SDK-free; the SDK chunk is fetched only when it is PRESSED (or a
+            silent resume / OAuth return runs). Without `VITE_PRIVY_APP_ID` the
+            build has no way in, so say so instead of rendering a dead button. */}
+        {PRIVY_ENABLED ? (
           <>
-            <div aria-hidden style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '2px 0' }}>
-              <span style={{ flex: 1, height: 1, background: 'rgba(212,175,55,0.28)' }} />
-              <span style={{ fontSize: 10.5, letterSpacing: '0.22em', color: '#9a94ad', fontWeight: 800 }}>
-                OR CONTINUE WITH
-              </span>
-              <span style={{ flex: 1, height: 1, background: 'rgba(212,175,55,0.28)' }} />
-            </div>
-            <button
-              type="button" disabled={busy || privyBusy}
+            <button className="ocva-btn"
+              type="button" disabled={privyBusy}
               onClick={() => setPrivyMount((prev) => ({ openLogin: true, n: (prev?.n ?? 0) + 1 }))}
-              style={{
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 9,
-                width: '100%', minHeight: 46, padding: '12px 14px', borderRadius: 10,
-                cursor: (busy || privyBusy) ? 'default' : 'pointer',
-                fontFamily: F.body, fontWeight: 800, fontSize: 13, letterSpacing: '0.08em',
-                background: 'rgba(18,14,34,0.85)', color: '#e8e2f2',
-                border: '1px solid rgba(212,175,55,0.35)',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
-                opacity: (busy || privyBusy) ? 0.55 : 1,
-              }}
-            >
-              <Mail size={15} /> <GoogleG size={15} /> <XBrand size={14} /> SOCIAL LOGINS
+              style={{ width: '100%', padding: '15px', fontSize: 15, background: 'linear-gradient(135deg,#F2D27A,#D4AF37)', color: '#1a1408' }}>
+              <Mail size={16} /> <GoogleG size={16} /> <XBrand size={15} /> {privyBusy ? 'Signing in…' : 'Sign in'}
             </button>
             <div style={{ fontSize: 10.5, color: '#6f6a80', textAlign: 'center', lineHeight: 1.45 }}>
-              Email, Google or X — a wallet is created for you behind the scenes,
-              and it is the same account on every device you sign in on.
+              It is the same account on every device you sign in on.
             </div>
             {privyMount && (
               <React.Suspense fallback={
@@ -457,7 +429,20 @@ function Login({ onSignedIn }: {
               </React.Suspense>
             )}
           </>
+        ) : (
+          <div role="status" style={{ fontSize: 12, color: '#ffb8b8', textAlign: 'center', lineHeight: 1.5 }}>
+            Sign-in is unavailable: this build has no <code>VITE_PRIVY_APP_ID</code>.
+          </div>
         )}
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12, color: '#9a94ad', cursor: 'pointer', padding: '6px 2px' }}>
+          <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} disabled={!!busy}
+            style={{ width: 16, height: 16, accentColor: '#8A2BE2' }} />
+          Remember me on this device
+        </label>
+        <div style={{ fontSize: 10.5, color: '#6f6a80', marginTop: -6, lineHeight: 1.45 }}>
+          Off by default: your session lives in this tab only and ends when you close it.
+        </div>
 
         {err && (
           <div role="alert" style={{ textAlign: 'center', fontSize: 12.5, color: '#ffb8b8', marginTop: 2, lineHeight: 1.5 }}>
@@ -1680,6 +1665,7 @@ function RBParticles() {
     <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', inset: 0, background:
         `radial-gradient(60% 40% at 50% 0%, rgba(139,92,246,0.10), transparent 70%), radial-gradient(120% 90% at 50% 0%, ${RB.bgEl} 0%, ${RB.bg} 60%)` }} />
+      <ArtBackdrop src={WIZARD_BATTLE_BG} />
       {Array.from({ length: 12 }).map((_, i) => (
         <span key={i} className="rb-anim" style={{ position: 'absolute', left: `${(i * 61) % 100}%`, top: `${(i * 37) % 100}%`,
           width: 2 + (i % 3), height: 2 + (i % 3), borderRadius: '50%', background: i % 3 === 0 ? RB.violet : RB.gold, opacity: 0.35,
@@ -2109,7 +2095,7 @@ function Landing({
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: mobile ? 'auto' : 'hidden', background: MENU.bg, fontFamily: F.body, color: MENU.text }}>
       <style>{`@media (prefers-reduced-motion: reduce){ .menu-anim{ transition:none!important; animation:none!important; } }`}</style>
-      <img src="/hub-bg.png?v=2" alt="" draggable={false}
+      <img src="/egregore-bg.png?v=2" alt="" draggable={false}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', userSelect: 'none', zIndex: 0 }} />
       <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: 0, background: 'radial-gradient(120% 80% at 50% 100%, rgba(8,8,23,0.6), transparent 60%)' }} />
       <div aria-live="polite" ref={liveRef} style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }} />
@@ -2152,7 +2138,7 @@ function Landing({
 
       <NavDock onCollection={goCollection} onBoosters={onBoosters} onLadder={onLadder} onMasters={onMasterquest} onProfile={onProfile} onRules={onRules} onSettings={onSettings} mobile={mobile} />
 
-      <img src="/built-on-robinhood.png?v=2" alt="Built on Robinhood" draggable={false}
+      <img src="/built-on-solana.svg" alt="Built on Solana" draggable={false}
         style={{ position: mobile ? 'static' : 'absolute', zIndex: 2, left: '50%', bottom: mobile ? undefined : 70,
           transform: mobile ? 'none' : 'translateX(-50%)', margin: mobile ? '10px auto 0' : undefined, display: 'block',
           width: mobile ? 120 : 150, height: 'auto', pointerEvents: 'none', userSelect: 'none', opacity: 0.9,
@@ -2541,37 +2527,21 @@ function NavDock({ onCollection, onBoosters, onLadder, onMasters, onProfile, onR
 // to view 'settings', which carries those three actions plus the rest.
 
 /**
- * The $MASTER token address, kept only as a display string for the landing
- * footer. Nothing in the client transacts in it any more: the wager service is
- * EVM-only (its stake token is an ERC-20 read from `wager.getStakes()`), and
- * there is no Solana money path in this backend at all.
- */
-/**
- * ── OCVA, the game's token, on Robinhood Chain ──────────────────────────────
+ * ── $GORE (Egregore), the live token, on Solana ─────────────────────────────
  *
- * Verified on chain (EIP-155 4663): `name()` is "On Chain Virtual Arena",
- * `symbol()` is OCVA, `decimals()` is 18. It does NOT exist on Sepolia, which
- * is why the strip names the network — pasting this into a wallet pointed at
- * the wrong chain finds nothing.
+ * Verified on chain (Solana mainnet): an SPL Token mint, 6 decimals, 1B supply.
+ * Display only — nothing in the client transacts in it. The strip names the
+ * network because pasting this into a wallet on the wrong chain finds nothing.
  *
- * This replaces `ContractAddressFooter` and its `MASTER_TOKEN_ADDRESS`
- * constant, which was a SOLANA address left over from before the project moved
- * to EVM. That component was rendered nowhere, so it was invisible rather than
- * wrong — but a stale address sitting one JSX line away from being shown is a
- * hazard, not dead code, so it is deleted rather than repurposed.
+ * Dexscreener and Solscan both resolve a Solana MINT address directly, so the
+ * chart and explorer links use the same address that is copied.
  */
-const OCVA_TOKEN_ADDRESS = '0x22f147eEf54Be28B0dc162309e6c202D4240B3F0';
-const OCVA_SYMBOL = 'OCVA';
-const OCVA_CHAIN_NAME = 'Robinhood Chain';
-/**
- * The Dexscreener chart.
- *
- * THE ADDRESS IN THIS URL IS THE LIQUIDITY PAIR, NOT THE TOKEN — its `token1()`
- * is `OCVA_TOKEN_ADDRESS` above. It is a chart link and nothing else; it must
- * never be presented as an address to copy into a wallet.
- */
-const OCVA_CHART_URL = 'https://dexscreener.com/robinhood/0xc4D9B15Cf9FFa807A78545c972d07D925Ad5eEe0';
-
+const TOKEN_ADDRESS = '3X7ee9sJe8af3rYyjCkVgadLV7D4pK1KPZ4EH7dMhpos';
+const TOKEN_SYMBOL = 'GORE';
+const TOKEN_NAME = 'Egregore';
+const TOKEN_CHAIN_NAME = 'Solana';
+const TOKEN_CHART_URL = `https://dexscreener.com/solana/${TOKEN_ADDRESS}`;
+const TOKEN_EXPLORER_URL = `https://solscan.io/token/${TOKEN_ADDRESS}`;
 /** Middle-truncate an address for display. The full value is still copied. */
 function shortenAddress(addr: string, lead = 8, tail = 4): string {
   return addr.length <= lead + tail + 1 ? addr : `${addr.slice(0, lead)}\u2026${addr.slice(-tail)}`;
@@ -2615,10 +2585,9 @@ async function copyToClipboard(text: string): Promise<boolean> {
  */
 function TokenAnnouncement({ mobile }: { mobile: boolean }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const explorerUrl = `${ROBINHOOD_EXPLORER_URL}/token/${OCVA_TOKEN_ADDRESS}`;
 
   async function copy() {
-    const ok = await copyToClipboard(OCVA_TOKEN_ADDRESS);
+    const ok = await copyToClipboard(TOKEN_ADDRESS);
     setCopyState(ok ? 'copied' : 'failed');
     // A failure stays on screen: it comes with the full address to select by
     // hand, and yanking that away after a second would be worse than useless.
@@ -2632,7 +2601,7 @@ function TokenAnnouncement({ mobile }: { mobile: boolean }) {
   };
 
   return (
-    <section aria-label={`${OCVA_SYMBOL} token`} style={{
+    <section aria-label={`${TOKEN_SYMBOL} token`} style={{
       padding: mobile ? 13 : 14, borderRadius: 14,
       background: `linear-gradient(160deg, rgba(230,196,92,0.13), ${MENU.panel} 62%)`,
       border: `1px solid ${MENU.borderStrong}`, backdropFilter: 'blur(10px)',
@@ -2641,22 +2610,22 @@ function TokenAnnouncement({ mobile }: { mobile: boolean }) {
         <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.14em', color: MENU.gold }}>TOKEN LIVE</span>
         <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: MENU.success, boxShadow: `0 0 6px ${MENU.success}` }} />
         <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em', color: MENU.text2 }}>
-          {OCVA_CHAIN_NAME.toUpperCase()}
+          {TOKEN_CHAIN_NAME.toUpperCase()}
         </span>
       </div>
 
       <div style={{ fontFamily: MENU_SERIF, fontWeight: 700, fontSize: 20, color: MENU.text, margin: '5px 0 2px' }}>
-        ${OCVA_SYMBOL}
+        ${TOKEN_SYMBOL} <span style={{ color: MENU.text2, fontWeight: 400 }}>|</span> {TOKEN_NAME}
       </div>
       <div style={{ fontSize: 11.5, color: MENU.text2, lineHeight: 1.5 }}>
-        On Chain Virtual Arena — add it to a wallet on {OCVA_CHAIN_NAME}.
+        {TOKEN_NAME} — add it to a wallet on {TOKEN_CHAIN_NAME}.
       </div>
 
       {/* The visible address is middle-truncated so 42 hex characters cannot
           overflow a phone. The button copies the WHOLE value, and its
           accessible name spells the whole value out. */}
-      <button onClick={() => { void copy(); }} title={OCVA_TOKEN_ADDRESS}
-        aria-label={`Copy the full ${OCVA_SYMBOL} contract address, ${OCVA_TOKEN_ADDRESS}`}
+      <button onClick={() => { void copy(); }} title={TOKEN_ADDRESS}
+        aria-label={`Copy the full ${TOKEN_SYMBOL} contract address, ${TOKEN_ADDRESS}`}
         style={{
           display: 'flex', alignItems: 'center', gap: 8, width: '100%', marginTop: 10,
           padding: '9px 11px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
@@ -2667,7 +2636,7 @@ function TokenAnnouncement({ mobile }: { mobile: boolean }) {
         <span aria-hidden style={{
           flex: 1, minWidth: 0, fontFamily: F.mono, fontSize: mobile ? 12 : 12.5,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{shortenAddress(OCVA_TOKEN_ADDRESS)}</span>
+        }}>{shortenAddress(TOKEN_ADDRESS)}</span>
         <span aria-hidden style={{
           flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 5,
           fontSize: 10.5, fontWeight: 800, letterSpacing: '0.06em',
@@ -2690,15 +2659,15 @@ function TokenAnnouncement({ mobile }: { mobile: boolean }) {
             marginTop: 5, padding: '7px 9px', borderRadius: 8, userSelect: 'all',
             fontFamily: F.mono, fontSize: 11, wordBreak: 'break-all', lineHeight: 1.5,
             background: 'rgba(8,8,22,0.7)', border: `1px solid ${MENU.border}`, color: MENU.text,
-          }}>{OCVA_TOKEN_ADDRESS}</div>
+          }}>{TOKEN_ADDRESS}</div>
         </div>
       )}
 
       <div style={{ display: 'flex', gap: 16, marginTop: 10, flexWrap: 'wrap' }}>
-        <a href={OCVA_CHART_URL} target="_blank" rel="noopener noreferrer" style={linkStyle}>
+        <a href={TOKEN_CHART_URL} target="_blank" rel="noopener noreferrer" style={linkStyle}>
           <Chart size={13} /> CHART <External size={11} />
         </a>
-        <a href={explorerUrl} target="_blank" rel="noopener noreferrer" style={linkStyle}>
+        <a href={TOKEN_EXPLORER_URL} target="_blank" rel="noopener noreferrer" style={linkStyle}>
           <LinkIcon size={13} /> EXPLORER <External size={11} />
         </a>
       </div>
@@ -2919,6 +2888,7 @@ function HubBackdrop() {
       <div style={{ position: 'absolute', inset: 0, background:
         `radial-gradient(60% 45% at 50% 0%, rgba(142,77,255,0.10), transparent 70%),
          radial-gradient(120% 90% at 50% 0%, #0a0d1c 0%, ${HUB.bg} 60%)` }} />
+      <ArtBackdrop src={DRAGON_WIZARD_BG} />
       <div style={{ position: 'absolute', inset: 0, opacity: 0.4, background:
         'repeating-linear-gradient(90deg, transparent 0 14%, rgba(229,184,75,0.03) 14% 14.3%, transparent 14.3% 28%)' }} />
       <div style={{ position: 'absolute', inset: 0, boxShadow: 'inset 0 0 200px 40px rgba(0,0,0,0.7)' }} />
@@ -7158,8 +7128,8 @@ export default function App() {
   // not a boolean set once at login: a token can die while the player is deep
   // in a screen, and the app has to land back on the login page rather than
   // render half-broken pages against a dead session.
-  const [signedIn, setSignedIn] = useState<boolean>(() => sessionApi.isSignedIn());
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [signedIn, setSignedIn] = useState<boolean>(() => SKIP_LOGIN || sessionApi.isSignedIn());
+  const [profile, setProfile] = useState<Profile | null>(() => (SKIP_LOGIN ? GUEST_PROFILE : null));
   const [profileError, setProfileError] = useState<string>('');
   /**
    * A Privy sign-in just CREATED this account → the profile is brand new and
@@ -7209,6 +7179,7 @@ export default function App() {
   }, []);
 
   useEffect(() => sessionApi.onSessionChange((s) => {
+    if (SKIP_LOGIN) return;
     setSignedIn(s !== null);
     if (s === null) {
       // Signed out, or the refresh chain failed. Drop every scrap of per-player
@@ -8294,13 +8265,11 @@ function RankedPage({ myName, queue, onBack, onDeckScreen, onBoosters, onViewPro
   return (
     <div style={{
       position: 'relative', minHeight: '100vh', color: LOBBY_TOKENS.text, fontFamily: PROFILE_FONT,
-      backgroundImage: 'url(/lobby-bg.png?v=2)', backgroundSize: 'cover',
-      backgroundPosition: 'center', backgroundAttachment: 'fixed',
+      background: '#07090f',
     }}>
-      <div aria-hidden style={{
-        position: 'fixed', inset: 0, zIndex: 0,
-        background: 'linear-gradient(180deg, rgba(7,9,15,0.80) 0%, rgba(7,9,15,0.60) 50%, rgba(7,9,15,0.90) 100%)',
-      }} />
+      <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+        <ArtBackdrop src={DRAGON_WIZARD_BG} />
+      </div>
       <div style={{ position: 'relative', zIndex: 1 }}>
         <header style={{
           display: 'flex', alignItems: 'center', gap: 12, padding: mobile ? '14px 14px' : '18px 22px',

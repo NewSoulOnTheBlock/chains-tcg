@@ -10,6 +10,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { color as C, font as F, radius as R, shadow as SH, surface as SURF, edge as EDGE, depth as DEPTH } from './theme';
 import { CARDS, COLOR_META } from './cards';
 import { ChainLogo } from './chain-logos';
+import { ArtBackdrop, WIZARD_BATTLE_BG } from './WizardBattleBackdrop';
 import {
   mintPack, resumePack, packCostEstimate, getEthBalance,
   getConnectedAccount, getWalletChainId, switchToRobinhood,
@@ -289,6 +290,7 @@ function VaultBackdrop() {
         `radial-gradient(60% 50% at 50% 30%, rgba(124,92,255,0.18), transparent 70%),
          radial-gradient(45% 40% at 50% 100%, rgba(217,180,90,0.10), transparent 70%),
          radial-gradient(120% 100% at 50% 0%, #14122b 0%, #0a0a14 55%, #06060d 100%)` }} />
+      <ArtBackdrop src={WIZARD_BATTLE_BG} />
       {/* faint architectural pillars */}
       <div style={{ position: 'absolute', inset: 0, background:
         'repeating-linear-gradient(90deg, transparent 0 12%, rgba(150,140,190,0.04) 12% 12.4%, transparent 12.4% 24%)', opacity: 0.5 }} />
