@@ -179,7 +179,7 @@ const IMAGES: Record<string, string> = {
   base_airdrop:   '/cards/base_airdrop.png?v=1',
   base_staybased: '/cards/base_staybased.png?v=1',
   // ── Auras (Genesis set) — emoji-art for now ──
-  bnb_liquidity:  '/cards/bnb_liquidity.png?v=1',
+  bnb_liquidity:  '/cards/retain.jpg?v=1',
   sol_validator:  '/cards/sol_validator.png?v=1',
   eth_shield:     '/cards/eth_shield.png?v=1',
   // ── NFT-linked meme art ──
@@ -327,7 +327,7 @@ reg(
   X('bnb_airdrop',  'bnb', 'Revelation',        3, 'drawTwo',               'The light shows two paths. Draw two cards.'),
   X('bnb_honeypot', 'bnb', 'Blinding Dawn',     3, 'damageAll_1',           'Every Meme on the field takes 1 damage.'),
   // Aura
-  U('bnb_liquidity','bnb', 'Blessing',          2, 'aura_+2+2',             'Enchant Meme. Attached Meme gets +2/+2.'),
+  U('bnb_liquidity','bnb', 'Retain',            2, 'aura_+2+2',             'Always retain, brother. Enchant Meme. Attached Meme gets +2/+2.'),
 );
 
 // Rebel Sprotos (red) — burn, snipe, hit first and fast.
