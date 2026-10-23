@@ -234,12 +234,13 @@ function LoginEmblem({ size = 92 }: { size?: number }) {
   );
 }
 
-// Dev-only: `VITE_SKIP_LOGIN=1` in `.env.development.local` skips the login
-// screen and drops you on the hub as a local guest, for editing screens without
-// signing in. `import.meta.env.DEV` keeps it out of production builds entirely.
-// Server calls still run without a session, so anything that needs one
-// (collection, ranked, profile edits) will show its own error state.
-const SKIP_LOGIN: boolean = import.meta.env.DEV && import.meta.env.VITE_SKIP_LOGIN === '1';
+// `VITE_SKIP_LOGIN=1` skips the login screen and drops every visitor on the hub
+// as a local guest. Set in `.env.production` (live site, sign-in switched off)
+// and `.env.development.local` (local editing). Remove it from either file to
+// bring the Privy login back. Server calls still run without a session, so
+// anything that needs one (collection, ranked, packs, profile edits) shows its
+// own error state.
+const SKIP_LOGIN: boolean = import.meta.env.VITE_SKIP_LOGIN === '1';
 const GUEST_PROFILE: Profile = {
   name: 'Guest', wins: 0, losses: 0, draws: 0, createdAt: Date.now(),
   avatarUrl: null, bio: null, level: 1, walletAddress: null, walletChain: null,
