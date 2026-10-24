@@ -49,6 +49,7 @@ import {
 } from './match-mode';
 import { color as C, font as F, surface as SURF, edge as EDGE, depth as DEPTH } from './theme';
 import { Button as UIButton, goldPlate, obsidianPlate, engravedPanel } from './ui';
+import { GlobalChat, AnnouncementToast, useGlobalChat, type GlobalChatState } from './GlobalChat';
 import { SettingsPage, PREFS_EVENT } from './Settings';
 import {
   ArrowRight, ArrowLeft, ArrowUp, ArrowUpRight, ArrowDown, ChevronRight, ChevronDown,
@@ -2018,6 +2019,7 @@ function Landing({
   const [muted, setMuted] = useState<boolean>(() => { try { return localStorage.getItem('ocva.muted') === '1'; } catch { return false; } });
   const [copied, setCopied] = useState(false);
   const liveRef = useRef<HTMLDivElement>(null);
+  const chat = useGlobalChat(prof.name);
 
   useEffect(() => {
     let alive = true;
@@ -2110,14 +2112,21 @@ function Landing({
         xpInto={xpInto} xpRange={xpRange}
         walletAddress={prof.walletAddress} copied={copied} onCopy={copyAddr}
         muted={muted} onToggleMute={() => setMuted((m) => !m)} onSettings={onSettings}
-        loading={loading} mobile={mobile}
+        loading={loading} mobile={mobile} chat={chat}
       />
+      <AnnouncementToast msg={chat.fresh} />
 
       {/* Body panels */}
       <div style={{ position: 'relative', zIndex: 3, height: mobile ? 'auto' : '100%',
         display: mobile ? 'flex' : 'block', flexDirection: 'column', gap: 12,
         padding: mobile ? '76px 12px 90px' : 0 }}>
-        <div style={mobile ? {} : { position: 'absolute', left: tablet ? 20 : 'clamp(24px, 4vw, 64px)', bottom: mobile ? undefined : 108, width: 'min(380px, 42vw)' }}>
+        {/* The left column: global chat takes whatever height is left between
+            the HUD and the matchmaking panel, so it grows with the window
+            instead of covering the art at a fixed size. */}
+        <div style={mobile ? { display: 'contents' } : { position: 'absolute', left: tablet ? 20 : 'clamp(24px, 4vw, 64px)', top: 84, bottom: 108, width: 'min(380px, 42vw)',
+          display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {!mobile && <div style={{ flex: 1, minHeight: 0 }}><GlobalChat chat={chat} myName={prof.name} mobile={false} /></div>}
+          <div style={{ flex: 'none' }}>
           <MatchmakingPanel deckState={deckState} deckName={activeDeck?.name ?? null}
             deckCount={deckCards.length} deckFaction={deckFaction} deckIssue={deckValid?.issues?.[0]?.message ?? null}
             players={players} onPlay={play} onChangeDeck={() => { try { window.location.hash = 'decks'; } catch {} onProfile(); }}
@@ -2126,6 +2135,8 @@ function Landing({
             scanning={scanning || collection.loading} onScanChain={() => { void scanChain(); }}
             onBoosters={onBoosters} onLadder={onLadder}
             onDeckScreen={() => { try { window.location.hash = 'decks'; } catch {} onProfile(); }} />
+          </div>
+          {mobile && <GlobalChat chat={chat} myName={prof.name} mobile />}
         </div>
 
         {/* The right-hand column: the token announcement sits ON TOP of the
@@ -2153,16 +2164,17 @@ function Landing({
   );
 }
 
-function PlayerHUD({ name, avatarUrl, level, xpInto, xpRange, walletAddress, copied, onCopy, muted, onToggleMute, onSettings, loading, mobile }: {
+function PlayerHUD({ name, avatarUrl, level, xpInto, xpRange, walletAddress, copied, onCopy, muted, onToggleMute, onSettings, loading, mobile, chat }: {
   name: string; avatarUrl: string | null; level: number; xpInto: number; xpRange: number;
   walletAddress: string | null; copied: boolean; onCopy: () => void; muted: boolean; onToggleMute: () => void; onSettings: () => void; loading: boolean; mobile: boolean;
+  chat: GlobalChatState;
 }) {
   const [notifOpen, setNotifOpen] = useState(false);
-  // Still empty, but for a different reason than it used to be: the ladder is
-  // back, and there is simply no notification FEED on the backend to read —
-  // no route delivers "you were promoted" or "your placements finished". The
-  // ladder screen and the hub card carry that news instead.
-  const notifs: string[] = [];
+  // The game server still has no notification feed, so the bell reads the
+  // global chat's: announcements, and chat lines that @mention this player.
+  // Opening it marks everything seen.
+  const notifs = chat.notifications.slice(0, 12);
+  const toggleNotifs = () => setNotifOpen((v) => { if (!v) chat.markSeen(); return !v; });
   const xpPct = Math.max(0, Math.min(100, Math.round((xpInto / xpRange) * 100)));
   const connected = !!walletAddress;
   return (
@@ -2192,15 +2204,23 @@ function PlayerHUD({ name, avatarUrl, level, xpInto, xpRange, walletAddress, cop
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{ position: 'relative' }}>
-          <button onClick={() => setNotifOpen((v) => !v)} aria-label="Notifications" aria-expanded={notifOpen} style={hudBtn()}>
+          <button onClick={toggleNotifs} aria-label={chat.unread ? `Notifications, ${chat.unread} unread` : 'Notifications'} aria-expanded={notifOpen} style={hudBtn()}>
             {mIco(<><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></>)}
-            {notifs.length > 0 && <span aria-hidden style={{ position: 'absolute', top: 6, right: 6, width: 8, height: 8, borderRadius: '50%', background: MENU.goldHi, boxShadow: `0 0 6px ${MENU.goldHi}` }} />}
+            {chat.unread > 0 && <span aria-hidden style={{ position: 'absolute', top: 3, right: 3, minWidth: 16, height: 16, padding: '0 4px', borderRadius: 999, display: 'grid', placeItems: 'center',
+              fontSize: 10, fontWeight: 800, color: '#1A1408', background: MENU.goldHi, boxShadow: `0 0 6px ${MENU.goldHi}` }}>{chat.unread > 9 ? '9+' : chat.unread}</span>}
           </button>
           {notifOpen && (
-            <div role="menu" style={{ position: 'absolute', right: 0, top: 44, width: 260, padding: 12, borderRadius: 12, background: MENU.panel, border: `1px solid ${MENU.border}`, backdropFilter: 'blur(10px)', zIndex: 10 }}>
+            <div role="menu" style={{ position: 'absolute', right: 0, top: 44, width: 300, maxHeight: 380, overflowY: 'auto', padding: 12, borderRadius: 12, background: MENU.panel, border: `1px solid ${MENU.border}`, backdropFilter: 'blur(10px)', zIndex: 10 }}>
               <div style={{ fontWeight: 800, fontSize: 12, letterSpacing: '0.1em', color: MENU.text2, marginBottom: 8 }}>NOTIFICATIONS</div>
               {notifs.length === 0 ? <div style={{ fontSize: 13, color: MENU.text2 }}>You're all caught up.</div>
-                : notifs.map((n, i) => <div key={i} style={{ fontSize: 13, padding: '6px 0', borderTop: i ? `1px solid ${MENU.border}` : 'none' }}>{n}</div>)}
+                : notifs.map((n, i) => (
+                  <div key={n.id} style={{ fontSize: 13, padding: '8px 0', borderTop: i ? `1px solid ${MENU.border}` : 'none' }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.12em', color: n.kind === 'announce' ? MENU.gold : MENU.violet }}>
+                      {n.kind === 'announce' ? 'ANNOUNCEMENT' : `${n.author} MENTIONED YOU`}
+                    </div>
+                    <div style={{ marginTop: 2, lineHeight: 1.4, overflowWrap: 'anywhere' }}>{n.body}</div>
+                  </div>
+                ))}
             </div>
           )}
         </div>
