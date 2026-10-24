@@ -2160,11 +2160,18 @@ function Playmat(props: {
       }}>
         <Diamond size={9} />
       </div>
-      {/* Built on Solana watermark — low-contrast, behind all cards/zones. */}
-      <img src="/built-on-solana.svg" alt="" aria-hidden style={{
+      {/* Built on The Hatchery watermark — low-contrast, behind all cards/zones. */}
+      <div aria-hidden style={{
         position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
-        width: 118, opacity: 0.1, zIndex: LAYER.MAT_SCRIM, pointerEvents: 'none',
-      }} />
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+        opacity: 0.16, zIndex: LAYER.MAT_SCRIM, pointerEvents: 'none', userSelect: 'none',
+      }}>
+        <span style={{
+          fontFamily: "Inter, 'Segoe UI', Helvetica, Arial, sans-serif", fontSize: 9,
+          fontWeight: 600, letterSpacing: '0.32em', textTransform: 'uppercase', color: '#fff',
+        }}>Built on the</span>
+        <img src="/hatchery-logo.png" alt="" draggable={false} style={{ width: 140, display: 'block' }} />
+      </div>
       {/* ── Playable content. Sits above every decoration layer. ── */}
       <div style={{ position: 'absolute', inset: 0, zIndex: LAYER.MAT_CONTENT }}>
       {/* ─── OPPONENT SIDE (mirrored layout, upright text) ─── */}
