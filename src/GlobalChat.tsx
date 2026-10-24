@@ -1,7 +1,7 @@
 // The hub's global chat, announcement feed and notification source.
 //
 // ─── WHERE THE DATA COMES FROM ──────────────────────────────────────────────
-// `/api/chat` is a Vercel function on THIS origin (api/chat.ts), not the game
+// `/api/chat` is a Vercel function on THIS origin (api/chat.mts), not the game
 // gateway, so it is called with plain `fetch` rather than `request()` (which
 // prefixes API_BASE). The bearer token is the player's ordinary game session;
 // the function resolves it to a profile itself, so nothing here claims a name.
