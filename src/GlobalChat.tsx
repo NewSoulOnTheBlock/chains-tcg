@@ -17,6 +17,7 @@
 // "what did I miss" dot.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { getAccessToken, refreshSession } from './api';
 import { font as F } from './theme';
 
@@ -190,6 +191,22 @@ export function GlobalChat({ chat, myName, mobile }: { chat: GlobalChatState; my
   const [open, setOpen] = useState(!mobile);
   const listRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  // Phones: an open chat is a full-screen sheet, not a 380px box scrolling
+  // inside the scrolling hub. Its height follows the visual viewport so the
+  // composer stays above the on-screen keyboard.
+  const sheet = mobile && open;
+  const [vvh, setVvh] = useState<number | null>(null);
+  useEffect(() => {
+    if (!sheet) return;
+    const vv = window.visualViewport;
+    const sync = () => setVvh(Math.round(vv ? vv.height : window.innerHeight));
+    sync();
+    vv?.addEventListener('resize', sync);
+    window.addEventListener('resize', sync);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { vv?.removeEventListener('resize', sync); window.removeEventListener('resize', sync); document.body.style.overflow = prev; };
+  }, [sheet]);
 
   const shown = tab === 'all' ? chat.messages : chat.messages.filter((m) => m.kind === 'announce');
   const pinned = useMemo(() => [...chat.messages].reverse().find((m) => m.kind === 'announce') ?? null, [chat.messages]);
@@ -218,19 +235,22 @@ export function GlobalChat({ chat, myName, mobile }: { chat: GlobalChatState; my
         color: tab === id ? M.gold : M.text2, borderBottom: `2px solid ${tab === id ? M.gold : 'transparent'}` }}>{label}</button>
   );
 
-  return (
-    <section aria-label="Global chat" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: mobile ? (open ? 380 : 'auto') : '100%',
-      borderRadius: 16, background: M.panel, border: `1px solid ${M.border}`, backdropFilter: 'blur(12px)', boxShadow: '0 20px 50px rgba(0,0,0,0.5)', overflow: 'hidden' }}>
-      <header style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 14px 8px', borderBottom: `1px solid ${M.border}` }}>
-        <h2 style={{ margin: 0, fontFamily: SERIF, fontSize: 15, fontWeight: 700, color: M.text, letterSpacing: '0.04em', flex: 1 }}>
+  const ui = (
+    <section aria-label="Global chat" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: sheet ? (vvh ?? '100dvh') : mobile ? 'auto' : '100%',
+      borderRadius: sheet ? 0 : 16, background: sheet ? '#0b0a1c' : M.panel, border: sheet ? 'none' : `1px solid ${M.border}`,
+      backdropFilter: 'blur(12px)', boxShadow: '0 20px 50px rgba(0,0,0,0.5)', overflow: 'hidden',
+      ...(sheet ? { position: 'fixed', left: 0, right: 0, top: 0, zIndex: 80, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' } : {}) }}>
+      <header style={{ display: 'flex', alignItems: 'center', gap: mobile ? 10 : 14, padding: '12px 14px 8px', borderBottom: `1px solid ${M.border}` }}>
+        <h2 style={{ margin: 0, fontFamily: SERIF, fontSize: 15, fontWeight: 700, color: M.text, letterSpacing: '0.04em', flex: 1, whiteSpace: 'nowrap' }}>
           Global Chat
           <span title={chat.online ? 'Connected' : 'Reconnecting…'} style={{ display: 'inline-block', marginLeft: 8, width: 7, height: 7, borderRadius: '50%', verticalAlign: 'middle',
             background: chat.online ? M.success : M.danger, boxShadow: `0 0 6px ${chat.online ? M.success : M.danger}` }} />
         </h2>
-        {(!mobile || open) && <>{tabBtn('all', 'ALL')}{tabBtn('news', 'ANNOUNCEMENTS')}</>}
+        {(!mobile || open) && <>{tabBtn('all', 'ALL')}{tabBtn('news', mobile ? 'NEWS' : 'ANNOUNCEMENTS')}</>}
         {mobile && (
           <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
-            style={{ border: 'none', background: 'none', color: M.text2, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>{open ? 'HIDE' : 'SHOW'}</button>
+            style={{ border: open ? `1px solid ${M.border}` : 'none', borderRadius: 8, background: 'none', color: open ? M.text : M.text2, cursor: 'pointer',
+              fontSize: 12, fontWeight: 800, minHeight: 36, padding: '0 10px' }}>{open ? 'CLOSE' : 'OPEN CHAT'}</button>
         )}
       </header>
 
@@ -287,12 +307,12 @@ export function GlobalChat({ chat, myName, mobile }: { chat: GlobalChatState; my
                 {megaphone}
               </button>
             )}
-            <input value={draft} onChange={(e) => { setDraft(e.target.value.slice(0, MAX_LEN)); setError(null); }}
+            <input value={draft} enterKeyHint="send" onChange={(e) => { setDraft(e.target.value.slice(0, MAX_LEN)); setError(null); }}
               placeholder={announce ? 'Announce to every player…' : 'Message the arena…'} aria-label="Chat message" maxLength={MAX_LEN}
-              style={{ flex: 1, minWidth: 0, height: 36, padding: '0 12px', borderRadius: 10, fontFamily: F.body, fontSize: 13, color: M.text, outline: 'none',
+              style={{ flex: 1, minWidth: 0, height: mobile ? 44 : 36, padding: '0 12px', borderRadius: 10, fontFamily: F.body, fontSize: 13, color: M.text, outline: 'none',
                 background: 'rgba(8,8,23,0.7)', border: `1px solid ${announce ? M.gold : M.border}` }} />
             <button type="submit" disabled={!draft.trim() || sending}
-              style={{ flex: 'none', height: 36, padding: '0 14px', borderRadius: 10, border: 'none', cursor: draft.trim() && !sending ? 'pointer' : 'default',
+              style={{ flex: 'none', height: mobile ? 44 : 36, padding: '0 14px', borderRadius: 10, border: 'none', cursor: draft.trim() && !sending ? 'pointer' : 'default',
                 fontWeight: 800, fontSize: 12, letterSpacing: '0.08em', color: '#1A1408', opacity: draft.trim() && !sending ? 1 : 0.5,
                 background: `linear-gradient(180deg, ${M.goldHi}, ${M.gold})` }}>SEND</button>
           </div>
@@ -301,6 +321,9 @@ export function GlobalChat({ chat, myName, mobile }: { chat: GlobalChatState; my
       )}
     </section>
   );
+  // The hub stacks chat inside a layer that sits under its top bar and nav
+  // dock, so the phone sheet is portalled to <body> to really cover the screen.
+  return sheet ? createPortal(ui, document.body) : ui;
 }
 
 /** A transient banner for an announcement that arrives while the player is on the hub. */

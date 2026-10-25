@@ -66,6 +66,9 @@ import {
 import { CardHover, CardPreview } from './CardPreview';
 import { SoloClient } from './SoloClient';
 import { FirstRunTutorial, hasSeenTutorial, markTutorialSeen } from './Tutorial';
+import { usePresenceHeartbeat, useOnlineCount } from './presence';
+import { loadProgress as loadQuestProgress, currentSiteId as questCurrentSiteId } from './masterquest/progress';
+import { SITES as QUEST_SITES, TOTAL_SITES as QUEST_TOTAL } from './masterquest/lore';
 import type { Difficulty } from './bot';
 import type { SoloMode } from './SoloClient';
 import { saveDailyResult, todayKey, todayBest } from './dailyChallenge';
@@ -243,6 +246,19 @@ function LoginEmblem({ size = 92 }: { size?: number }) {
 // anything that needs one (collection, ranked, packs, profile edits) shows its
 // own error state.
 const SKIP_LOGIN: boolean = import.meta.env.VITE_SKIP_LOGIN === '1';
+/**
+ * Real progress toward the next level. The server derives level from wins on
+ * a triangular curve (profile service `levelFromWins`): level L is reached at
+ * L*(L-1)/2 wins, so the next level is exactly L more wins away. This replaced
+ * a made-up "XP" bar computed from games played.
+ */
+function levelProgress(wins: number, level: number): { into: number; range: number; pct: number } {
+  const base = (level * (level - 1)) / 2;
+  const range = Math.max(1, level);
+  const into = Math.max(0, Math.min(range, wins - base));
+  return { into, range, pct: Math.round((into / range) * 100) };
+}
+
 const GUEST_PROFILE: Profile = {
   name: 'Guest', wins: 0, losses: 0, draws: 0, createdAt: Date.now(),
   avatarUrl: null, bio: null, level: 1, walletAddress: null, walletChain: null,
@@ -547,7 +563,13 @@ function WalletLinkPrompt({ onSettings, onDismiss }: { onSettings: () => void; o
 }
 
 // ── Background music player (used for menu + battle tracks) ────────────────
-function BgMusic({ src, storageKey }: { src: string; storageKey: string }) {
+/**
+ * `showToggle`: draw the floating left-edge mute stud. Menu screens pass false:
+ * each has a mute button in its own top bar, Settings has the music toggles,
+ * and on phones the stud floated over the page content. Matches keep it on
+ * desktop, where Settings is out of reach mid-game.
+ */
+function BgMusic({ src, storageKey, showToggle = false }: { src: string; storageKey: string; showToggle?: boolean }) {
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const [muted, setMuted] = useState<boolean>(() => {
     try { return localStorage.getItem(storageKey) === '1'; } catch { return false; }
@@ -606,7 +628,7 @@ function BgMusic({ src, storageKey }: { src: string; storageKey: string }) {
   return (
     <>
       <audio ref={audioRef} src={src} loop preload="auto" />
-      {/* Docked to the vertical centre of the LEFT edge: clears the in-game
+      {showToggle && <>{/* Docked to the vertical centre of the LEFT edge: clears the in-game
           bottom action bar, the top turn banner, and the board's right rail
           (which occupies the opposite edge). z-index sits under that rail (60)
           and under every modal, so it can never cover them. */}
@@ -620,13 +642,18 @@ function BgMusic({ src, storageKey }: { src: string; storageKey: string }) {
       >
         <span className="ova-stud-grip" aria-hidden />
         {muted ? <SoundOff size={19} /> : <SoundOn size={19} />}
-      </button>
+      </button></>}
     </>
   );
 }
 
 function MenuMusic()   { return <BgMusic src="/menu-music.mp3?v=2"   storageKey="musicMuted" />; }
-function BattleMusic() { return <BgMusic src="/battle-music.mp3" storageKey="battleMuted" />; }
+function BattleMusic() {
+  // Phones: the stud sat over the mat's left column (life orb); Settings and
+  // the hub mute cover it there.
+  const mobile = useIsMobile(860);
+  return <BgMusic src="/battle-music.mp3" storageKey="battleMuted" showToggle={!mobile} />;
+}
 
 // ── Rules page (Interactive Rulebook) ──────────────────────────────────────
 const RULES_TOKENS = {
@@ -2029,7 +2056,8 @@ function Landing({
   // the only shape that carries a wallet address, and re-fetching it here would
   // just be a second `GET /api/profiles/me`.
   const prof = profile;
-  const [players, setPlayers] = useState<number | null>(null);
+  // Real presence (api/presence.ts), not the number of profiles ever created.
+  const players = useOnlineCount();
   const [activeDeck, setActiveDeck] = useState<DeckEntry | null>(null);
   const [ranked, setRanked] = useState<OwnRankedProfile | null>(null);
   const [season, setSeason] = useState<SeasonInfo | null>(null);
@@ -2047,14 +2075,12 @@ function Landing({
       // ranked card's countdown and the caller's own standing drives the badge.
       // Both are allowed to fail independently — a ladder outage must not stop
       // a player getting to a casual match.
-      const [all, decks, me, seasonInfo] = await Promise.all([
-        listProfilesApi().catch(() => [] as Profile[]),
+      const [decks, me, seasonInfo] = await Promise.all([
         listDecksApi().catch(() => [] as DeckEntry[]),
         RankedAPI.getMe().catch(() => null),
         RankedAPI.getSeason().catch(() => null),
       ]);
       if (!alive) return;
-      setPlayers(all.length);
       setActiveDeck(decks.find((d) => d.isActive) ?? decks[0] ?? null);
       setRanked(me);
       setSeason(seasonInfo);
@@ -2070,12 +2096,8 @@ function Landing({
   }, [muted]);
 
   const games = prof.wins + prof.losses + prof.draws;
-  // `level` is derived server-side from wins; the XP bar is a local flourish
-  // on top of it, not a second source of truth.
   const level = prof.level;
-  const xpForLvl = (l: number) => Math.round((l + 1) * (l + 1) / 2.2);
-  const xpPrev = xpForLvl(level - 1), xpNext = xpForLvl(level);
-  const xpInto = games - xpPrev, xpRange = Math.max(1, xpNext - xpPrev);
+  const { into: xpInto, range: xpRange } = levelProgress(prof.wins, level);
 
   const deckCards = activeDeck?.cards ?? [];
   const deckValid = activeDeck ? validateDeck(deckCards) : null;
@@ -2214,7 +2236,7 @@ function PlayerHUD({ name, avatarUrl, level, xpInto, xpRange, walletAddress, cop
             <div style={{ width: mobile ? 90 : 150, height: 5, borderRadius: 999, background: 'rgba(255,255,255,0.12)', overflow: 'hidden' }}>
               <div className="menu-anim" style={{ width: `${loading ? 0 : xpPct}%`, height: '100%', background: `linear-gradient(90deg, ${MENU.gold}, ${MENU.violet})`, transition: 'width .3s ease' }} />
             </div>
-            {!mobile && <span style={{ fontSize: 11, color: MENU.text2 }}>{xpInto} / {xpRange} XP</span>}
+            {!mobile && <span style={{ fontSize: 11, color: MENU.text2 }}>{xpInto} / {xpRange} wins to level {level + 1}</span>}
           </div>
         </div>
       </div>
@@ -2470,7 +2492,13 @@ function ActivityPanel({ onViewEvent, onLadder, season, standing, loading, mobil
   season: SeasonInfo | null; standing: RankedStanding | null; loading: boolean; mobile: boolean;
 }) {
   const now = useNow(1000);
+  // The daily quest key is the UTC date, so it really does reset at UTC midnight.
   const eventMs = nextUtcMidnight() - now;
+  const quest = useMemo(() => {
+    const p = loadQuestProgress();
+    const id = questCurrentSiteId(p);
+    return { cleared: p.cleared.length, next: id ? QUEST_SITES.find((s) => s.id === id) ?? null : null };
+  }, []);
   // Real daily-quest tracker: won a match today? (set by the match-result flow)
   const dayKey = todayKey();
   const [questDone, setQuestDone] = useState<boolean>(() => { try { return localStorage.getItem(`ocva.daily.${dayKey}.win`) === '1'; } catch { return false; } });
@@ -2508,15 +2536,24 @@ function ActivityPanel({ onViewEvent, onLadder, season, standing, loading, mobil
           <span style={{ fontSize: 11, color: MENU.text2, whiteSpace: 'nowrap' }}>{questDone ? '1 / 1' : '0 / 1'}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 11, fontWeight: 800, color: MENU.cyan }}>+100 XP</span>
+          <span style={{ fontSize: 11, color: MENU.text2 }}>Resets in <b style={{ fontFamily: F.mono, color: MENU.cyan }}>{fmtCountdown(eventMs)}</b></span>
           {questDone && <span style={{ fontSize: 11, fontWeight: 800, color: MENU.success }}>✓ COMPLETE</span>}
         </div>
       </ActCard>
 
-      <ActCard title="NEXT EVENT" mobile={mobile}>
-        <div style={{ fontFamily: MENU_SERIF, fontWeight: 700, fontSize: 16, color: MENU.text }}>DAILY $MASTER CUP</div>
-        <div style={{ fontFamily: F.mono, fontSize: 20, fontWeight: 700, color: MENU.cyan, margin: '4px 0 8px', letterSpacing: '0.04em' }}>{fmtCountdown(eventMs)}</div>
-        <button onClick={onViewEvent} style={{ background: 'none', border: 'none', color: MENU.violet, cursor: 'pointer', fontWeight: 800, fontSize: 11.5, letterSpacing: '0.06em', display: 'inline-flex', alignItems: 'center', gap: 6 }}>VIEW EVENT →</button>
+      {/* Was "NEXT EVENT · DAILY $MASTER CUP", a countdown to an event that does
+          not exist. Masterquest is real, so show the player's actual campaign. */}
+      <ActCard title="MASTERQUEST" mobile={mobile}>
+        <div style={{ fontFamily: MENU_SERIF, fontWeight: 700, fontSize: 16, color: MENU.text }}>
+          {quest.next ? quest.next.name : 'Campaign complete'}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0 8px' }}>
+          <Bar pct={Math.round((quest.cleared / QUEST_TOTAL) * 100)} />
+          <span style={{ fontSize: 11, color: MENU.text2, whiteSpace: 'nowrap' }}>{quest.cleared} / {QUEST_TOTAL} sites</span>
+        </div>
+        <button onClick={onViewEvent} style={{ background: 'none', border: 'none', color: MENU.violet, cursor: 'pointer', fontWeight: 800, fontSize: 11.5, letterSpacing: '0.06em', display: 'inline-flex', alignItems: 'center', gap: 6, padding: 0 }}>
+          {quest.cleared === 0 ? 'START QUEST →' : quest.next ? 'CONTINUE →' : 'REVISIT →'}
+        </button>
       </ActCard>
     </aside>
   );
@@ -2869,10 +2906,8 @@ function ProfilePage({ myName, onBack, onSettings }: { myName: string; onBack: (
   const games  = prof ? prof.wins + prof.losses + prof.draws : 0;
   const winPct = games ? Math.round((prof!.wins / games) * 100) : 0;
   const level  = prof?.level ?? 1;
-  const xpForNextLevel = (lvl: number) => Math.round((lvl + 1) * (lvl + 1) / 2.2);
-  const xpPrev = xpForNextLevel(level - 1);
-  const xpNext = xpForNextLevel(level);
-  const xpPct  = Math.max(0, Math.min(100, Math.round(((games - xpPrev) / Math.max(1, xpNext - xpPrev)) * 100)));
+  const lp = levelProgress(prof?.wins ?? 0, level);
+  const xpPct = lp.pct;
 
   const copyAddr = async () => {
     if (!prof?.walletAddress) return;
@@ -2886,6 +2921,12 @@ function ProfilePage({ myName, onBack, onSettings }: { myName: string; onBack: (
         @media (prefers-reduced-motion: reduce) { .hub-anim { transition: none !important; animation: none !important; } }
         .hub-scroll::-webkit-scrollbar { width: 9px; height: 9px; }
         .hub-scroll::-webkit-scrollbar-thumb { background: ${HUB.borderHi}; border-radius: 5px; }
+        /* Phones: the whole page scrolls. The tabs are built as full-height boxes
+           with their own inner scrollers (right for desktop), but squeezed under
+           the identity card those scrollers collapsed to ~0px: the deck builder
+           showed its filters and no cards. Unwind them into normal flow. */
+        .hub-tabs-phone > * { height: auto !important; }
+        .hub-tabs-phone .hub-scroll { overflow: visible !important; height: auto !important; flex: none !important; max-height: none !important; }
       `}</style>
       <HubBackdrop />
 
@@ -2898,19 +2939,19 @@ function ProfilePage({ myName, onBack, onSettings }: { myName: string; onBack: (
       {loading ? (
         <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: HUB.muted, position: 'relative', zIndex: 1 }}>Loading profile…</div>
       ) : (
-        <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
+        <div style={{ position: 'relative', zIndex: 1, flex: mobile ? '0 0 auto' : 1, minHeight: 0, display: 'flex', flexDirection: 'column',
           gap: 12, padding: mobile ? '12px 12px 32px' : '14px 22px 18px', maxWidth: 1680, width: '100%', margin: '0 auto' }}>
           <IdentityBar
             name={prof?.name ?? myName} avatarUrl={prof?.avatarUrl ?? null}
             placement={ranked?.placement.inPlacements ? ranked.placement.remaining : 0}
             rankLabel={formatRankLabel(ranked?.rank ?? null)}
-            level={level} xpPct={xpPct} xpInto={games - xpPrev} xpRange={xpNext - xpPrev}
+            level={level} xpPct={xpPct} xpInto={lp.into} xpRange={lp.range}
             wins={prof?.wins ?? 0} losses={prof?.losses ?? 0} winPct={winPct} games={games}
             favoriteDeckName={activeDeck?.name ?? null} favoriteFaction={deriveFavoriteFaction(favoriteCards)}
             onOpenDecks={() => setTab('decks')}
           />
 
-          <div style={{ flex: 1, minHeight: 0 }}>
+          <div className={mobile ? 'hub-tabs-phone' : undefined} style={{ flex: mobile ? '0 0 auto' : 1, minHeight: 0 }}>
             {tab === 'overview' && (
               <OverviewTab prof={prof} ranked={ranked} winPct={winPct} games={games} level={level}
                 xpPct={xpPct} favoriteDeck={activeDeck} favoriteFaction={deriveFavoriteFaction(favoriteCards)}
@@ -3094,7 +3135,7 @@ function IdentityBar(props: {
           <div style={{ flex: 1, maxWidth: 260, height: 6, borderRadius: 999, background: HUB.raised, border: `1px solid ${HUB.border}`, overflow: 'hidden' }}>
             <div className="hub-anim" style={{ width: `${xpPct}%`, height: '100%', background: `linear-gradient(90deg, ${HUB.gold}, ${HUB.violet})`, transition: 'width .3s ease' }} />
           </div>
-          <span style={{ fontSize: 11, color: HUB.muted }}>{xpInto} / {xpRange} XP</span>
+          <span style={{ fontSize: 11, color: HUB.muted }}>{xpInto} / {xpRange} wins to level {level + 1}</span>
         </div>
       </div>
 
@@ -4903,6 +4944,8 @@ function Lobby({
   linkProblem: LinkProblem | null;
   onDismissLinkProblem: () => void;
 }) {
+  // Real presence (api/presence.ts) for the Players Online panel and footer.
+  const online = useOnlineCount();
   const mobile = useIsMobile();
   const [matches, setMatches] = useState<LobbyEntry[]>([]);
   const [invites, setInvites] = useState<LobbyEntry[]>([]);
@@ -5353,15 +5396,15 @@ function Lobby({
 
           <CommunityPanel
             leaderboard={leaderboard}
+            online={online}
             onViewProfile={onViewProfile}
             activity={activity}
           />
         </div>
 
         <FooterStatsBar
-          playersOnline={leaderboard.length}
+          playersOnline={online}
           openMatches={openMatches.length}
-          inProgress={0}
           onBack={onBack}
         />
       </div>
@@ -6186,8 +6229,10 @@ function buildActivityFeed(matches: LobbyEntry[], leaderboard: Profile[]): Activ
   return items;
 }
 
-function CommunityPanel({ leaderboard, onViewProfile, activity }: {
+function CommunityPanel({ leaderboard, online, onViewProfile, activity }: {
   leaderboard: Profile[];
+  /** Real presence (api/presence.ts); null until the first read. */
+  online: number | null;
   onViewProfile: (name: string) => void;
   activity: ActivityItem[];
 }) {
@@ -6203,7 +6248,7 @@ function CommunityPanel({ leaderboard, onViewProfile, activity }: {
           <div style={{
             fontFamily: '"Cinzel", serif', fontSize: 28, fontWeight: 900,
             color: LOBBY_TOKENS.green, textShadow: `0 0 18px ${LOBBY_TOKENS.green}66`,
-          }}>{leaderboard.length}</div>
+          }}>{online ?? '…'}</div>
         </div>
       </section>
 
@@ -6224,27 +6269,6 @@ function CommunityPanel({ leaderboard, onViewProfile, activity }: {
             </div>
           ))}
         </div>
-      </section>
-
-      {/* Tournaments */}
-      <section style={{ ...LOBBY_GLASS, padding: 16 }}>
-        <div style={{ fontSize: 10, color: LOBBY_TOKENS.gold, letterSpacing: 2, fontWeight: 700, textTransform: 'uppercase' }}>Tournaments</div>
-        <div style={{ fontFamily: '"Cinzel", serif', fontSize: 15, fontWeight: 800, color: '#fff', letterSpacing: 1, marginBottom: 10 }}>Upcoming</div>
-        <TournamentCard
-          name="Daily $MASTER Cup"
-          flavor="Top placement wins $MASTER"
-          countdownToNextUtcMidnight
-          entrants={Math.max(8, leaderboard.length)}
-          accent={LOBBY_TOKENS.gold}
-        />
-        <div style={{ height: 10 }} />
-        <TournamentCard
-          name="Weekend Solana Showdown"
-          flavor="Mono-Solana bracket · 32 seats"
-          countdownDays={6}
-          entrants={Math.min(32, Math.max(4, leaderboard.length / 2 | 0))}
-          accent={LOBBY_TOKENS.purple}
-        />
       </section>
 
       {/* Top players quick links */}
@@ -6284,55 +6308,15 @@ function CommunityPanel({ leaderboard, onViewProfile, activity }: {
   );
 }
 
-function TournamentCard({ name, flavor, countdownToNextUtcMidnight, countdownDays, entrants, accent }: {
-  name: string; flavor: string;
-  countdownToNextUtcMidnight?: boolean; countdownDays?: number;
-  entrants: number; accent: string;
-}) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
-  const target = useMemo(() => {
-    if (countdownToNextUtcMidnight) {
-      const d = new Date();
-      d.setUTCHours(24, 0, 0, 0);
-      return d.getTime();
-    }
-    return Date.now() + (countdownDays ?? 1) * 86400000;
-  }, [countdownToNextUtcMidnight, countdownDays]);
-  const ms = Math.max(0, target - now);
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  return (
-    <div style={{
-      padding: 12, borderRadius: 10,
-      background: `linear-gradient(135deg, ${accent}1a, rgba(10,15,25,0.6))`,
-      border: `1px solid ${accent}55`,
-    }}>
-      <div style={{ fontFamily: '"Cinzel", serif', fontSize: 14, fontWeight: 800, color: '#fff', letterSpacing: 1 }}>{name}</div>
-      <div style={{ fontSize: 11, color: LOBBY_TOKENS.muted, marginTop: 2 }}>{flavor}</div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-        <span style={{ fontFamily: '"Cinzel", serif', fontSize: 18, fontWeight: 900, color: accent, letterSpacing: 1.5, textShadow: `0 0 12px ${accent}66` }}>
-          {String(h).padStart(2,'0')}:{String(m).padStart(2,'0')}:{String(s).padStart(2,'0')}
-        </span>
-        <span style={{ fontSize: 11, color: LOBBY_TOKENS.muted }}>{entrants} entrants</span>
-      </div>
-    </div>
-  );
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FOOTER STATS BAR
 // ─────────────────────────────────────────────────────────────────────────────
-function FooterStatsBar({ playersOnline, openMatches, inProgress, onBack: _onBack }: {
-  playersOnline: number; openMatches: number; inProgress: number; onBack: () => void;
+// Only numbers the client actually knows. "In Progress" (always 0) and a
+// "Next Tournament" countdown to an event that does not exist were removed.
+function FooterStatsBar({ playersOnline, openMatches, onBack: _onBack }: {
+  playersOnline: number | null; openMatches: number; onBack: () => void;
 }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
-  const next = useMemo(() => { const d = new Date(); d.setUTCHours(24,0,0,0); return d.getTime(); }, []);
-  const ms = Math.max(0, next - now);
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
   return (
     <div style={{
       position: 'sticky', bottom: 0, zIndex: 10,
@@ -6346,10 +6330,8 @@ function FooterStatsBar({ playersOnline, openMatches, inProgress, onBack: _onBac
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: 14, flexWrap: 'wrap', fontFamily: PROFILE_FONT,
       }}>
-        <FooterStat label="Players Online" value={playersOnline} color={LOBBY_TOKENS.green} />
+        <FooterStat label="Players Online" value={playersOnline ?? '…'} color={LOBBY_TOKENS.green} />
         <FooterStat label="Open Matches" value={openMatches} color={LOBBY_TOKENS.gold} />
-        <FooterStat label="In Progress" value={inProgress} color={LOBBY_TOKENS.purple} />
-        <FooterStat label="Next Tournament" value={`${h}h ${m}m`} color={LOBBY_TOKENS.danger} />
       </div>
     </div>
   );
@@ -7247,6 +7229,8 @@ export default function App() {
     if (profile && !hasSeenTutorial(tutorialAccount)) setTutorialOpen(true);
   }, [profile, tutorialAccount]);
   function closeTutorial() { markTutorialSeen(tutorialAccount); setTutorialOpen(false); }
+  // Counts this player in the hub's real "players online" number.
+  usePresenceHeartbeat(signedIn && !SKIP_LOGIN);
 
   // Track solo match start/end for daily-best recording. Board fires
   // `mmtcg:solo-end` when a solo match resolves.
