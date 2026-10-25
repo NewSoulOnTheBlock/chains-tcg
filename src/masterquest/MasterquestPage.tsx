@@ -166,16 +166,30 @@ export function MasterquestPage({
   return (
     <div style={{
       position: 'fixed', inset: 0, overflowY: 'auto',
-      background: 'radial-gradient(circle at 50% 45%, #1a0f3a 0%, #08051a 60%, #02010a 100%)',
+      display: 'flex', flexDirection: 'column',
+      background: '#02010a',
       color: '#f5f3ff', fontFamily: 'Inter, sans-serif',
     }}>
+      {/* Full-screen backdrop: the same painted map, blurred and dimmed, so
+          the art fills the whole viewport at any aspect ratio. The playable
+          map below is never cropped — its site nodes share the SVG's
+          coordinate space, so cropping would cut sites off on narrow or
+          very wide screens. */}
+      <img src="/masterquest-map.png?v=1" alt="" aria-hidden draggable={false}
+        style={{
+          position: 'fixed', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
+          filter: 'blur(14px) brightness(0.5) saturate(1.1)', transform: 'scale(1.08)',
+          zIndex: 0, pointerEvents: 'none', userSelect: 'none',
+        }} />
+
       {/* Header */}
       <div style={{
-        position: 'sticky', top: 0, zIndex: 5,
+        position: 'relative', zIndex: 5, flex: 'none',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         padding: '12px 20px',
-        background: 'linear-gradient(180deg, rgba(8,5,26,0.94) 0%, rgba(8,5,26,0.6) 100%)',
-        borderBottom: '1px solid #2a1f55',
+        background: 'linear-gradient(180deg, rgba(8,5,26,0.82) 0%, rgba(8,5,26,0.5) 100%)',
+        backdropFilter: 'blur(8px)',
+        borderBottom: '1px solid rgba(58,47,106,0.6)',
       }}>
         <button onClick={onBack} style={btnSecondary}><ArrowLeft size={14} /> Back</button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontWeight: 900, fontSize: 18, letterSpacing: 2 }}>
@@ -188,8 +202,9 @@ export function MasterquestPage({
 
       {/* Status bar */}
       <div style={{
-        padding: '14px 24px', textAlign: 'center',
-        background: 'rgba(108,75,216,0.08)',
+        position: 'relative', zIndex: 2, flex: 'none',
+        padding: '10px 24px', textAlign: 'center',
+        background: 'rgba(8,5,26,0.45)', backdropFilter: 'blur(6px)',
       }}>
         <div style={{ fontSize: 13, letterSpacing: 1, opacity: 0.85 }}>
           {complete
@@ -211,10 +226,13 @@ export function MasterquestPage({
         onSelect={setSelectedDeckId}
       />
 
-      {/* Map */}
-      <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 16px 32px' }}>
-        <div style={{ width: '100%', maxWidth: 1280 }}>
-          <MapSvg progress={progress} onSiteClick={handleSiteClick} />
+      {/* Map — takes every pixel left under the bars and scales to fit it
+          whole (the SVG's default `meet`), with the act legend floating over
+          its bottom edge. `minHeight` lets tiny screens scroll instead of
+          shrinking the map to nothing. */}
+      <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 280, padding: '8px 8px 40px' }}>
+        <MapSvg progress={progress} onSiteClick={handleSiteClick} />
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 8, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
           <ActLegend />
         </div>
       </div>
@@ -258,9 +276,8 @@ function MapSvg({
     <svg
       viewBox={`0 0 ${VW} ${VH}`}
       style={{
-        width: '100%', height: 'auto', display: 'block',
-        borderRadius: 10, border: '1px solid #3a2f6a',
-        boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
+        width: '100%', height: '100%', display: 'block',
+        filter: 'drop-shadow(0 12px 40px rgba(0,0,0,0.6))',
       }}
       aria-label="Sproto Masterquest map"
     >
@@ -371,8 +388,9 @@ function ActLegend() {
   return (
     <div style={{
       display: 'flex', justifyContent: 'center', flexWrap: 'wrap',
-      padding: '14px 8px 0', gap: 18,
-      fontSize: 11, opacity: 0.85, color: '#cfc4ff',
+      padding: '6px 14px', gap: 18, borderRadius: 999,
+      background: 'rgba(8,5,26,0.6)', backdropFilter: 'blur(6px)',
+      fontSize: 11, color: '#cfc4ff',
     }}>
       <div>{ACT_LABEL.awakening} — Sites I–V</div>
       <div>{ACT_LABEL.pilgrimage} — Sites VI–X</div>
@@ -641,9 +659,10 @@ function DeckChooser({
 }) {
   return (
     <div style={{
-      padding: '12px 20px',
-      background: 'rgba(108,75,216,0.06)',
-      borderBottom: '1px solid #2a1f55',
+      position: 'relative', zIndex: 2, flex: 'none',
+      padding: '10px 20px',
+      background: 'rgba(8,5,26,0.45)', backdropFilter: 'blur(6px)',
+      borderBottom: '1px solid rgba(58,47,106,0.6)',
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 12,
