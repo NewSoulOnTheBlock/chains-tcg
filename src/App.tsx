@@ -6,7 +6,7 @@ import { Client } from 'boardgame.io/react';
 import { SocketIO } from 'boardgame.io/multiplayer';
 import { Plaza } from './Plaza';
 import { ChainsTCG } from './Game';
-import { ChainsBoard } from './Board';
+import { ChainsBoard, MATCH_EXIT_EVENT } from './Board';
 import { CARDS, COLOR_META, COLORS, STARTER_DECKS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MAX_COPIES_NONBASIC, isBasicNode, type Color, type CardType, type CardDef, type DeckIssue, type DeckValidation } from './cards';
 import { ChainLogo } from './chain-logos';
 import {
@@ -6535,6 +6535,15 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
     </div>
   );
 
+  // A finished match closes itself: the board's end-of-match countdown fires
+  // MATCH_EXIT_EVENT. The result is already written server-side, so there is
+  // nothing to cancel; just release the seat and go home.
+  useEffect(() => {
+    const handler = () => onLeave();
+    window.addEventListener(MATCH_EXIT_EVENT, handler);
+    return () => window.removeEventListener(MATCH_EXIT_EVENT, handler);
+  }, [onLeave]);
+
   // Once the interstitial elapses and both seats are filled, mount the game.
   if (entered && isFull && playerID !== null && credentials !== null) {
     return (
@@ -7491,7 +7500,7 @@ export default function App() {
           mode={soloCfg.mode}
           playerDeckColor={soloCfg.color}
           customDeck={soloCfg.customDeck}
-          onExit={() => setSoloCfg(null)}
+          onExit={() => { setSoloCfg(null); goto('landing'); }}
         />
       )}
       {soloSetup && !soloCfg && (

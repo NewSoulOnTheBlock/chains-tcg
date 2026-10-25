@@ -1,6 +1,6 @@
 // src/Board.tsx
 // React board for Chains TCG.
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { BoardProps } from 'boardgame.io/react';
 import {
   CARDS, COLOR_META, COLORS, templateFor,
@@ -1140,6 +1140,14 @@ export function ChainsBoard(props: Props) {
         myName={myName}
       />
 
+      {ctx.gameover && (
+        <MatchEndCountdown
+          key={matchID ?? 'match'}
+          headline={ctx.gameover.draw ? 'Draw' : ctx.gameover.winner === myId ? 'You won' : 'You lost'}
+          won={!ctx.gameover.draw && ctx.gameover.winner === myId}
+        />
+      )}
+
       {/* Combat zone display */}
       <CombatStrip G={G} ctx={ctx} myId={myId} />
 
@@ -1682,6 +1690,56 @@ function WagerPayoutModal({
             style={{ padding: '9px 20px', fontSize: 13 }}>Close</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Fired when a finished match should close. Each host that mounts the board
+ *  (MatchSeat, SoloClient → App / Masterquest) listens and runs its own exit,
+ *  because the board itself has no route out of the match. */
+export const MATCH_EXIT_EVENT = 'egregore:match-exit';
+const MATCH_EXIT_SECONDS = 8;
+
+/**
+ * End-of-match bar: counts down, then sends the player back to the hub.
+ * Sits above the result modals (z 250 > 199/200) so it is always visible.
+ * "Stay" cancels the auto-exit for players who want to share the win.
+ */
+function MatchEndCountdown({ headline, won }: { headline: string; won: boolean }) {
+  const [left, setLeft] = useState(MATCH_EXIT_SECONDS);
+  const [stayed, setStayed] = useState(false);
+  const exit = useCallback(() => {
+    try { window.dispatchEvent(new CustomEvent(MATCH_EXIT_EVENT)); } catch { /* old browsers */ }
+  }, []);
+  useEffect(() => {
+    if (stayed) return;
+    if (left <= 0) { exit(); return; }
+    const t = setTimeout(() => setLeft(n => n - 1), 1000);
+    return () => clearTimeout(t);
+  }, [left, stayed, exit]);
+  const accent = won ? '#f0b32a' : '#b896ff';
+  return (
+    <div role="status" aria-live="polite" style={{
+      position: 'fixed', zIndex: 250, left: '50%', transform: 'translateX(-50%)',
+      bottom: 'calc(16px + env(safe-area-inset-bottom))', width: 'min(460px, calc(100vw - 20px))',
+      display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'center',
+      padding: '10px 14px', borderRadius: 12,
+      background: 'linear-gradient(180deg, rgba(26,18,64,0.97), rgba(10,10,30,0.97))',
+      border: `1px solid ${accent}99`, boxShadow: `0 10px 30px rgba(0,0,0,0.6), 0 0 18px ${accent}33`,
+      color: '#ece1c7', fontSize: 13.5,
+    }}>
+      <span style={{ flex: '1 1 auto', textAlign: 'center' }}>
+        <b style={{ color: accent, fontFamily: '"Cinzel", "Times New Roman", serif', letterSpacing: 1 }}>{headline}.</b>{' '}
+        {stayed ? 'Leave whenever you are ready.' : <>Returning to the hub in <b style={{ fontVariantNumeric: 'tabular-nums' }}>{left}</b>…</>}
+      </span>
+      <span style={{ display: 'flex', gap: 8 }}>
+        {!stayed && (
+          <button onClick={() => setStayed(true)} className="brd-plate brd-plate--obsidian"
+            style={{ padding: '8px 14px', fontSize: 12, minHeight: 40 }}>Stay</button>
+        )}
+        <button onClick={exit} className="brd-plate brd-plate--gold"
+          style={{ padding: '8px 14px', fontSize: 12, minHeight: 40 }}>{stayed ? 'Back to hub' : 'Leave now'}</button>
+      </span>
     </div>
   );
 }

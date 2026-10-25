@@ -15,7 +15,7 @@ import React, { useMemo, useEffect, useRef } from 'react';
 import { Client } from 'boardgame.io/react';
 import { Local } from 'boardgame.io/multiplayer';
 import { ChainsTCG } from './Game';
-import { ChainsBoard } from './Board';
+import { ChainsBoard, MATCH_EXIT_EVENT } from './Board';
 import { MMTCGBot, enumerateMoves, type Difficulty } from './bot';
 import { dailySeed, dailyBotColor, todayKey, saveDailyResult } from './dailyChallenge';
 import { COLORS, STARTER_DECKS, type Color } from './cards';
@@ -101,6 +101,13 @@ export function SoloClient({
       debug: false,
     });
   }, [difficulty, mode, playerDeckColor, playerName, customDeck, botDeckColor, matchLabel]);
+
+  // The board's end-of-match countdown asks its host to close the match.
+  useEffect(() => {
+    const handler = () => onExit();
+    window.addEventListener(MATCH_EXIT_EVENT, handler);
+    return () => window.removeEventListener(MATCH_EXIT_EVENT, handler);
+  }, [onExit]);
 
   // Forward `mmtcg:solo-end` to the optional onMatchEnd callback.
   useEffect(() => {
