@@ -69,122 +69,15 @@ export interface CardDef {
 }
 
 /**
- * Token logo sourced from CoinMarketCap, vendored into `public/cards/` at
- * build-authoring time rather than hotlinked from s2.coinmarketcap.com — the
- * production gateway's `default-src 'self'` CSP blocks third-party img hosts.
- * The argument is still the CMC coin id so the provenance stays greppable.
+ * Card art keyed by card id. Cards without an entry render their faction sigil
+ * (src/chain-logos.tsx) everywhere: hand, field, previews, deckbuilder, packs.
  *
- * Adding a new one: `curl -o public/cards/cmc-<id>.png
- * https://s2.coinmarketcap.com/static/img/coins/128x128/<id>.png`.
+ * Emptied 2026-10-24: the whole art set is being replaced. Add entries back as
+ * `card_id: '/cards/<file>?v=1'` (files in public/cards/) as the new art lands.
+ * The production CSP is `default-src 'self'`, so art must be vendored into
+ * public/, never hotlinked.
  */
-const cmc = (id: number) => `/cards/cmc-${id}.png`;
-
-/** Image overrides keyed by card id. Cards without an entry render the chain glyph. */
-const IMAGES: Record<string, string> = {
-  // Nodes have no art entry: they render their faction sigil (src/chain-logos.tsx).
-
-  // BnB memes
-  bnb_babydoge: '/cards/babydoge.png?v=1',
-  bnb_broccoli: '/cards/broccoli.png?v=1',
-  bnb_tut:      cmc(33687),
-  bnb_tst:      '/cards/tst.png?v=1',
-  bnb_banana:   '/cards/banana.jpg?v=1',
-  bnb_mubarak:  '/cards/bocca.jpg?v=1',
-  bnb_cheems:   '/cards/cheems.png?v=1',
-  bnb_floki:    cmc(10804),
-
-  // Solana memes
-  sol_pnut:     '/cards/pnut.webp?v=2',
-  sol_bonk:     '/cards/bonk.png?v=1',
-  sol_popcat:   '/cards/popcat.png?v=1',
-  sol_mew:      '/cards/mew.png?v=1',
-  sol_bome:     '/cards/bome.png?v=3',
-  sol_wif:      '/cards/shadow.jpg?v=1',
-  sol_fartcoin: '/cards/fartcoin.png?v=1',
-  sol_goat:     cmc(33440),
-
-  // Robinhood memes (meme-stocks — emoji glyph art)
-  robinhood_hood:    '/cards/robinhood_hood.png?v=1',
-  robinhood_ozzy:    '/cards/robinhood_ozzy.png?v=1',
-  robinhood_cashcat: '/cards/robinhood_cashcat.png?v=1',
-  robinhood_kitty:   '/cards/robinhood_kitty.png?v=1',
-  robinhood_tendies: '/cards/robinhood_tendies.png?v=1',
-  robinhood_moon:    '/cards/robinhood_moon.png?v=1',
-  robinhood_yolo:    '/cards/robinhood_yolo.png?v=1',
-  robinhood_ape:     '/cards/robinhood_ape.png?v=1',
-
-  // Ethereum memes
-  eth_andy:     '/cards/andy.png?v=1',
-  eth_apu:      '/cards/apu.webp?v=1',
-  eth_wojak:    '/cards/wojak.png?v=2',
-  eth_turbo:    '/cards/turbo.png?v=1',
-  eth_mog:      '/cards/hoba.jpg?v=1',
-  eth_shib:     '/cards/carbonara.jpg?v=1',
-  eth_pepe:     '/cards/pepe.png?v=1',
-
-  // Base memes (BRETT keeps its painted art, rest emoji glyph)
-  base_brett:   '/cards/brett.png?v=1',
-  base_degen:   '/cards/base_degen.png?v=1',
-  base_toshi:   '/cards/base_toshi.png?v=1',
-  base_miggles: '/cards/base_miggles.png?v=1',
-  base_keycat:  '/cards/base_keycat.png?v=1',
-  base_normie:  '/cards/base_normie.png?v=1',
-  base_doginme: '/cards/base_doginme.png?v=1',
-  base_based:   '/cards/base_based.png?v=1',
-
-  // ── BnB machines/moves ──
-  bnb_farm:     '/cards/volume_bot.png?v=1',
-  bnb_bridge:   '/cards/token_launchpad.png?v=1',
-  bnb_sniper:   '/cards/sniper_bot.png?v=1',
-  bnb_mmalgo:   '/cards/market_maker_algo.png?v=1',
-  bnb_rugpull:  '/cards/rug_pull.png?v=1',
-  bnb_airdrop:  '/cards/airdrop_farm.png?v=1',
-  bnb_honeypot: '/cards/honeypot.png?v=1',
-
-  // ── Solana machines/moves ──
-  sol_priority: '/cards/mev-bundler.png?v=1',
-  sol_oracle:   '/cards/ai-trading-agent.png?v=1',
-  sol_amm:      '/cards/amm-router.png?v=1',
-  sol_tgbot:    '/cards/telegram-bot-suite.png?v=1',
-  sol_zap:      '/cards/snipe.png?v=1',
-  sol_bounce:   '/cards/sol_bounce.png?v=1',
-  sol_tgpump:   '/cards/sol_tgpump.png?v=1',
-
-  // ── Robinhood machines/moves/aura ──
-  robinhood_dividend:   '/cards/robinhood_dividend.png?v=1',
-  robinhood_options:    '/cards/robinhood_options.png?v=1',
-  robinhood_fractional: '/cards/robinhood_fractional.png?v=1',
-  robinhood_margin:     '/cards/robinhood_margin.png?v=1',
-  robinhood_buydip:     '/cards/robinhood_buydip.png?v=1',
-  robinhood_gamma:      '/cards/robinhood_gamma.png?v=1',
-  robinhood_pfof:       '/cards/robinhood_pfof.png?v=1',
-  robinhood_diamond:    '/cards/robinhood_diamond.png?v=1',
-
-  // ── Ethereum machines/moves ──
-  eth_eip1559:  '/cards/smart_contract_suite.png?v=1',
-  eth_temple:   '/cards/eth_temple.png?v=1',
-  eth_l2:       '/cards/layer2_rollup.png?v=1',
-  eth_yield:    '/cards/eth_yield.png?v=1',
-  eth_smite:    '/cards/eth_smite.png?v=1',
-  eth_heal:     '/cards/dca_in.png?v=1',
-  eth_exploit:  '/cards/exploit_disclosure.png?v=1',
-
-  // ── Base machines/moves/aura ──
-  base_summer:    '/cards/base_summer.png?v=1',
-  base_frames:    '/cards/base_frames.png?v=1',
-  base_wallet:    '/cards/base_wallet.png?v=1',
-  base_onramp:    '/cards/base_onramp.png?v=1',
-  base_tip:       '/cards/base_tip.png?v=1',
-  base_bridge:    '/cards/base_bridge.png?v=1',
-  base_airdrop:   '/cards/base_airdrop.png?v=1',
-  base_staybased: '/cards/base_staybased.png?v=1',
-  // ── Auras (Genesis set) — emoji-art for now ──
-  bnb_liquidity:  '/cards/retain.jpg?v=1',
-  sol_validator:  '/cards/sol_validator.png?v=1',
-  eth_shield:     '/cards/eth_shield.png?v=1',
-  // ── NFT-linked meme art ──
-  eth_sproto_gremlin: '/sproto-gremlin.png',
-};
+const IMAGES: Record<string, string> = {};
 
 /**
  * Resolves the framed-template (MTG-style) to use for a card.

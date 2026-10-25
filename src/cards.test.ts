@@ -47,6 +47,6 @@ describe('EGREGORE faction registry', () => {
 
   it('moves BRETT from Ethereum to Base', () => {
     expect(CARDS.eth_brett).toBeUndefined();
-    expect(CARDS.base_brett).toMatchObject({ color: 'base', image: '/cards/brett.png?v=1' });
+    expect(CARDS.base_brett).toMatchObject({ color: 'base' });
   });
 });

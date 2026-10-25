@@ -2108,7 +2108,6 @@ function Landing({
     try { await navigator.clipboard.writeText(prof.walletAddress); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
   };
 
-  const goCollection = () => { try { window.location.hash = 'collection'; } catch {} onProfile(); };
 
   const play = () => {
     // The lobby is where create / join / challenge live. Deck choice is not
@@ -2170,7 +2169,7 @@ function Landing({
         </div>
       </div>
 
-      <NavDock onCollection={goCollection} onBoosters={onBoosters} onLadder={onLadder} onMasters={onMasterquest} onProfile={onProfile} onRules={onRules} onSettings={onSettings} mobile={mobile} />
+      <NavDock onDecks={() => { try { window.location.hash = 'decks'; } catch {} onProfile(); }} onBoosters={onBoosters} onLadder={onLadder} onMasters={onMasterquest} onProfile={onProfile} onRules={onRules} mobile={mobile} />
 
       <img src="/built-on-solana.svg" alt="Built on Solana" draggable={false}
         style={{ position: mobile ? 'static' : 'absolute', zIndex: 2, left: '50%', bottom: mobile ? undefined : 70,
@@ -2536,39 +2535,42 @@ function Bar({ pct }: { pct: number }) {
   </div>;
 }
 
-function NavDock({ onCollection, onBoosters, onLadder, onMasters, onProfile, onRules, onSettings, mobile }: {
-  onCollection: () => void; onBoosters: () => void; onLadder: () => void; onMasters: () => void; onProfile: () => void; onRules: () => void; onSettings: () => void; mobile: boolean;
+function NavDock({ onDecks, onBoosters, onLadder, onMasters, onProfile, onRules, mobile }: {
+  onDecks: () => void; onBoosters: () => void; onLadder: () => void; onMasters: () => void; onProfile: () => void; onRules: () => void; mobile: boolean;
 }) {
   const primary = [
-    { label: 'Collection', icon: mIco(<><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z" /><path d="m3 8 9 5 9-5" /><path d="M12 13v8" /></>, 20), onClick: onCollection },
+    // "Decks", not "Collection": building a deck is the step a new player
+    // needs, and the collection is one tab over on the same screen.
+    { label: 'Decks', icon: mIco(<><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z" /><path d="m3 8 9 5 9-5" /><path d="M12 13v8" /></>, 20), onClick: onDecks },
     { label: 'Boosters', icon: mIco(<><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M4 9h16" /><path d="M12 3v18" /></>, 20), onClick: onBoosters },
     // The ladder is a first-class destination now that there is a service
     // behind it. The dock already scrolls horizontally, so a sixth primary
     // item does not change the layout on a narrow screen.
     { label: 'Ladder', icon: mIco(<><path d="M7 4h10v5a5 5 0 0 1-10 0z" /><path d="M7 5.5H4.5A2.5 2.5 0 0 0 7 10M17 5.5h2.5A2.5 2.5 0 0 1 17 10" /><path d="M12 14v3M8.5 20h7M9.5 20l.5-3h4l.5 3" /></>, 20), onClick: onLadder },
-    { label: 'Masters', icon: mIco(<><path d="M6 9a6 6 0 0 0 12 0V4H6Z" /><path d="M6 5H3v2a3 3 0 0 0 3 3" /><path d="M18 5h3v2a3 3 0 0 1-3 3" /><path d="M12 15v4" /><path d="M8 21h8" /></>, 20), onClick: onMasters },
+    { label: 'Quest', icon: mIco(<><path d="M6 9a6 6 0 0 0 12 0V4H6Z" /><path d="M6 5H3v2a3 3 0 0 0 3 3" /><path d="M18 5h3v2a3 3 0 0 1-3 3" /><path d="M12 15v4" /><path d="M8 21h8" /></>, 20), onClick: onMasters },
     { label: 'Profile', icon: mIco(<><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>, 20), onClick: onProfile },
   ];
+  // Settings left the dock: the gear in the top bar already opens it, and a
+  // seventh item made the dock scroll sideways on phones, hiding the ends.
   const utils = [
-    { label: 'Rulebook', icon: mIco(<><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2Z" /><path d="M4 19a2 2 0 0 1 2-2h13" /></>, 20), onClick: onRules },
-    { label: 'Settings', icon: mIco(<><circle cx="12" cy="12" r="3.2" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" /></>, 20), onClick: onSettings },
+    { label: 'How to play', icon: mIco(<><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2Z" /><path d="M4 19a2 2 0 0 1 2-2h13" /></>, 20), onClick: onRules },
   ];
   const Item = ({ it }: { it: { label: string; icon: React.ReactNode; onClick: () => void } }) => (
     <button onClick={it.onClick} title={it.label} aria-label={it.label} className="menu-anim ova-dock-item"
-      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '8px 14px', minWidth: 62, minHeight: 44, borderRadius: 10,
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: mobile ? '7px 4px' : '8px 14px', minWidth: mobile ? 50 : 62, minHeight: 44, borderRadius: 10, flex: 'none',
         background: 'none', border: 'none', color: MENU.text2, cursor: 'pointer', transition: 'color .18s ease, background .18s ease' }}
       onMouseEnter={(e) => { e.currentTarget.style.color = MENU.goldHi; e.currentTarget.style.background = 'rgba(230,196,92,0.08)'; }}
       onMouseLeave={(e) => { e.currentTarget.style.color = MENU.text2; e.currentTarget.style.background = 'none'; }}>
       {it.icon}
-      <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em' }}>{it.label.toUpperCase()}</span>
+      <span style={{ fontSize: mobile ? 9.5 : 10.5, fontWeight: 700, letterSpacing: mobile ? '0.02em' : '0.05em', whiteSpace: 'nowrap' }}>{it.label.toUpperCase()}</span>
     </button>
   );
   return (
     <nav aria-label="Main navigation" style={{ position: 'fixed', left: '50%', transform: 'translateX(-50%)', bottom: mobile ? 'calc(6px + env(safe-area-inset-bottom))' : 14, zIndex: 6,
-      display: 'flex', alignItems: 'center', gap: 2, padding: '6px 10px', borderRadius: 16, maxWidth: 'calc(100vw - 16px)', overflowX: 'auto',
+      display: 'flex', alignItems: 'center', gap: 2, padding: mobile ? '5px 6px' : '6px 10px', borderRadius: 16, maxWidth: 'calc(100vw - 16px)', overflowX: 'auto',
       background: 'rgba(10,11,26,0.9)', border: `1px solid ${MENU.border}`, backdropFilter: 'blur(12px)', boxShadow: '0 12px 30px rgba(0,0,0,0.5)' }}>
       {primary.map((it) => <Item key={it.label} it={it} />)}
-      <span aria-hidden style={{ width: 1, height: 34, background: MENU.border, margin: '0 6px', flex: 'none' }} />
+      <span aria-hidden style={{ width: 1, height: 34, background: MENU.border, margin: mobile ? '0 2px' : '0 6px', flex: 'none' }} />
       {utils.map((it) => <Item key={it.label} it={it} />)}
     </nav>
   );

@@ -19,7 +19,7 @@ import { Haptics } from './haptics';
 const VOICE_CHAT_ENABLED = false;
 import {
   ArrowDown, ArrowRight, Bolt, Cards, Chain, Chat as ChatIcon, Check, ChevronLeft, ChevronRight,
-  Close, Diamond, Dot, Hand as HandIcon, Minus, Moon, Orb, Plus, Refresh, Robot, Scroll as ScrollIcon,
+  Close, Diamond, Dot, Hand as HandIcon, Minus, Moon, Orb, Plus, Refresh, Robot,
   Settings as SettingsIcon, Shield, Skull, Swords, Target, Warning,
 } from './icons';
 import './Board.css';
@@ -2105,6 +2105,7 @@ function Playmat(props: {
     myName, oppName,
   } = props;
 
+  const mobile = useIsMobile();
   const mePump  = me.machines.filter(m => CARDS[m.defId]?.effect === 'pump_all_+1+1' && !m.attachedTo).length;
   const oppPump = opp.machines.filter(m => CARDS[m.defId]?.effect === 'pump_all_+1+1' && !m.attachedTo).length;
 
@@ -2124,7 +2125,6 @@ function Playmat(props: {
     myLife:      { left: 1,  top: 55, w: 13, h: 7  },
     myBattle:    { left: 15, top: 55, w: 70, h: 25 }, // memes / battlefield
     myMachines:  { left: 86, top: 62, w: 13, h: 17 },
-    myMaindeck:  { left: 1,  top: 62, w: 13, h: 17 }, // decorative
     myDeck:      { left: 1,  top: 80, w: 13, h: 18 }, // draw deck
     myNodes:     { left: 15, top: 80, w: 70, h: 18 },
     myGrave:     { left: 86, top: 80, w: 13, h: 18 },
@@ -2138,7 +2138,9 @@ function Playmat(props: {
       // it hands us a square box sized by the leftover height, on mobile a
       // full-width one. Either way we just fill it and stay square.
       maxWidth: '100%', maxHeight: '100%',
-      aspectRatio: '1 / 1',
+      // Phones: shorter than wide. Cards are sized off the mat's WIDTH (cqw),
+      // so trimming height only removes empty mat, and those px go to the hand.
+      aspectRatio: mobile ? '5 / 4' : '1 / 1',
       margin: '0 auto', borderRadius: 16, overflow: 'hidden',
       // Gilded outer bezel: bronze edge outside, gold hairline inside.
       border: '1px solid rgba(122,84,18,0.9)',
@@ -2290,9 +2292,6 @@ function Playmat(props: {
             onClick={machineTargetable ? () => onMachineClick(inst.uid) : undefined}
             targetable={machineTargetable} />
         ))}
-      </ZoneSlot>
-      <ZoneSlot rect={Z.myMaindeck} icon={<ScrollIcon size={11} />} label="Main Deck" compactLabel="">
-        <div style={{ color: '#888', fontSize: 10 }}>—</div>
       </ZoneSlot>
       <ZoneSlot rect={Z.myDeck} icon={<Cards size={11} />} label={`Deck (${myDeckCount})`} compactLabel={`${myDeckCount}`}>
         {myDeckCount > 0 && <MiniCard faceDown />}
@@ -3196,20 +3195,23 @@ function MiniCard({
         position: 'relative',
         flex: '0 0 auto',
       }}>
-      <div style={{
-        fontSize: 8, fontWeight: 800, lineHeight: 1.0, overflow: 'hidden',
-        position: 'relative', zIndex: 2, textShadow: '0 1px 0 rgba(255,255,255,0.22)',
-      }}>{def.name}</div>
-      {/* Art window: the field used to show only a name on flat faction colour,
-          so cards were hard to tell apart (and white Spirit cards read as blank). */}
-      <div aria-hidden style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, margin: '2px 0', borderRadius: 3, overflow: 'hidden',
-        background: 'rgba(0,0,0,0.35)', boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.6)', display: 'grid', placeItems: 'center' }}>
+      {/* Art fills the card behind the name and P/T. The field used to show only
+          a name on flat faction colour (white Spirit cards read as blank), and a
+          stacked art row got squeezed to nothing on a 28px phone card. The
+          faction colour stays visible as the 2px frame around the art. */}
+      <div aria-hidden style={{ position: 'absolute', inset: 2, zIndex: 1, borderRadius: 3, overflow: 'hidden',
+        background: 'rgba(0,0,0,0.35)', display: 'grid', placeItems: 'center' }}>
         {def.image
           ? <img src={def.image} alt="" loading="lazy" draggable={false}
               onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
               style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
           : <ChainLogo color={def.color} size={22} />}
       </div>
+      <div style={{
+        fontSize: 8, fontWeight: 800, lineHeight: 1.05, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+        position: 'relative', zIndex: 2, color: '#fff', padding: '0 2px', borderRadius: 2,
+        background: 'linear-gradient(180deg, rgba(0,0,0,0.78), rgba(0,0,0,0.45))', textShadow: '0 1px 1px #000',
+      }}>{def.name}</div>
       {def.power != null && def.toughness != null && (() => {
         const bonus = pumpBonus ?? 0;
         const pow = (def.power ?? 0) + bonus;
