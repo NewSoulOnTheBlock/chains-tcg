@@ -290,7 +290,7 @@ const FACTION_STYLE: Record<Color, string> = {
   base: 'Card draw and tricks. Bounce threats and outthink the opponent.',
 };
 
-function buildSteps(): Step[] {
+function buildSteps(guest: boolean): Step[] {
   return [
     {
       id: 'welcome', kicker: 'WELCOME TO EGREGORE', title: 'Bring their life from 20 to 0',
@@ -302,7 +302,9 @@ function buildSteps(): Step[] {
           <Bullets items={[
             <>You also lose if you have to draw from an <B>empty deck</B>.</>,
             <>This tour takes about two minutes. It covers <B>every card type</B> and every rule you need for your first match.</>,
-            <>You can skip it and replay it any time from <B>Settings</B>.</>,
+            guest
+              ? <>No account needed to read this. Sign in when you are ready to play.</>
+              : <>You can skip it and replay it any time from <B>Settings</B>.</>,
           ]} />
         </>
       ),
@@ -498,16 +500,18 @@ function buildSteps(): Step[] {
       ),
     },
     {
-      id: 'ready', kicker: 'YOU ARE READY', title: 'Try it against the bot',
+      id: 'ready', kicker: 'YOU ARE READY', title: guest ? 'Sign in and play' : 'Try it against the bot',
       body: (
         <>
           <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.6, color: T.text }}>
-            That's every card type and every rule. A practice match against the bot is the fastest way to make it stick: nothing is at stake, and you can quit any time.
+            {guest
+              ? <>That's every card type and every rule. Sign in with email, Google or X (a wallet is made for you), then start with a <B>practice match against the bot</B>: nothing is at stake, and you can quit any time.</>
+              : <>That's every card type and every rule. A practice match against the bot is the fastest way to make it stick: nothing is at stake, and you can quit any time.</>}
           </p>
           <Bullets items={[
             <>Hover or long-press any card in a match to see it full size.</>,
             <>The <B>Rulebook</B> has every rule in detail, plus a video walkthrough.</>,
-            <>Replay this tutorial from <B>Settings</B>.</>,
+            guest ? <>Once you're in, press <B>Practice vs Bot</B> on the main screen. No deck needed.</> : <>Replay this tutorial from <B>Settings</B>.</>,
           ]} />
         </>
       ),
@@ -517,13 +521,16 @@ function buildSteps(): Step[] {
 
 // ── Overlay ─────────────────────────────────────────────────────────────────
 
-export function FirstRunTutorial({ onClose, onPractice, onRulebook }: {
+export function FirstRunTutorial({ onClose, onPractice, onRulebook, onSignIn }: {
   /** Fired for skip, finish and Escape. The caller marks the tutorial seen. */
   onClose: () => void;
-  onPractice: () => void;
-  onRulebook: () => void;
+  onPractice?: () => void;
+  onRulebook?: () => void;
+  /** Guest mode (sign-in screen): the last step offers sign-in instead of practice. */
+  onSignIn?: () => void;
 }) {
-  const steps = useMemo(buildSteps, []);
+  const guest = !!onSignIn;
+  const steps = useMemo(() => buildSteps(guest), [guest]);
   const [i, setI] = useState(0);
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 900);
   const step = steps[i];
@@ -595,6 +602,16 @@ export function FirstRunTutorial({ onClose, onPractice, onRulebook }: {
           </button>
           {last ? (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {guest ? (
+                <>
+                  <button onClick={onClose} style={{ padding: '9px 16px', borderRadius: 9, background: T.panel,
+                    border: `1px solid ${T.border}`, color: T.text, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Close</button>
+                  <button onClick={onSignIn} style={{ padding: '9px 18px', borderRadius: 9, border: 'none', cursor: 'pointer',
+                    background: T.gold, color: '#1a1406', fontWeight: 800, fontSize: 13, letterSpacing: '0.04em', boxShadow: `0 0 16px ${T.gold}66` }}>
+                    Sign in to play →
+                  </button>
+                </>
+              ) : <>
               <button onClick={onRulebook} style={{ padding: '9px 16px', borderRadius: 9, background: T.panel,
                 border: `1px solid ${T.border}`, color: T.text, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>Open Rulebook</button>
               <button onClick={onClose} style={{ padding: '9px 16px', borderRadius: 9, background: T.panel,
@@ -603,6 +620,7 @@ export function FirstRunTutorial({ onClose, onPractice, onRulebook }: {
                 background: T.gold, color: '#1a1406', fontWeight: 800, fontSize: 13, letterSpacing: '0.04em', boxShadow: `0 0 16px ${T.gold}66` }}>
                 Practice vs bot →
               </button>
+              </>}
             </div>
           ) : (
             <button onClick={next} style={{ padding: '9px 20px', borderRadius: 9, border: 'none', cursor: 'pointer',

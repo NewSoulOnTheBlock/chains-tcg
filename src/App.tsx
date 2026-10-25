@@ -260,6 +260,8 @@ function Login({ onSignedIn }: {
   const [err, setErr] = useState('');
   const [stage, setStage] = useState<'idle' | 'connecting' | 'signing'>('idle');
   const [remember, setRemember] = useState(false);
+  /** "How to play" — the first-run tutorial, readable before committing to sign-in. */
+  const [guideOpen, setGuideOpen] = useState(false);
   // ── Privy (email / social / passkey) ─────────────────────────────────────
   // The five buttons below are EAGER — plain styled buttons, no SDK — so the
   // heavy chunk is only fetched when one is pressed, or when a silent resume
@@ -401,6 +403,12 @@ function Login({ onSignedIn }: {
         background: 'rgba(12,10,26,0.72)', border: '1px solid rgba(150,120,255,0.22)', borderRadius: 18,
         padding: 26, backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', boxShadow: '0 24px 70px rgba(0,0,0,0.55)',
       }}>
+        <button type="button" onClick={() => setGuideOpen(true)}
+          style={{ width: '100%', padding: '12px', borderRadius: 12, cursor: 'pointer', fontWeight: 800, fontSize: 14, letterSpacing: '0.05em',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            color: '#e6d4ff', background: 'rgba(139,92,246,0.2)', border: '1px solid rgba(139,92,246,0.6)' }}>
+          <Book size={16} /> New here? How to play
+        </button>
         <div style={{ textAlign: 'center', marginBottom: 2 }}>
           <div style={{ color: '#b794f6', letterSpacing: 3, fontWeight: 800, fontSize: 14 }}>‹ SIGN IN ›</div>
           <div style={{ color: '#9a94ad', fontSize: 12, marginTop: 4 }}>
@@ -463,6 +471,15 @@ function Login({ onSignedIn }: {
           </div>
         )}
       </div>
+      {guideOpen && (
+        <FirstRunTutorial
+          onClose={() => setGuideOpen(false)}
+          onSignIn={() => {
+            setGuideOpen(false);
+            if (PRIVY_ENABLED) setPrivyMount((prev) => ({ openLogin: true, n: (prev?.n ?? 0) + 1 }));
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1998,12 +2015,12 @@ function fmtCountdown(ms: number) {
 type QueueMode = 'ranked' | 'casual';
 
 function Landing({
-  myName, profile, queue, onPlay, onLadder, onMasterquest, onBoosters, onProfile, onRules, onSettings,
+  myName, profile, queue, onPlay, onSolo, onLadder, onMasterquest, onBoosters, onProfile, onRules, onSettings,
 }: {
   myName: string; profile: Profile;
   /** The ranked queue, owned by the app root so it survives a view change. */
   queue: RankedQueue;
-  onPlay: () => void; onLadder: () => void; onMasterquest: () => void; onBoosters: () => void;
+  onPlay: () => void; onSolo: () => void; onLadder: () => void; onMasterquest: () => void; onBoosters: () => void;
   onProfile: () => void; onRules: () => void; onSettings: () => void;
 }) {
   const mobile = useIsMobile(767);
@@ -2130,7 +2147,7 @@ function Landing({
           <div style={{ flex: 'none' }}>
           <MatchmakingPanel deckState={deckState} deckName={activeDeck?.name ?? null}
             deckCount={deckCards.length} deckFaction={deckFaction} deckIssue={deckValid?.issues?.[0]?.message ?? null}
-            players={players} onPlay={play} onChangeDeck={() => { try { window.location.hash = 'decks'; } catch {} onProfile(); }}
+            players={players} onPlay={play} onSolo={onSolo} onChangeDeck={() => { try { window.location.hash = 'decks'; } catch {} onProfile(); }}
             loading={loading} mobile={mobile}
             queue={queue} season={season} standing={standing} rankedDeck={rankedDeck}
             scanning={scanning || collection.loading} onScanChain={() => { void scanChain(); }}
@@ -2262,12 +2279,12 @@ function hudBtn(): React.CSSProperties {
  * synced" prompts a chain scan and must never claim the deck is illegal.
  */
 function MatchmakingPanel({
-  deckState, deckName, deckCount, deckFaction, deckIssue, players, onPlay, onChangeDeck, loading, mobile,
+  deckState, deckName, deckCount, deckFaction, deckIssue, players, onPlay, onSolo, onChangeDeck, loading, mobile,
   queue, season, standing, rankedDeck, scanning, onScanChain, onBoosters, onDeckScreen, onLadder,
 }: {
   deckState: 'loading' | 'missing' | 'invalid' | 'valid';
   deckName: string | null; deckCount: number; deckFaction: { name: string; color: string } | null; deckIssue: string | null;
-  players: number | null; onPlay: () => void; onChangeDeck: () => void; loading: boolean; mobile: boolean;
+  players: number | null; onPlay: () => void; onSolo: () => void; onChangeDeck: () => void; loading: boolean; mobile: boolean;
   queue: RankedQueue;
   season: SeasonInfo | null;
   /** `null` while the caller's ranked profile is loading or unavailable. */
@@ -2377,6 +2394,16 @@ function MatchmakingPanel({
       ) : (
         <RankedQueueControl queue={queue} onDeckScreen={onDeckScreen} onBoosters={onBoosters} />
       )}
+
+      {/* New players have no deck yet, so the play button above is disabled
+          for them. Bot practice runs on starter decks: always offer it here
+          rather than one screen deeper in the lobby. */}
+      <button onClick={onSolo} className="menu-anim"
+        style={{ width: '100%', marginTop: 10, padding: '11px', borderRadius: 12, cursor: 'pointer',
+          fontWeight: 800, fontSize: 13, letterSpacing: '0.06em', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          color: '#e6d4ff', background: 'rgba(139,92,246,0.18)', border: '1px solid rgba(139,92,246,0.55)' }}>
+        <Robot size={15} /> PRACTICE VS BOT <span style={{ fontWeight: 600, fontSize: 11, opacity: 0.75, letterSpacing: 0 }}>· no deck needed</span>
+      </button>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 12, fontSize: 12, color: MENU.text2 }}>
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: MENU.success, boxShadow: `0 0 6px ${MENU.success}` }} />
@@ -6756,6 +6783,9 @@ function PrintAllCards() {
 // Solo (vs-bot) setup modal: pick difficulty + mode + deck color, then launch
 // the in-browser SoloClient. No server hops, no wager, no voice — see
 // src/SoloClient.tsx + src/bot.ts.
+/** Solo deck ids are saved-deck ids or `starter:<color>` for the free starters. */
+const STARTER_PREFIX = 'starter:';
+
 function SoloSetupModal({
   myName, onLaunch, onClose,
 }: {
@@ -6766,9 +6796,9 @@ function SoloSetupModal({
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
   const [mode, setMode] = useState<SoloMode>('casual');
   const [color, setColor] = useState<Color>('sol');
-  // null = use one of the 5 starter decks; otherwise the chosen saved deck id.
+  // A saved deck id, or `starter:<color>` for a free starter deck.
   // Deck ids are bigint-safe decimal strings.
-  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(`${STARTER_PREFIX}sol`);
   const [decks, setDecks] = useState<DeckEntry[]>([]);
   const [decksLoading, setDecksLoading] = useState<boolean>(true);
   const dateKey = todayKey();
@@ -6783,9 +6813,10 @@ function SoloSetupModal({
         const list = await listDecksApi();
         if (cancelled) return;
         setDecks(list);
-        // Single-player requires an owned custom deck — default to the first valid one.
+        // Default to the first legal saved deck; a brand-new player with none
+        // starts on a free starter deck instead of a disabled START button.
         const firstLegal = list.find(d => validateDeck(d.cards).ok);
-        setSelectedDeckId(firstLegal ? firstLegal.id : null);
+        setSelectedDeckId(firstLegal ? firstLegal.id : `${STARTER_PREFIX}sol`);
       } catch {
         if (!cancelled) setDecks([]);
       } finally {
@@ -6795,10 +6826,10 @@ function SoloSetupModal({
     return () => { cancelled = true; };
   }, [myName]);
 
-  const chosenCustom = selectedDeckId == null ? null : decks.find(d => d.id === selectedDeckId) ?? null;
-  // Single-player requires a custom deck built only from owned (booster) cards.
-  const chosenOwnedOk = chosenCustom ? validateDeck(chosenCustom.cards).ok : false;
-  const canStart = selectedDeckId != null && chosenOwnedOk;
+  const starterColor = selectedDeckId?.startsWith(STARTER_PREFIX) ? selectedDeckId.slice(STARTER_PREFIX.length) as Color : null;
+  const chosenCustom = selectedDeckId == null || starterColor ? null : decks.find(d => d.id === selectedDeckId) ?? null;
+  const chosenCards = starterColor ? STARTER_DECKS[starterColor] : chosenCustom?.cards ?? null;
+  const canStart = chosenCards != null && validateDeck(chosenCards).ok;
 
   const btn = (active: boolean, accent: string): React.CSSProperties => ({
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
@@ -6865,9 +6896,23 @@ function SoloSetupModal({
         </div>
 
         <div>
-          <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, letterSpacing: 1 }}>YOUR DECK · CUSTOM ONLY</div>
+          <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, letterSpacing: 1 }}>FREE STARTER DECKS</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+            {COLORS.map(c => {
+              const id = `${STARTER_PREFIX}${c}`;
+              const active = selectedDeckId === id;
+              return (
+                <button key={id} onClick={() => setSelectedDeckId(id)} style={{
+                  background: active ? COLOR_META[c].hex : '#1a1730',
+                  color: active ? COLOR_META[c].ink : '#ccc',
+                  border: `2px solid ${active ? COLOR_META[c].hex : COLOR_META[c].hex + '66'}`,
+                  borderRadius: 8, padding: '8px 12px', fontWeight: 700, cursor: 'pointer', fontSize: 12,
+                }} title={`${COLOR_META[c].name} starter deck`}>{COLOR_META[c].name}</button>
+              );
+            })}
+          </div>
 
-          {/* Single-player requires a custom deck built only from owned cards. */}
+          <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, letterSpacing: 1 }}>YOUR DECKS</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
             {decksLoading && (
               <div style={{ fontSize: 11, opacity: 0.6, alignSelf: 'center' }}>loading decks…</div>
@@ -6890,13 +6935,9 @@ function SoloSetupModal({
             })}
             {!decksLoading && decks.length === 0 && (
               <div style={{ fontSize: 11, opacity: 0.7, alignSelf: 'center' }}>
-                No decks yet — build one from your collection in Profile › Decks.
+                None yet. Build one in Profile › Decks, or use a starter above.
               </div>
             )}
-          </div>
-
-          <div style={{ fontSize: 11, opacity: 0.7 }}>
-            Single-player uses a custom deck built only from cards you own — booster pulls plus your 20 starter Nodes of each faction.
           </div>
         </div>
 
@@ -6914,15 +6955,15 @@ function SoloSetupModal({
 
         {!canStart && (
           <div style={{ fontSize: 11, color: '#ffb84d', opacity: 0.9 }}>
-            Build a valid 60-card deck from your collection to play single-player.
+            Pick a starter deck or a complete 60-card deck to play.
           </div>
         )}
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
           <button
             disabled={!canStart}
             onClick={() => canStart && onLaunch({
-              difficulty, mode, color,
-              customDeck: chosenCustom!.cards,
+              difficulty, mode, color: starterColor ?? color,
+              customDeck: chosenCards,
             })}
             style={{
               flex: 1, background: !canStart ? '#3a2a4a' : '#6c4bd8', color: '#fff',
@@ -7514,7 +7555,7 @@ export default function App() {
                       linkProblem={linkProblem}
                       onDismissLinkProblem={() => setLinkProblem(null)}
                     />
-                  : <Landing myName={name} profile={profile} queue={rankedQueue} onPlay={() => goto('lobby')} onLadder={() => goto('ranked')} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onSettings={() => goto('settings')} />}
+                  : <Landing myName={name} profile={profile} queue={rankedQueue} onPlay={() => goto('lobby')} onSolo={() => setSoloSetup(true)} onLadder={() => goto('ranked')} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onSettings={() => goto('settings')} />}
     </>
   );
 }

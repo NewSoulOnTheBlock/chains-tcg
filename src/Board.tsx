@@ -197,10 +197,10 @@ function MobilePlaymatScaler({
           top-right corner used to bury the opponent's deck / hand / graveyard
           zones on a 390px phone, making those cards untappable. */}
       <div style={{
-        margin: '4px auto 0', width: 'fit-content', zIndex: 5,
-        display: 'flex', gap: 8,
+        margin: '3px auto 0', width: 'fit-content', zIndex: 5,
+        display: 'flex', gap: 6,
         background: 'linear-gradient(180deg, rgba(22,17,32,0.85), rgba(8,7,14,0.9))',
-        padding: 5, borderRadius: 999,
+        padding: 3, borderRadius: 999,
         border: '1px solid rgba(229,184,75,0.4)',
         backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
         boxShadow: 'inset 0 1px 0 rgba(255,226,160,0.14), 0 4px 14px rgba(0,0,0,0.5)',
@@ -223,10 +223,9 @@ function MobilePlaymatScaler({
 function zoomBtnStyle(): React.CSSProperties {
   // Visual treatment lives in `.brd-stud` (bezelled metal stud); this only sizes it.
   // 44px keeps it at the minimum comfortable touch target.
-  return { width: 44, height: 44, fontWeight: 800, fontSize: 18, lineHeight: 1 };
+  // 36px on the board's compact pill: every px of height here comes out of the hand.
+  return { width: 36, height: 36, fontWeight: 800, fontSize: 16, lineHeight: 1 };
 }
-
-const COLOR_BAR: React.CSSProperties = { display: 'flex', gap: 6, fontSize: 12, marginTop: 4 };
 
 function Pip({ c, n }: { c: Color | 'any'; n: number }) {
   if (!n) return null;
@@ -240,16 +239,6 @@ function Pip({ c, n }: { c: Color | 'any'; n: number }) {
       background: meta.hex, color: meta.ink,
       fontWeight: 700, fontSize: 11, border: '1px solid #0003',
     }}>{n}</span>
-  );
-}
-
-function CostPips({ def }: { def: CardDef }) {
-  if (!def.cost) return null;
-  return (
-    <div style={COLOR_BAR}>
-      <Pip c="any" n={def.cost.any ?? 0} />
-      {COLORS.map(c => <Pip key={c} c={c} n={def.cost?.[c] ?? 0} />)}
-    </div>
   );
 }
 
@@ -439,33 +428,63 @@ function CardFace({
         position: 'relative', flex: '0 0 auto',
       }}>
       {tpl ? <TemplatedCardFaceContent def={def} instance={instance} footer={footer} tpl={tpl} /> : <>
-      <div style={{ fontWeight: 700, fontSize: 10, lineHeight: 1.05, position: 'relative', zIndex: 1 }}>{def.name}</div>
-      <div style={{ fontSize: 8, opacity: 0.85, marginTop: 1, lineHeight: 1.1, position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 3 }}>
-        {def.type.toUpperCase()}
+      {/* Name gets the full width; the cost rides on the art (below). */}
+      <div style={{ fontWeight: 800, fontSize: compact ? 9.5 : 11, lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        position: 'relative', zIndex: 1 }}>{def.name}</div>
+      {/* Art window. Memes and Moves have art; Nodes show their faction sigil.
+          Without this only framed Machine/Aura cards showed any picture. */}
+      <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, margin: '3px 0', borderRadius: 4, overflow: 'hidden',
+        background: 'rgba(0,0,0,0.35)', boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.6)', display: 'grid', placeItems: 'center' }}>
+        {def.image
+          ? <img src={def.image} alt="" loading="lazy" draggable={false}
+              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+          : <ChainLogo color={def.color} size={compact ? 34 : 52} />}
+        {def.cost && (
+          <span style={{ position: 'absolute', top: 2, left: 2, display: 'flex', gap: 2 }}>
+            {(['any', ...COLORS] as const).map(c => {
+              const n = def.cost?.[c] ?? 0; if (!n) return null;
+              const cm = c === 'any' ? { hex: '#c8c8d0', ink: '#1a1a1a' } : COLOR_META[c];
+              return (
+                <span key={c} title={c === 'any' ? `${n} any gas` : `${n} ${COLOR_META[c].name} gas`} style={{
+                  width: 15, height: 15, borderRadius: 8, display: 'grid', placeItems: 'center',
+                  background: cm.hex, color: cm.ink, fontSize: 9.5, fontWeight: 900,
+                  border: '1px solid #000', boxShadow: '0 1px 3px rgba(0,0,0,0.8)',
+                }}>{n}</span>
+              );
+            })}
+          </span>
+        )}
         {instance?.summoningSick && (
           <span title="Summoning sick — cannot attack this turn"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 2, color: '#2a1f00', background: '#ffd76a', padding: '0 3px', borderRadius: 3, fontSize: 7, fontWeight: 800 }}>
+            style={{ position: 'absolute', top: 2, right: 2, display: 'inline-flex', alignItems: 'center', gap: 2, color: '#2a1f00', background: '#ffd76a', padding: '0 3px', borderRadius: 3, fontSize: 7, fontWeight: 800, boxShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
             <Moon size={8} />SICK
           </span>
         )}
         {tapped && !instance?.summoningSick && (
-          <span title="Tapped" style={{ display: 'inline-flex', alignItems: 'center', gap: 2, color: '#111', background: '#b9bcc8', padding: '0 3px', borderRadius: 3, fontSize: 7, fontWeight: 800 }}>
+          <span title="Tapped" style={{ position: 'absolute', top: 2, right: 2, display: 'inline-flex', alignItems: 'center', gap: 2, color: '#111', background: '#b9bcc8', padding: '0 3px', borderRadius: 3, fontSize: 7, fontWeight: 800, boxShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
             <Refresh size={8} />TAPPED
           </span>
         )}
       </div>
-      <div style={{ fontSize: 8, marginTop: 3, flex: 1, overflow: 'hidden', lineHeight: 1.15, position: 'relative', zIndex: 1 }}>{def.text}</div>
-      {def.type === 'meme' && (
-        <div style={{
-          alignSelf: 'flex-end', fontWeight: 800, fontSize: 11, position: 'relative', zIndex: 1,
-          padding: '0 5px', borderRadius: 4, color: '#F4F2EA',
-          background: 'linear-gradient(180deg, rgba(20,16,10,0.85), rgba(8,6,4,0.9))',
-          boxShadow: 'inset 0 0 0 1px rgba(229,184,75,0.45), 0 1px 2px rgba(0,0,0,0.6)',
-        }}>
-          {def.power}/{(def.toughness ?? 1) - (instance?.damage ?? 0)}
-        </div>
+      {/* Type line — big enough to read at a glance; P/T sits on it for Memes */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 3, position: 'relative', zIndex: 1 }}>
+        <span style={{ fontSize: compact ? 8 : 9, fontWeight: 900, letterSpacing: '0.08em', padding: '1px 4px', borderRadius: 3,
+          background: 'rgba(0,0,0,0.55)', color: '#fff' }}>{def.type.toUpperCase()}</span>
+        {def.type === 'meme' && (
+          <span style={{
+            fontWeight: 800, fontSize: compact ? 10 : 12, padding: '0 5px', borderRadius: 4, color: '#F4F2EA',
+            background: 'linear-gradient(180deg, rgba(20,16,10,0.85), rgba(8,6,4,0.9))',
+            boxShadow: 'inset 0 0 0 1px rgba(229,184,75,0.45), 0 1px 2px rgba(0,0,0,0.6)',
+          }}>
+            {def.power}/{(def.toughness ?? 1) - (instance?.damage ?? 0)}
+          </span>
+        )}
+      </div>
+      {/* Rules text only where it is legible; phones read it via long-press. */}
+      {!compact && def.type !== 'meme' && def.type !== 'node' && (
+        <div style={{ fontSize: 8, marginTop: 2, maxHeight: 28, overflow: 'hidden', lineHeight: 1.15, position: 'relative', zIndex: 1 }}>{def.text}</div>
       )}
-      <div style={{ position: 'relative', zIndex: 1 }}><CostPips def={def} /></div>
       {footer && <div style={{ fontSize: 8, lineHeight: 1.1, position: 'relative', zIndex: 1 }}>{footer}</div>}
       </>}
       {damaged && <span aria-hidden className="brd-damaged" />}
@@ -614,6 +633,19 @@ export function ChainsBoard(props: Props) {
   // Mobile hand sheet. The hand itself is always visible as a strip under the
   // mat; this is the expanded grid view for browsing a large hand.
   const [handOpen, setHandOpen] = useState(false);
+  // Phone hand cards fill whatever height the strip has left (it is the column's
+  // flex-grow item), so the hand never ends up under the action bar.
+  const handStripRef = useRef<HTMLDivElement | null>(null);
+  const [handStripH, setHandStripH] = useState(170);
+  useEffect(() => {
+    const el = handStripRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(([e]) => setHandStripH(Math.round(e.contentRect.height)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+  const handCardH = Math.max(112, Math.min(170, handStripH - 2));
+  const handCardSize = { w: Math.round(handCardH * 0.69), h: handCardH };
   // ACTION LOG + CHAT panel. Owned here (not inside MatchRail) because on
   // phones the trigger lives in MobileActionBar — a floating one covered the
   // hand strip. Starts closed on phones and landscape so it never hides the mat.
@@ -1190,7 +1222,7 @@ export function ChainsBoard(props: Props) {
           it. The bottom sheet is still there as the expanded/grid view. */}
       {mobile && (
         <div style={{
-          flex: '1 1 auto', minHeight: 216,
+          flex: '1 1 auto', minHeight: 150,
           display: 'flex', flexDirection: 'column', marginTop: 4,
         }}>
           <div style={{
@@ -1209,10 +1241,10 @@ export function ChainsBoard(props: Props) {
               className="brd-glyph-btn"
               aria-label="Expand hand"
               title="Expand hand — full grid view"
-              style={{ minHeight: 44, minWidth: 44, padding: '4px 12px', fontSize: 10, letterSpacing: 1.4, fontWeight: 800 }}
+              style={{ minHeight: 36, minWidth: 44, padding: '4px 12px', fontSize: 10, letterSpacing: 1.4, fontWeight: 800 }}
             >EXPAND</button>
           </div>
-          <div className="brd-scroll" style={{
+          <div ref={handStripRef} className="brd-scroll" style={{
             flex: '1 1 auto', minHeight: 0,
             display: 'flex', flexWrap: 'nowrap', gap: 4,
             alignItems: 'center',
@@ -1240,7 +1272,7 @@ export function ChainsBoard(props: Props) {
                       defId={id}
                       selected={selectedHand === i}
                       pinOnTap
-                      size={{ w: 110, h: 160 }}
+                      size={handCardSize}
                       onClick={() => isActive && myTurn && !inBlockers && tryPlay(i)}
                     />
                   </DraggableCard>
@@ -2584,17 +2616,9 @@ function MobileActionBar({
         {canEndTurn && (
           <button onClick={onEndTurn} className="brd-plate brd-plate--gold" style={mobBtn()}>END TURN</button>
         )}
-        <button onClick={onOpenHand} className="brd-plate brd-plate--violet"
-          style={{ ...mobBtn(), position: 'relative' }} aria-label={`Open hand (${handCount} cards)`}>
-          <HandIcon size={14} /> HAND
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9,
-            background: 'linear-gradient(180deg,#f7dc93,#c08f2c)', color: '#241703',
-            boxShadow: 'inset 0 1px 0 rgba(255,250,220,0.7), 0 1px 2px rgba(0,0,0,0.6)',
-            fontFamily: 'system-ui, sans-serif', fontWeight: 900, fontSize: 11, letterSpacing: 0,
-          }}>{handCount}</span>
-        </button>
+        {/* No HAND button: the hand strip is always on screen and has its own
+            EXPAND control. The extra button wrapped this bar onto a second row
+            and pushed the board past the bottom of a phone screen. */}
       </div>
     </div>
   );
@@ -2977,8 +3001,10 @@ function TurnBanner({
             </span>
           )}
         </div>
-        {/* Phase line — flanked by heraldic diamonds, current phase in gold. */}
-        <div aria-live="polite" style={{
+        {/* Phase line — flanked by heraldic diamonds, current phase in gold.
+            Phones skip it: the instruction strip right below names the phase,
+            and these ~16px are what the hand needs to clear the action bar. */}
+        {!mobile && <div aria-live="polite" style={{
           fontFamily: '"Cinzel", "Times New Roman", serif', fontWeight: 700, fontSize: 10.5,
           color: '#989BB0', letterSpacing: 2, textTransform: 'uppercase',
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -2988,7 +3014,7 @@ function TurnBanner({
             ? <>Your move · <b style={{ color: bannerAccent, textShadow: `0 0 10px ${bannerAccent}66`, letterSpacing: 2.4 }}>{phase.toUpperCase()}</b></>
             : 'Opponent is deciding…'}
           <Diamond size={6} color={myTurn ? 'rgba(229,184,75,0.65)' : 'rgba(152,155,176,0.45)'} />
-        </div>
+        </div>}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: mobile || short ? 0 : 160, justifyContent: 'flex-end' }}>
         {!mobile && (
@@ -3174,6 +3200,16 @@ function MiniCard({
         fontSize: 8, fontWeight: 800, lineHeight: 1.0, overflow: 'hidden',
         position: 'relative', zIndex: 2, textShadow: '0 1px 0 rgba(255,255,255,0.22)',
       }}>{def.name}</div>
+      {/* Art window: the field used to show only a name on flat faction colour,
+          so cards were hard to tell apart (and white Spirit cards read as blank). */}
+      <div aria-hidden style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, margin: '2px 0', borderRadius: 3, overflow: 'hidden',
+        background: 'rgba(0,0,0,0.35)', boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.6)', display: 'grid', placeItems: 'center' }}>
+        {def.image
+          ? <img src={def.image} alt="" loading="lazy" draggable={false}
+              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+          : <ChainLogo color={def.color} size={22} />}
+      </div>
       {def.power != null && def.toughness != null && (() => {
         const bonus = pumpBonus ?? 0;
         const pow = (def.power ?? 0) + bonus;
