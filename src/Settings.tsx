@@ -437,11 +437,13 @@ function UnlinkWalletDialog({
 // ── Page ────────────────────────────────────────────────────────────────────
 
 export function SettingsPage({
-  myName, onBack, onRules, onLogout, onEditProfile,
+  myName, onBack, onRules, onTutorial, onLogout, onEditProfile,
 }: {
   myName: string;
   onBack: () => void;
   onRules: () => void;
+  /** Reopens the first-run tutorial overlay. */
+  onTutorial: () => void;
   onLogout: () => void;
   onEditProfile: () => void;
 }) {
@@ -779,8 +781,8 @@ export function SettingsPage({
 
           <Row
             title="Replay the tutorial"
-            hint="Opens the interactive rulebook, including the tutorial video."
-            control={<RowButton onClick={onRules}><Book size={14} /> RULEBOOK</RowButton>}
+            hint="Walks through every card type and rule again, with the hands-on gas and combat demos."
+            control={<RowButton onClick={onTutorial}><Book size={14} /> REPLAY</RowButton>}
           />
           <Row
             title="Reset dismissed prompts"

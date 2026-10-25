@@ -65,6 +65,7 @@ import {
 } from './icons';
 import { CardHover, CardPreview } from './CardPreview';
 import { SoloClient } from './SoloClient';
+import { FirstRunTutorial, hasSeenTutorial, markTutorialSeen } from './Tutorial';
 import type { Difficulty } from './bot';
 import type { SoloMode } from './SoloClient';
 import { saveDailyResult, todayKey, todayBest } from './dailyChallenge';
@@ -7102,6 +7103,8 @@ export default function App() {
   const [view, setView] = useState<View>(() => sess.get<View>('view', 'landing'));
   const [viewedProfile, setViewedProfile] = useState<string | null>(null);
   const [soloSetup, setSoloSetup] = useState<boolean>(false);
+  /** First-run tutorial overlay. Opened once per account, or on demand from Settings. */
+  const [tutorialOpen, setTutorialOpen] = useState(false);
   const [soloCfg, setSoloCfg] = useState<{ difficulty: Difficulty; mode: SoloMode; color: Color; customDeck: string[] | null } | null>(null);
   const soloStartRef = useRef<number>(0);
 
@@ -7186,6 +7189,12 @@ export default function App() {
   }, [reloadProfile]);
 
   const name = profile?.name ?? '';
+  const tutorialAccount = profile?.walletAddress ?? (name || null);
+  // First sign-in: open the tutorial as soon as we know who the player is.
+  useEffect(() => {
+    if (profile && !hasSeenTutorial(tutorialAccount)) setTutorialOpen(true);
+  }, [profile, tutorialAccount]);
+  function closeTutorial() { markTutorialSeen(tutorialAccount); setTutorialOpen(false); }
 
   // Track solo match start/end for daily-best recording. Board fires
   // `mmtcg:solo-end` when a solo match resolves.
@@ -7454,11 +7463,21 @@ export default function App() {
         />
       )}
       {showMusic && <MenuMusic />}
+      {/* Waits behind the wallet-link prompt and any solo match so a new
+          player never sees two overlays stacked on top of each other. */}
+      {tutorialOpen && !offerWalletLink && !soloCfg && !soloSetup && (
+        <FirstRunTutorial
+          onClose={closeTutorial}
+          onPractice={() => { closeTutorial(); goto('landing'); setSoloSetup(true); }}
+          onRulebook={() => { closeTutorial(); goto('rules'); }}
+        />
+      )}
       {view === 'settings'
         ? <SettingsPage
             myName={name}
             onBack={() => goto('landing')}
             onRules={() => goto('rules')}
+            onTutorial={() => setTutorialOpen(true)}
             onLogout={logout}
             onEditProfile={editProfile}
           />
