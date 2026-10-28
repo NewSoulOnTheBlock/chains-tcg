@@ -37,6 +37,14 @@ function db(): pg.Pool {
 const admins = (): Set<string> =>
   new Set((process.env.CHAT_ADMINS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 
+// Admins named by their profile display name, committed here so they don't need
+// an env var. Matched case-insensitively against the gateway's `displayName`,
+// which is server-resolved from the caller's token (see whoIs) — a client can't
+// post under someone else's name to borrow admin.
+const NAME_ADMINS = new Set<string>([
+  'anoversizedmoosewithsocks',
+]);
+
 interface Who { id: string; name: string; avatarUrl: string | null; address: string }
 
 // Warm instances reuse this, so a chatty player costs one gateway call per
@@ -57,7 +65,8 @@ async function whoIs(auth: string | null): Promise<Who | null> {
   return who;
 }
 
-const isAdmin = (who: Who | null) => !!who && admins().has(who.address.toLowerCase());
+const isAdmin = (who: Who | null) =>
+  !!who && (admins().has(who.address.toLowerCase()) || NAME_ADMINS.has((who.name ?? '').trim().toLowerCase()));
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {

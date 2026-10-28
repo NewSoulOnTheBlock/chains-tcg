@@ -321,7 +321,7 @@ export const SITES: ReadonlyArray<SacredSite> = [
       title: 'Hostess of the Carnival of Masks',
       bio:
         'A Jester who has not shown her own face in nine cycles. Plays a tricky deck that ' +
-        'trades evenly, then lets The Last Laugh close it out.',
+        'trades evenly, then lets Harry Horcrux close it out.',
       botColor: 'eth', difficulty: 'hard',
       quote: '"Lovely face. Mind if I keep it?"',
     },

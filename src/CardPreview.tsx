@@ -12,6 +12,7 @@ const PREVIEW_H = 400;
 export function CardPreview({ def }: { def: CardDef }) {
   const meta = COLOR_META[def.color];
   const tpl = templateFor(def);
+  if (def.fullCard && def.image) return <FullCardPreview def={def} />;
   if (tpl) return <TemplatedPreview def={def} tpl={tpl} />;
   return (
     <div style={{
@@ -75,6 +76,24 @@ export function CardPreview({ def }: { def: CardDef }) {
           {def.power}/{def.toughness}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Full-card preview — the image is a complete rendered card (CardDef.fullCard),
+ * so it is shown edge to edge with no overlays.
+ */
+function FullCardPreview({ def }: { def: CardDef }) {
+  return (
+    <div style={{
+      position: 'relative', width: PREVIEW_W, height: PREVIEW_H,
+      borderRadius: 10, overflow: 'hidden', background: '#0a0a0c',
+      boxShadow: '0 12px 40px rgba(0,0,0,0.75)', pointerEvents: 'none',
+    }}>
+      <img src={def.image} alt={def.name} draggable={false}
+        onDragStart={e => e.preventDefault()}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', WebkitUserDrag: 'none', userSelect: 'none' } as React.CSSProperties} />
     </div>
   );
 }

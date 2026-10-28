@@ -66,6 +66,13 @@ export interface CardDef {
   effect?: EffectId;       // for moves + machines
   /** Optional art URL (e.g. CMC logo for meme coins). Falls back to chain glyph on error. */
   image?: string;
+  /**
+   * `image` is a complete rendered card (frame, name, cost, type, rules text
+   * and P/T all baked in), not just the art window. Renderers draw it edge to
+   * edge and skip their own frame chrome, overlaying only live state (damage,
+   * tapped, summoning sick).
+   */
+  fullCard?: boolean;
 }
 
 /**
@@ -78,6 +85,70 @@ export interface CardDef {
  * public/, never hotlinked.
  */
 const IMAGES: Record<string, string> = {};
+
+/**
+ * Complete rendered cards keyed by card id (see `CardDef.fullCard`). These are
+ * the card-forge exports: 1064x1478 WebP, frame + text baked in, vendored in
+ * public/cards/<faction>/. A card listed here renders the file edge to edge
+ * everywhere instead of the composited frame.
+ */
+const FULL_CARDS: Record<string, string> = {
+  // Rebel (internal key `sol`) — landed 2026-10-28.
+  node_sol:      '/cards/rebel/rebel-node.webp?v=1',
+  sol_pnut:      '/cards/rebel/spark-gremlin.webp?v=1',
+  sol_popcat:    '/cards/rebel/riot-drummer.webp?v=1',
+  sol_mew:       '/cards/rebel/graffiti-sproto.webp?v=1',
+  sol_bome:      '/cards/rebel/molotov-mixer.webp?v=1',
+  sol_wif:       '/cards/rebel/shadow.webp?v=1',
+  sol_fartcoin:  '/cards/rebel/firestarter-sproto.webp?v=1',
+  sol_goat:      '/cards/rebel/rebel-warlord.webp?v=1',
+  sol_priority:  '/cards/rebel/black-market-forge.webp?v=1',
+  sol_oracle:    '/cards/rebel/pirate-radio.webp?v=1',
+  sol_tgbot:     '/cards/rebel/burning-banner.webp?v=1',
+  sol_bounce:    '/cards/rebel/scatter.webp?v=1',
+  sol_tgpump:    '/cards/rebel/cheap-shot.webp?v=1',
+  sol_validator: '/cards/rebel/shadow-mode.webp?v=1',
+  // Still on the faction sigil (no render yet): sol_bonk (Brick Tosser),
+  // sol_amm (War Drums), sol_zap (Firebomb).
+
+  // Jester (internal key `eth`) — landed 2026-10-28.
+  node_eth:           '/cards/jester/jester-node.webp?v=1',
+  eth_andy:           '/cards/jester/pocket-jester.webp?v=1',
+  eth_apu:            '/cards/jester/mask-collector.webp?v=1',
+  eth_wojak:          '/cards/jester/weeping-clown.webp?v=1',
+  eth_turbo:          '/cards/jester/knife-juggler.webp?v=1',
+  eth_mog:            '/cards/jester/hoba-carpenter.webp?v=1',
+  eth_shib:           '/cards/jester/carbonara-mussolini.webp?v=1',
+  eth_pepe:           '/cards/jester/harry-horcrux.webp?v=1',
+  eth_sproto_gremlin: '/cards/jester/sproto-gremlin.webp?v=1',
+  eth_eip1559:        '/cards/jester/trick-deck.webp?v=1',
+  eth_temple:         '/cards/jester/carnival-of-masks.webp?v=1',
+  eth_l2:             '/cards/jester/trapdoor-stage.webp?v=1',
+  eth_smite:          '/cards/jester/punchline.webp?v=1',
+  eth_heal:           '/cards/jester/fake-death.webp?v=1',
+  eth_exploit:        '/cards/jester/sabotage.webp?v=1',
+  eth_shield:         '/cards/jester/mirror-mask.webp?v=1',
+  // Still on the faction sigil (no render yet): eth_yield (Jack-in-the-Box).
+
+  // Spirit (internal key `bnb`) — landed 2026-10-28, complete.
+  node_bnb:      '/cards/spirit/spirit-node.webp?v=1',
+  bnb_babydoge:  '/cards/spirit/candle-acolyte.webp?v=1',
+  bnb_broccoli:  '/cards/spirit/halo-hatchling.webp?v=1',
+  bnb_tut:       '/cards/spirit/choir-sproto.webp?v=1',
+  bnb_tst:       '/cards/spirit/pilgrim-sproto.webp?v=1',
+  bnb_banana:    '/cards/spirit/lantern-warden.webp?v=1',
+  bnb_mubarak:   '/cards/spirit/bocca-de-verita.webp?v=1',
+  bnb_cheems:    '/cards/spirit/seraph-sproto.webp?v=1',
+  bnb_floki:     '/cards/spirit/more-light.webp?v=1',
+  bnb_farm:      '/cards/spirit/shrine-of-many.webp?v=1',
+  bnb_bridge:    '/cards/spirit/pilgrim-road.webp?v=1',
+  bnb_sniper:    '/cards/spirit/dawn-bell.webp?v=1',
+  bnb_mmalgo:    '/cards/spirit/banner-of-the-host.webp?v=1',
+  bnb_rugpull:   '/cards/spirit/exorcism.webp?v=1',
+  bnb_airdrop:   '/cards/spirit/revelation.webp?v=1',
+  bnb_honeypot:  '/cards/spirit/blinding-dawn.webp?v=1',
+  bnb_liquidity: '/cards/spirit/retain.webp?v=1',
+};
 
 /**
  * Resolves the framed-template (MTG-style) to use for a card.
@@ -191,8 +262,9 @@ const U = (
 export const CARDS: Record<string, CardDef> = {};
 function reg(...cs: CardDef[]) {
   for (const c of cs) {
+    const full = FULL_CARDS[c.id];
     const img = IMAGES[c.id];
-    CARDS[c.id] = img ? { ...c, image: img } : c;
+    CARDS[c.id] = full ? { ...c, image: full, fullCard: true } : img ? { ...c, image: img } : c;
   }
 }
 
@@ -280,7 +352,7 @@ reg(
   M('eth_turbo',   'eth', 'Knife Juggler',     2, 3, 1, 'Drops one every show. On purpose.'),
   M('eth_mog',     'eth', 'Hoba Carpenter',    3, 3, 4, 'Measures once. Builds twice. Laughs at both.'),
   M('eth_shib',    'eth', 'Carbonara Mussolini', 3, 4, 3, '"The Stink Badger Empire is reawakening!"'),
-  M('eth_pepe',    'eth', 'The Last Laugh',    5, 5, 6, 'It was always going to be him.'),
+  M('eth_pepe',    'eth', 'Harry Horcrux',     5, 5, 6, 'It was always going to be him.'),
   // NFT-linked meme — ETB zaps opp + draws a card (Sproto Gremlin NFT mint)
   ME('eth_sproto_gremlin', 'eth', 'Sproto Gremlin', 2, 2, 2, 'etb_zap_2_and_draw',
      'When ~ enters the field, deal 2 damage to your opponent and draw a card.'),

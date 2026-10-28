@@ -3452,16 +3452,18 @@ const HubCardTile = React.memo(function HubCardTile({ def, inDeck, cap, deckFull
         onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = inDeck > 0 ? `0 0 0 1px ${meta.hex}55 inset` : 'none'; }}
         onFocus={(e) => { e.currentTarget.style.boxShadow = `0 0 0 2px ${HUB.gold}, 0 0 0 4px ${HUB.violet}55`; }}
         onBlur={(e) => { e.currentTarget.style.boxShadow = inDeck > 0 ? `0 0 0 1px ${meta.hex}55 inset` : 'none'; }}>
-        {/* real TCG proportion art */}
+        {/* real TCG proportion art. Full-card renders (CardDef.fullCard) carry
+            their own cost/type/P/T, so the badges stay off them; they are
+            letterboxed (contain) so the tile keeps the grid's 3:4 row height. */}
         <div style={{ position: 'relative', aspectRatio: '3 / 4', background: `linear-gradient(160deg, ${meta.hex}, #0a1020)`, display: 'grid', placeItems: 'center' }}>
-          {def.image ? <img src={def.image} alt={def.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          {def.image ? <img src={def.image} alt={def.name} loading="lazy" style={{ width: '100%', height: '100%', objectFit: def.fullCard ? 'contain' : 'cover' }} />
             /* Decorative — the tile footer below already names the chain. */
             : <ChainLogo color={def.color} size={64} />}
-          {cost != null && <span style={{ position: 'absolute', top: 6, left: 6, minWidth: 22, height: 22, padding: '0 6px', borderRadius: 8,
+          {!def.fullCard && cost != null && <span style={{ position: 'absolute', top: 6, left: 6, minWidth: 22, height: 22, padding: '0 6px', borderRadius: 8,
             background: 'rgba(0,0,0,0.72)', color: '#fff', fontSize: 12, fontWeight: 900, display: 'grid', placeItems: 'center' }}>{cost}</span>}
-          <span style={{ position: 'absolute', top: 6, right: 6, padding: '2px 7px', borderRadius: 999, fontSize: 9, fontWeight: 800,
-            letterSpacing: '0.06em', background: 'rgba(0,0,0,0.7)', color: '#fff', textTransform: 'uppercase' }}>{def.type}</span>
-          {def.type === 'meme' && def.power != null && (
+          {!def.fullCard && <span style={{ position: 'absolute', top: 6, right: 6, padding: '2px 7px', borderRadius: 999, fontSize: 9, fontWeight: 800,
+            letterSpacing: '0.06em', background: 'rgba(0,0,0,0.7)', color: '#fff', textTransform: 'uppercase' }}>{def.type}</span>}
+          {!def.fullCard && def.type === 'meme' && def.power != null && (
             <span style={{ position: 'absolute', bottom: 6, right: 6, padding: '2px 7px', borderRadius: 6, background: 'rgba(0,0,0,0.78)', color: '#fff', fontSize: 12, fontWeight: 900 }}>{def.power}/{def.toughness}</span>
           )}
           {inDeck > 0 && <span style={{ position: 'absolute', bottom: 6, left: 6, padding: '2px 8px', borderRadius: 999, background: meta.hex, color: meta.ink, fontSize: 11, fontWeight: 900 }}>×{inDeck}</span>}
@@ -4810,7 +4812,9 @@ function DeckBuilderCard({ def, count, cap, totalFull, onPlus, onMinus }: {
           transition: '200ms ease',
           boxShadow: owned ? `0 0 0 1px ${meta.hex}88 inset` : 'none',
         }}>
-        {/* Art */}
+        {/* Art. Full-card renders (CardDef.fullCard) are shown whole
+            (letterboxed in the square) and carry their own type/cost/P/T, so
+            no badges. */}
         <div style={{
           aspectRatio: '1', overflow: 'hidden',
           background: `linear-gradient(160deg, ${meta.hex}, #0a1020)`,
@@ -4819,17 +4823,17 @@ function DeckBuilderCard({ def, count, cap, totalFull, onPlus, onMinus }: {
         }}>
           {def.image
             ? <img src={def.image} alt={def.name} loading="lazy"
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                style={{ width: '100%', height: '100%', objectFit: def.fullCard ? 'contain' : 'cover' }} />
             /* Decorative — the card footer below already names the chain. */
             : <ChainLogo color={def.color as Color} size={64} />}
           {/* Type badge */}
-          <span style={{
+          {!def.fullCard && <span style={{
             position: 'absolute', top: 6, left: 6,
             padding: '2px 7px', borderRadius: 999, fontSize: 9, fontWeight: 800,
             background: 'rgba(0,0,0,0.7)', color: '#fff', letterSpacing: 1, textTransform: 'uppercase',
-          }}>{def.type}</span>
+          }}>{def.type}</span>}
           {/* Cost badge (sum of all chain gas) */}
-          {def.cost && Object.keys(def.cost).length > 0 && (
+          {!def.fullCard && def.cost && Object.keys(def.cost).length > 0 && (
             <span style={{
               position: 'absolute', top: 6, right: 6,
               minWidth: 22, height: 22, padding: '0 6px',
@@ -4840,7 +4844,7 @@ function DeckBuilderCard({ def, count, cap, totalFull, onPlus, onMinus }: {
             }}>{Object.values(def.cost as Record<string, number>).reduce((s, n) => s + (n as number), 0)}</span>
           )}
           {/* Power/toughness for memes */}
-          {def.type === 'meme' && (
+          {!def.fullCard && def.type === 'meme' && (
             <span style={{
               position: 'absolute', bottom: 6, right: 6,
               padding: '2px 7px', borderRadius: 6,

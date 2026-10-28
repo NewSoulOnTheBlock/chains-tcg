@@ -276,7 +276,10 @@ function DraggableCard({
     startRef.current = { x: e.clientX, y: e.clientY };
     movedRef.current = false;
     idRef.current = e.pointerId;
-    try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch {}
+    // Pointer capture is taken only once a real drag starts (onPointerMove).
+    // Taking it here broke plain clicks: with the pointer captured by this
+    // span, Chrome retargets pointerup and the resulting click to the span,
+    // so the CardFace's own onClick (a descendant) never fired.
   }
   function onPointerMove(e: React.PointerEvent) {
     if (idRef.current !== e.pointerId || !startRef.current) return;
@@ -284,6 +287,7 @@ function DraggableCard({
     const dy = e.clientY - startRef.current.y;
     if (!movedRef.current && Math.hypot(dx, dy) > 10) {
       movedRef.current = true;
+      try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch {}
       Haptics.tap();
       onDragStateChange?.(true);
     }
@@ -391,6 +395,8 @@ function CardFace({
   const tapped = !!instance?.tapped;
   const damaged = (instance?.damage ?? 0) > 0;
   const tpl = templateFor(def);
+  // Full-card renders carry their own frame and text; see CardDef.fullCard.
+  const full = !!(def.fullCard && def.image);
   // Layered rest shadow: contact shadow + cast shadow, so the card lifts off
   // the mat instead of sitting flat on it. `--shadow` is consumed by .brd-cardface.
   const restShadow = selected
@@ -413,10 +419,10 @@ function CardFace({
       onKeyDown={onClick ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }) : undefined}
       style={{
         ...vars,
-        width: W, height: H, margin: 2, padding: tpl ? 0 : 5, borderRadius: 8,
-        background: tpl ? undefined : meta.hex,
-        backgroundImage: tpl ? `url(${tpl.url})` : undefined,
-        backgroundSize: tpl ? '100% 100%' : undefined,
+        width: W, height: H, margin: 2, padding: full || tpl ? 0 : 5, borderRadius: 8,
+        background: full || tpl ? undefined : meta.hex,
+        backgroundImage: full ? `url(${def.image})` : tpl ? `url(${tpl.url})` : undefined,
+        backgroundSize: full || tpl ? '100% 100%' : undefined,
         backgroundRepeat: 'no-repeat',
         color: meta.ink,
         // Hairline frame: 1px ink edge; attacker/selected swaps in a gold ring.
@@ -427,7 +433,8 @@ function CardFace({
         display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
         position: 'relative', flex: '0 0 auto',
       }}>
-      {tpl ? <TemplatedCardFaceContent def={def} instance={instance} footer={footer} tpl={tpl} /> : <>
+      {full ? <FullCardFaceContent def={def} instance={instance} footer={footer} />
+        : tpl ? <TemplatedCardFaceContent def={def} instance={instance} footer={footer} tpl={tpl} /> : <>
       {/* Name gets the full width; the cost rides on the art (below). */}
       <div style={{ fontWeight: 800, fontSize: compact ? 9.5 : 11, lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         position: 'relative', zIndex: 1 }}>{def.name}</div>
@@ -491,6 +498,47 @@ function CardFace({
       <span aria-hidden className="brd-gloss" />
     </div>
     </CardHover>
+  );
+}
+
+/**
+ * Overlays for a full-card render (CardDef.fullCard). The image already shows
+ * name, cost, type, text and printed P/T, so only live state goes on top:
+ * status badges at the art's top-right corner and, once a Meme has taken
+ * damage, a current P/T chip over the printed box at the bottom-right.
+ */
+function FullCardFaceContent({ def, instance, footer }: { def: CardDef; instance?: Instance; footer?: React.ReactNode }) {
+  const damage = instance?.damage ?? 0;
+  return (
+    <>
+      {instance?.summoningSick && (
+        <span title="Summoning sick — cannot attack this turn"
+          style={{ position: 'absolute', top: '13.5%', right: '9%', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 1, color: '#2a1f00', background: '#ffd76a', padding: '0 3px', borderRadius: 3, fontSize: 6, fontWeight: 800, boxShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
+          <Moon size={7} />SICK
+        </span>
+      )}
+      {instance?.tapped && !instance?.summoningSick && (
+        <span title="Tapped"
+          style={{ position: 'absolute', top: '13.5%', right: '9%', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 1, color: '#111', background: '#b9bcc8', padding: '0 3px', borderRadius: 3, fontSize: 6, fontWeight: 800, boxShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
+          <Refresh size={7} />TAP
+        </span>
+      )}
+      {def.type === 'meme' && damage > 0 && (
+        <span title={`${damage} damage marked`} style={{
+          position: 'absolute', right: '6%', bottom: '4.5%', zIndex: 1,
+          fontWeight: 800, fontSize: 10, color: '#ffb3a7',
+          padding: '0 5px', borderRadius: 4,
+          background: 'linear-gradient(180deg, rgba(60,10,6,0.95), rgba(20,4,2,0.97))',
+          boxShadow: 'inset 0 0 0 1px rgba(255,120,100,0.6), 0 1px 3px rgba(0,0,0,0.8)',
+        }}>
+          {def.power}/{(def.toughness ?? 1) - damage}
+        </span>
+      )}
+      {footer && (
+        <div style={{ position: 'absolute', left: '9%', right: '9%', bottom: '1.5%', zIndex: 1, fontSize: 6, lineHeight: 1.05,
+          color: '#fff', padding: '1px 3px', borderRadius: 2, background: 'rgba(0,0,0,0.7)' }}>{footer}</div>
+      )}
+    </>
   );
 }
 
@@ -645,6 +693,14 @@ export function ChainsBoard(props: Props) {
     return () => ro.disconnect();
   });
   const handCardH = Math.max(112, Math.min(170, handStripH - 2));
+  // Desktop hand fan floats OVER the bottom of the playmat (Arena-style) instead
+  // of taking its own row below it. The fan's cards hang HAND_HANG px below the
+  // mat's bottom edge; the rest of their height overlaps the mat, so the mat's
+  // playable zones are inset by HAND_INSET (see Playmat.handInset) and nothing
+  // sits underneath the cards. Card heights mirror CardFace (compact = short).
+  const HAND_CARD_H = short ? 134 : 200;
+  const HAND_HANG   = short ? 44 : 60;
+  const HAND_INSET  = HAND_CARD_H + 24 /* fan arc */ + 6 - HAND_HANG;
   const handCardSize = { w: Math.round(handCardH * 0.69), h: handCardH };
   // ACTION LOG + CHAT panel. Owned here (not inside MatchRail) because on
   // phones the trigger lives in MobileActionBar — a floating one covered the
@@ -1166,6 +1222,10 @@ export function ChainsBoard(props: Props) {
         width: '100%',
         ...(mobile ? { flex: '0 0 auto' } : {
           flex: '1 1 auto',
+          // The hand fan is absolutely positioned inside this wrapper; the
+          // bottom padding is the part of the fan that hangs below the mat.
+          position: 'relative',
+          paddingBottom: HAND_HANG,
           // Floor: on a very short viewport the mat stops shrinking and `.brd`
           // scrolls instead, rather than collapsing the arena to nothing.
           minHeight: short ? 240 : 320,
@@ -1178,6 +1238,7 @@ export function ChainsBoard(props: Props) {
         <div data-dropzone="battlefield" style={mobile ? undefined : { height: '100%', aspectRatio: '1 / 1', maxWidth: '100%' }}>
         <MobilePlaymatScaler enabled={mobile}>
         <Playmat
+        handInset={mobile ? 0 : HAND_INSET}
         me={me} opp={opp} myId={myId} oppId={oppId}
         myName={myName} oppName={oppName}
         myDeckCount={(G as any).deckCounts?.[myId]  ?? 0}
@@ -1220,6 +1281,58 @@ export function ChainsBoard(props: Props) {
       />
       </MobilePlaymatScaler>
       </div>
+
+      {/* Hand — curved fan floating over the bottom of the mat (desktop). The
+          overlay hugs the fan's own width so the mat stays clickable beside it.
+          Do NOT make it a full-width `pointer-events: none` wrapper instead:
+          DraggableCard takes pointer capture on pointerdown, and with a
+          pointer-transparent ancestor Chrome retargets the resulting click to
+          the capturing wrapper, so CardFace's onClick never fires (verified). */}
+      {!mobile && (
+        <div style={{ position: 'absolute', left: '50%', bottom: 0, transform: 'translateX(-50%)', maxWidth: '100%', zIndex: 6 }}>
+          <div className="brd-scroll" style={{
+            display: 'flex', flexWrap: 'nowrap',
+            overflow: 'visible',
+            WebkitOverflowScrolling: 'touch',
+            paddingBottom: 4,
+            justifyContent: 'center', alignItems: 'flex-end',
+            minHeight: short ? 120 : 176,
+            perspective: 1400,
+          }}>
+            {me.hand.map((id, i) => {
+              const n = me.hand.length;
+              const mid = (n - 1) / 2;
+              const t = n === 1 ? 0 : (i - mid) / Math.max(1, mid); // -1 (left) .. 1 (right)
+              const rot = t * 10;                                   // fan spread
+              // Arc: the centre card RISES, the edges sit on the baseline, so
+              // the fan never grows downward into the action row.
+              const arc = -(24 - t * t * 24);                       // -24 at centre, 0 at the edges
+              const overlap = n > 9 ? -48 : n > 7 ? -34 : n > 5 ? -26 : -18; // tighten for larger hands
+              const rest = `translateY(${arc}px) rotate(${rot}deg)`;
+              return (
+                <div key={i} className="brd-fan" style={{
+                  ...({ '--rest': rest, '--z': selectedHand === i ? 20 : i } as Vars),
+                  transformOrigin: '50% 130%',
+                  marginLeft: i === 0 ? 0 : overlap,
+                  flex: '0 0 auto',
+                }}>
+                  <DraggableCard
+                    defId={id}
+                    onDrop={() => isActive && myTurn && !inBlockers && tryPlay(i)}
+                  >
+                    <CardFace
+                      defId={id}
+                      selected={selectedHand === i}
+                      pinOnTap
+                      onClick={() => isActive && myTurn && !inBlockers && tryPlay(i)}
+                    />
+                  </DraggableCard>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       </div>
 
       {/* Hand on phones — a real, always-visible strip directly under the mat.
@@ -1290,65 +1403,7 @@ export function ChainsBoard(props: Props) {
         </div>
       )}
 
-      {/* Hand — curved fan layout on desktop */}
-      {!mobile && (
-        <div style={{ marginTop: short ? 4 : 6, flex: '0 0 auto' }}>
-          <div className="brd-zone-label" style={{
-            fontSize: 11, color: 'rgba(229,184,75,0.78)', marginBottom: 5,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            textShadow: '0 1px 3px rgba(0,0,0,0.8)',
-          }}>
-            <Diamond size={7} color="rgba(229,184,75,0.55)" />
-            <HandIcon size={12} />
-            <span>Hand · {me.hand.length}</span>
-            <Diamond size={7} color="rgba(229,184,75,0.55)" />
-          </div>
-          <div className="brd-scroll" style={{
-            display: 'flex', flexWrap: 'nowrap',
-            overflowX: 'auto', overflowY: 'visible',
-            WebkitOverflowScrolling: 'touch',
-            paddingBottom: 4,
-            justifyContent: 'center', alignItems: 'flex-end',
-            minHeight: short ? 120 : 176,
-            perspective: 1400,
-          }}>
-            {me.hand.map((id, i) => {
-              const n = me.hand.length;
-              const mid = (n - 1) / 2;
-              const t = n === 1 ? 0 : (i - mid) / Math.max(1, mid); // -1 (left) .. 1 (right)
-              const rot = t * 10;                                   // fan spread
-              // Arc: the centre card RISES, the edges sit on the baseline. The
-              // curve used to be `t*t*24` (edges pushed *down*), which is the
-              // same shape but overflowed the row's box and hung the outer
-              // cards over the action bar below. Rising is free — the fan
-              // paints above the mat, and there is nothing to collide with.
-              const arc = -(24 - t * t * 24);                       // -24 at centre, 0 at the edges
-              const overlap = n > 7 ? -34 : n > 5 ? -26 : -18;      // tighten for larger hands
-              const rest = `translateY(${arc}px) rotate(${rot}deg)`;
-              return (
-                <div key={i} className="brd-fan" style={{
-                  ...({ '--rest': rest, '--z': selectedHand === i ? 20 : i } as Vars),
-                  transformOrigin: '50% 130%',
-                  marginLeft: i === 0 ? 0 : overlap,
-                  flex: '0 0 auto',
-                }}>
-                  <DraggableCard
-                    defId={id}
-                    onDrop={() => isActive && myTurn && !inBlockers && tryPlay(i)}
-                  >
-                    <CardFace
-                      defId={id}
-                      selected={selectedHand === i}
-                      pinOnTap
-                      onClick={() => isActive && myTurn && !inBlockers && tryPlay(i)}
-                    />
-                  </DraggableCard>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Desktop hand: see the fan overlay inside the mat wrapper above. */}
 
       {/* Mobile bottom action bar + hand drawer trigger */}
       {mobile && (
@@ -2153,6 +2208,9 @@ function Playmat(props: {
   onOppMemeClick: (uid: string) => void;
   onMachineClick: (uid: string) => void;
   myName?: string; oppName?: string;
+  /** Px of the mat's bottom covered by the hand fan: zones and the centre
+   *  rule are laid out above it, the mat art still runs underneath. */
+  handInset?: number;
 }) {
   const {
     me, opp, myId, oppId, myDeckCount, oppDeckCount,
@@ -2233,6 +2291,10 @@ function Playmat(props: {
           'linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 16%, rgba(0,0,0,0) 84%, rgba(0,0,0,0.55) 100%),' +
           'linear-gradient(90deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0) 12%, rgba(0,0,0,0) 88%, rgba(0,0,0,0.45) 100%)',
       }} />
+      {/* Everything from here down is laid out in the PLAY AREA: the mat minus
+          the strip the hand fan covers (props.handInset). The art, scrim and
+          vignette above stay full-bleed so the fan reads as sitting on the mat. */}
+      <div aria-hidden style={{ position: 'absolute', inset: 0, bottom: props.handInset ?? 0, pointerEvents: 'none' }}>
       {/* Violet lane light */}
       <div aria-hidden style={{ position: 'absolute', inset: 0, zIndex: LAYER.MAT_SCRIM, pointerEvents: 'none',
         background: 'radial-gradient(50% 30% at 50% 50%, rgba(142,77,255,0.13), transparent 70%)' }} />
@@ -2264,8 +2326,9 @@ function Playmat(props: {
         }}>Built on the</span>
         <img src="/hatchery-logo.png" alt="" draggable={false} style={{ width: 140, display: 'block' }} />
       </div>
+      </div>
       {/* ── Playable content. Sits above every decoration layer. ── */}
-      <div style={{ position: 'absolute', inset: 0, zIndex: LAYER.MAT_CONTENT }}>
+      <div style={{ position: 'absolute', inset: 0, bottom: props.handInset ?? 0, zIndex: LAYER.MAT_CONTENT }}>
       {/* ─── OPPONENT SIDE (mirrored layout, upright text) ─── */}
       <ZoneSlot rect={Z.oppGrave} icon={<Skull size={11} />} label={`Graveyard (${opp.graveyard.length})`} compactLabel={`${opp.graveyard.length}`} rotated>
         {opp.graveyard.slice(-1).map((id, i) => <MiniCard key={i} defId={id} faceUp />)}

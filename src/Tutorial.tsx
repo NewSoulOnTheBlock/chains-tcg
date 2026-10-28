@@ -51,6 +51,16 @@ function MiniCard({ id, scale = 0.62, dim = false }: { id: string; scale?: numbe
   const fs = Math.max(9, Math.round(w / 15)); // body text scales with the card
   const pips = def.cost ? ([...COLORS, 'any'] as const).flatMap((c) =>
     Array.from({ length: def.cost?.[c] ?? 0 }, () => c)) : [];
+  if (def.fullCard && def.image) {
+    // Complete rendered card: show it whole, same footprint and dim treatment.
+    return (
+      <div style={{ width: w, flex: 'none', aspectRatio: '5 / 7', borderRadius: 10, overflow: 'hidden', background: '#0d0b1c',
+        boxShadow: `0 10px 26px rgba(0,0,0,0.55), 0 0 14px ${meta.hex}33`,
+        opacity: dim ? 0.35 : 1, filter: dim ? 'grayscale(1)' : 'none', transition: 'opacity 200ms, filter 200ms' }}>
+        <img src={def.image} alt={def.name} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+      </div>
+    );
+  }
   return (
     <div style={{ width: w, flex: 'none', aspectRatio: '5 / 7', display: 'flex', flexDirection: 'column', borderRadius: 10, overflow: 'hidden',
       background: '#0d0b1c', border: `2px solid ${meta.hex}`, boxShadow: `0 10px 26px rgba(0,0,0,0.55), 0 0 14px ${meta.hex}33`,

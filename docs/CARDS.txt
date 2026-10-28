@@ -1,0 +1,577 @@
+EGREGORE TCG - CARD LIST
+Generated 2026-10-28 from src/cards.ts (85 cards)
+Factions: Spirit (white), Rebel (red), Jester (black), Wealth (green), Knowledge (blue)
+
+========================================================================
+SPIRIT (17 cards)
+========================================================================
+
+Spirit Node
+  Type: Node
+  Cost: none (Node)
+  Text: Tap: add 1 Spirit gas.
+  Card id: node_bnb
+
+Candle Acolyte
+  Type: Meme  |  Power/Toughness: 1/1
+  Cost: 1 gas (1 Spirit)
+  Text: Lights one wick every sunrise. Never misses.
+  Card id: bnb_babydoge
+
+Halo Hatchling
+  Type: Meme  |  Power/Toughness: 2/1
+  Cost: 1 gas (1 Spirit)
+  Text: Born glowing. Never learned how to stop.
+  Card id: bnb_broccoli
+
+Choir Sproto
+  Type: Meme  |  Power/Toughness: 2/2
+  Cost: 2 gas (1 Spirit + 1 any)
+  Text: Sings off-key, but always in unison.
+  Card id: bnb_tut
+
+Pilgrim Sproto
+  Type: Meme  |  Power/Toughness: 3/2
+  Cost: 2 gas (1 Spirit + 1 any)
+  Text: Walked here from the genesis block. Barefoot.
+  Card id: bnb_tst
+
+Bocca De Verita
+  Type: Meme  |  Power/Toughness: 4/3
+  Cost: 3 gas (2 Spirit + 1 any)
+  Text: Put your hand in. Tell the truth.
+  Card id: bnb_mubarak
+
+Lantern Warden
+  Type: Meme  |  Power/Toughness: 3/3
+  Cost: 3 gas (2 Spirit + 1 any)
+  Text: Keeps the shrine lit through the longest night.
+  Card id: bnb_banana
+
+Seraph Sproto
+  Type: Meme  |  Power/Toughness: 4/4
+  Cost: 4 gas (2 Spirit + 2 any)
+  Text: Six wings. Zero sell orders.
+  Card id: bnb_cheems
+
+More Light
+  Type: Meme  |  Power/Toughness: 6/5
+  Cost: 5 gas (3 Spirit + 2 any)
+  Text: Leader of the gremlins. Asks only for more.
+  Card id: bnb_floki
+
+Pilgrim Road
+  Type: Machine
+  Cost: 2 gas (1 Spirit + 1 any)
+  Text: You may play one extra Node each turn.
+  Effect id: extra_node_per_turn
+  Card id: bnb_bridge
+
+Banner of the Host
+  Type: Machine
+  Cost: 3 gas (2 Spirit + 1 any)
+  Text: Your attacking Memes get +1/+0.
+  Effect id: pump_attackers_+1+0
+  Card id: bnb_mmalgo
+
+Shrine of Many
+  Type: Machine
+  Cost: 3 gas (2 Spirit + 1 any)
+  Text: Every Sproto in the light grows: your Memes get +1/+1.
+  Effect id: pump_all_+1+1
+  Card id: bnb_farm
+
+Dawn Bell
+  Type: Machine
+  Cost: 4 gas (2 Spirit + 2 any)
+  Text: Your Memes have no summoning sickness.
+  Effect id: meme_haste
+  Card id: bnb_sniper
+
+Retain
+  Type: Aura
+  Cost: 2 gas (1 Spirit + 1 any)
+  Text: Always retain, brother. Enchant Meme. Attached Meme gets +2/+2.
+  Effect id: aura_+2+2
+  Card id: bnb_liquidity
+
+Exorcism
+  Type: Move
+  Cost: 2 gas (1 Spirit + 1 any)
+  Text: Cast it out. Destroy target Meme.
+  Effect id: destroyMeme
+  Card id: bnb_rugpull
+
+Blinding Dawn
+  Type: Move
+  Cost: 3 gas (2 Spirit + 1 any)
+  Text: Every Meme on the field takes 1 damage.
+  Effect id: damageAll_1
+  Card id: bnb_honeypot
+
+Revelation
+  Type: Move
+  Cost: 3 gas (2 Spirit + 1 any)
+  Text: The light shows two paths. Draw two cards.
+  Effect id: drawTwo
+  Card id: bnb_airdrop
+
+========================================================================
+REBEL (17 cards)
+========================================================================
+
+Rebel Node
+  Type: Node
+  Cost: none (Node)
+  Text: Tap: add 1 Rebel gas.
+  Card id: node_sol
+
+Brick Tosser
+  Type: Meme  |  Power/Toughness: 1/2
+  Cost: 1 gas (1 Rebel)
+  Text: Aims for the windows. Hits the windows.
+  Card id: sol_bonk
+
+Spark Gremlin
+  Type: Meme  |  Power/Toughness: 2/1
+  Cost: 1 gas (1 Rebel)
+  Text: Small, loud, and already on fire.
+  Card id: sol_pnut
+
+Graffiti Sproto
+  Type: Meme  |  Power/Toughness: 3/2
+  Cost: 2 gas (1 Rebel + 1 any)
+  Text: Tags every wall it can reach, and some it cannot.
+  Card id: sol_mew
+
+Riot Drummer
+  Type: Meme  |  Power/Toughness: 2/3
+  Cost: 2 gas (1 Rebel + 1 any)
+  Text: Keeps the beat while everything burns.
+  Card id: sol_popcat
+
+Molotov Mixer
+  Type: Meme  |  Power/Toughness: 3/3
+  Cost: 3 gas (2 Rebel + 1 any)
+  Text: Required ingredients: one bottle, no plan.
+  Card id: sol_bome
+
+Shadow
+  Type: Meme  |  Power/Toughness: 4/2
+  Cost: 3 gas (2 Rebel + 1 any)
+  Text: The ultimate lifeform. Never asked to be a hero.
+  Card id: sol_wif
+
+Firestarter Sproto
+  Type: Meme  |  Power/Toughness: 5/4
+  Cost: 4 gas (2 Rebel + 2 any)
+  Text: Did not start the fire. Is the fire.
+  Card id: sol_fartcoin
+
+Rebel Warlord
+  Type: Meme  |  Power/Toughness: 6/5
+  Cost: 5 gas (3 Rebel + 2 any)
+  Text: Overthrew the last warlord. Kept the hat.
+  Card id: sol_goat
+
+Black Market Forge
+  Type: Machine
+  Cost: 2 gas (1 Rebel + 1 any)
+  Text: Your Moves cost 1 less Rebel gas (min 0).
+  Effect id: gas_discount_color
+  Card id: sol_priority
+
+Burning Banner
+  Type: Machine
+  Cost: 3 gas (2 Rebel + 1 any)
+  Text: Your attacking Memes get +1/+0.
+  Effect id: pump_attackers_+1+0
+  Card id: sol_tgbot
+
+Pirate Radio
+  Type: Machine
+  Cost: 3 gas (2 Rebel + 1 any)
+  Text: When a Meme enters under you, draw a card (once per turn).
+  Effect id: on_meme_etb_draw
+  Card id: sol_oracle
+
+War Drums
+  Type: Machine
+  Cost: 4 gas (2 Rebel + 2 any)
+  Text: Your Memes have no summoning sickness.
+  Effect id: meme_haste
+  Card id: sol_amm
+
+Shadow Mode
+  Type: Aura
+  Cost: 2 gas (1 Rebel + 1 any)
+  Text: Chaos Control. Enchant Meme. Attached Meme has no summoning sickness.
+  Effect id: aura_haste
+  Card id: sol_validator
+
+Cheap Shot
+  Type: Move
+  Cost: 1 gas (1 Rebel)
+  Text: Nobody said fair. Deal 2 damage to any target.
+  Effect id: damage2
+  Card id: sol_tgpump
+
+Firebomb
+  Type: Move
+  Cost: 1 gas (1 Rebel)
+  Text: Lit and thrown. Deal 3 damage to any target.
+  Effect id: damage3
+  Card id: sol_zap
+
+Scatter
+  Type: Move
+  Cost: 2 gas (1 Rebel + 1 any)
+  Text: Everybody run. Return target Meme to its owner's hand.
+  Effect id: bounceMeme
+  Card id: sol_bounce
+
+========================================================================
+JESTER (17 cards)
+========================================================================
+
+Jester Node
+  Type: Node
+  Cost: none (Node)
+  Text: Tap: add 1 Jester gas.
+  Card id: node_eth
+
+Mask Collector
+  Type: Meme  |  Power/Toughness: 1/3
+  Cost: 1 gas (1 Jester)
+  Text: Already has your face. Wants the rest.
+  Card id: eth_apu
+
+Pocket Jester
+  Type: Meme  |  Power/Toughness: 2/2
+  Cost: 1 gas (1 Jester)
+  Text: Fits in your pocket. Leaves with your wallet.
+  Card id: eth_andy
+
+Knife Juggler
+  Type: Meme  |  Power/Toughness: 3/1
+  Cost: 2 gas (1 Jester + 1 any)
+  Text: Drops one every show. On purpose.
+  Card id: eth_turbo
+
+Sproto Gremlin
+  Type: Meme  |  Power/Toughness: 2/2
+  Cost: 2 gas (1 Jester + 1 any)
+  Text: When ~ enters the field, deal 2 damage to your opponent and draw a card.
+  Effect id: etb_zap_2_and_draw
+  Card id: eth_sproto_gremlin
+
+Weeping Clown
+  Type: Meme  |  Power/Toughness: 2/3
+  Cost: 2 gas (1 Jester + 1 any)
+  Text: Laughs at funerals. Cries at weddings.
+  Card id: eth_wojak
+
+Carbonara Mussolini
+  Type: Meme  |  Power/Toughness: 4/3
+  Cost: 3 gas (2 Jester + 1 any)
+  Text: "The Stink Badger Empire is reawakening!"
+  Card id: eth_shib
+
+Hoba Carpenter
+  Type: Meme  |  Power/Toughness: 3/4
+  Cost: 3 gas (2 Jester + 1 any)
+  Text: Measures once. Builds twice. Laughs at both.
+  Card id: eth_mog
+
+The Last Laugh
+  Type: Meme  |  Power/Toughness: 5/6
+  Cost: 5 gas (3 Jester + 2 any)
+  Text: It was always going to be him.
+  Card id: eth_pepe
+
+Jack-in-the-Box
+  Type: Machine
+  Cost: 3 gas (2 Jester + 1 any)
+  Text: Your attacking Memes get +1/+0.
+  Effect id: pump_attackers_+1+0
+  Card id: eth_yield
+
+Trick Deck
+  Type: Machine
+  Cost: 3 gas (2 Jester + 1 any)
+  Text: Every card a trick: your Moves cost 1 less Jester gas (min 0).
+  Effect id: gas_discount_color
+  Card id: eth_eip1559
+
+Carnival of Masks
+  Type: Machine
+  Cost: 4 gas (2 Jester + 2 any)
+  Text: The show goes on: your Memes get +1/+1.
+  Effect id: pump_all_+1+1
+  Card id: eth_temple
+
+Trapdoor Stage
+  Type: Machine
+  Cost: 4 gas (2 Jester + 2 any)
+  Text: Enter laughing: your Memes have no summoning sickness.
+  Effect id: meme_haste
+  Card id: eth_l2
+
+Mirror Mask
+  Type: Aura
+  Cost: 2 gas (1 Jester + 1 any)
+  Text: Enchant Meme. Attached Meme gets +0/+3.
+  Effect id: aura_+0+3
+  Card id: eth_shield
+
+Fake Death
+  Type: Move
+  Cost: 2 gas (1 Jester + 1 any)
+  Text: Get up once the crowd leaves. Gain 4 life.
+  Effect id: gainLife4
+  Card id: eth_heal
+
+Sabotage
+  Type: Move
+  Cost: 2 gas (1 Jester + 1 any)
+  Text: Loosen one bolt. Destroy target Machine.
+  Effect id: destroyMachine
+  Card id: eth_exploit
+
+Punchline
+  Type: Move
+  Cost: 3 gas (2 Jester + 1 any)
+  Text: Timing is everything. Deal 5 damage to any target.
+  Effect id: damage5
+  Card id: eth_smite
+
+========================================================================
+WEALTH (17 cards)
+========================================================================
+
+Wealth Node
+  Type: Node
+  Cost: none (Node)
+  Text: Tap: add 1 Wealth gas.
+  Card id: node_robinhood
+
+Coin Sprout
+  Type: Meme  |  Power/Toughness: 1/2
+  Cost: 1 gas (1 Wealth)
+  Text: Plant a penny. Wait.
+  Card id: robinhood_hood
+
+Golden Grub
+  Type: Meme  |  Power/Toughness: 2/3
+  Cost: 2 gas (1 Wealth + 1 any)
+  Text: Eats copper. Sheds gold.
+  Card id: robinhood_cashcat
+
+Vault Toad
+  Type: Meme  |  Power/Toughness: 1/4
+  Cost: 2 gas (1 Wealth + 1 any)
+  Text: Sits on the gold. Never moves. Never needs to.
+  Card id: robinhood_ozzy
+
+Harvest Sproto
+  Type: Meme  |  Power/Toughness: 4/3
+  Cost: 3 gas (2 Wealth + 1 any)
+  Text: Reaps what it sowed, and a little of yours.
+  Card id: robinhood_tendies
+
+Orchard Keeper
+  Type: Meme  |  Power/Toughness: 3/4
+  Cost: 3 gas (2 Wealth + 1 any)
+  Text: Every tree in the grove pays rent.
+  Card id: robinhood_kitty
+
+Treasure Golem
+  Type: Meme  |  Power/Toughness: 4/5
+  Cost: 4 gas (2 Wealth + 2 any)
+  Text: Built from interest. Still compounding.
+  Card id: robinhood_moon
+
+Gilded Boar
+  Type: Meme  |  Power/Toughness: 6/4
+  Cost: 5 gas (3 Wealth + 2 any)
+  Text: Charges through the fence and the price tag.
+  Card id: robinhood_yolo
+
+Old Money
+  Type: Meme  |  Power/Toughness: 6/7
+  Cost: 6 gas (3 Wealth + 3 any)
+  Text: Was rich before rich had a name.
+  Card id: robinhood_ape
+
+Treasury
+  Type: Machine
+  Cost: 2 gas (1 Wealth + 1 any)
+  Text: The vault pays you back: you heal when your Memes deal damage.
+  Effect id: lifelink_all
+  Card id: robinhood_dividend
+
+Fertile Grove
+  Type: Machine
+  Cost: 3 gas (2 Wealth + 1 any)
+  Text: Everything here grows: your Memes get +1/+1.
+  Effect id: pump_all_+1+1
+  Card id: robinhood_margin
+
+Golden Spurs
+  Type: Machine
+  Cost: 3 gas (2 Wealth + 1 any)
+  Text: Your attacking Memes get +1/+0.
+  Effect id: pump_attackers_+1+0
+  Card id: robinhood_options
+
+Ledger of Plenty
+  Type: Machine
+  Cost: 3 gas (2 Wealth + 1 any)
+  Text: When a Meme enters under you, draw a card (once per turn).
+  Effect id: on_meme_etb_draw
+  Card id: robinhood_fractional
+
+Gold Plating
+  Type: Aura
+  Cost: 2 gas (1 Wealth + 1 any)
+  Text: Enchant Meme. Attached Meme gets +0/+3.
+  Effect id: aura_+0+3
+  Card id: robinhood_diamond
+
+Bountiful Harvest
+  Type: Move
+  Cost: 2 gas (1 Wealth + 1 any)
+  Text: The granary overflows. Gain 4 life.
+  Effect id: gainLife4
+  Card id: robinhood_buydip
+
+Count the Coins
+  Type: Move
+  Cost: 3 gas (2 Wealth + 1 any)
+  Text: Twice, to be sure. Draw two cards.
+  Effect id: drawTwo
+  Card id: robinhood_pfof
+
+Stampede
+  Type: Move
+  Cost: 3 gas (2 Wealth + 1 any)
+  Text: The herd runs one way. Deal 5 damage to any target.
+  Effect id: damage5
+  Card id: robinhood_gamma
+
+========================================================================
+KNOWLEDGE (17 cards)
+========================================================================
+
+Knowledge Node
+  Type: Node
+  Cost: none (Node)
+  Text: Tap: add 1 Knowledge gas.
+  Card id: node_base
+
+Ink Imp
+  Type: Meme  |  Power/Toughness: 2/1
+  Cost: 1 gas (1 Knowledge)
+  Text: Writes faster than it reads.
+  Card id: base_degen
+
+Page Turner
+  Type: Meme  |  Power/Toughness: 1/2
+  Cost: 1 gas (1 Knowledge)
+  Text: Lost in the same book since the first block.
+  Card id: base_toshi
+
+Apprentice Sproto
+  Type: Meme  |  Power/Toughness: 2/2
+  Cost: 2 gas (1 Knowledge + 1 any)
+  Text: Knows one spell. Uses it constantly.
+  Card id: base_miggles
+
+Scroll Runner
+  Type: Meme  |  Power/Toughness: 3/2
+  Cost: 2 gas (1 Knowledge + 1 any)
+  Text: Delivers the message before you send it.
+  Card id: base_brett
+
+Owl Familiar
+  Type: Meme  |  Power/Toughness: 4/2
+  Cost: 3 gas (2 Knowledge + 1 any)
+  Text: Knows what you are thinking. Disapproves.
+  Card id: base_normie
+
+Rune Scribe
+  Type: Meme  |  Power/Toughness: 3/3
+  Cost: 3 gas (2 Knowledge + 1 any)
+  Text: Every mark means something. Most mean "mine".
+  Card id: base_keycat
+
+Tower Sage
+  Type: Meme  |  Power/Toughness: 4/4
+  Cost: 4 gas (2 Knowledge + 2 any)
+  Text: Read every book in the tower. Wrote half of them.
+  Card id: base_doginme
+
+The Archivist
+  Type: Meme  |  Power/Toughness: 5/5
+  Cost: 5 gas (3 Knowledge + 2 any)
+  Text: Remembers everything. Forgives nothing overdue.
+  Card id: base_based
+
+Star Chart
+  Type: Machine
+  Cost: 2 gas (1 Knowledge + 1 any)
+  Text: Plot the course: play one extra Node each turn.
+  Effect id: extra_node_per_turn
+  Card id: base_wallet
+
+Crystal Ball
+  Type: Machine
+  Cost: 3 gas (2 Knowledge + 1 any)
+  Text: When a Meme enters under you, draw a card (once per turn).
+  Effect id: on_meme_etb_draw
+  Card id: base_frames
+
+Great Library
+  Type: Machine
+  Cost: 3 gas (2 Knowledge + 1 any)
+  Text: Everyone studies: your Memes get +1/+1.
+  Effect id: pump_all_+1+1
+  Card id: base_summer
+
+Portal Circle
+  Type: Machine
+  Cost: 4 gas (2 Knowledge + 2 any)
+  Text: Step through ready: your Memes have no summoning sickness.
+  Effect id: meme_haste
+  Card id: base_onramp
+
+Spellblade
+  Type: Aura
+  Cost: 2 gas (1 Knowledge + 1 any)
+  Text: Enchant Meme. Attached Meme gets +3/+0.
+  Effect id: aura_+3+0
+  Card id: base_staybased
+
+Banish
+  Type: Move
+  Cost: 2 gas (1 Knowledge + 1 any)
+  Text: Not gone, just elsewhere. Return target Meme to its owner's hand.
+  Effect id: bounceMeme
+  Card id: base_bridge
+
+Arcane Storm
+  Type: Move
+  Cost: 3 gas (2 Knowledge + 1 any)
+  Text: Every Meme on the field takes 1 damage.
+  Effect id: damageAll_1
+  Card id: base_airdrop
+
+Study Session
+  Type: Move
+  Cost: 3 gas (2 Knowledge + 1 any)
+  Text: One more chapter. Draw two cards.
+  Effect id: drawTwo
+  Card id: base_tip
+
+========================================================================
+Totals: 85 cards. Nodes: 5, Memes: 40, Machines: 20, Auras: 5, Moves: 15.
