@@ -78,7 +78,6 @@ export type DepositRejectCode =
   | 'not_enough_confirmations'
   | 'no_block_time'
   | 'tx_predates_escrow'
-  | 'not_sent_by_depositor'
   | 'no_transfer_to_escrow'
   | 'wrong_amount'
   | 'wrong_token'
@@ -134,17 +133,14 @@ export function verifyDepositTx(tx: ParsedTx | null, expect: DepositExpectation)
     );
   }
 
-  // One of the authenticated profile's wallets must be the account that sent
-  // the transaction. Membership in a server-derived set, not equality with a
-  // single address — but still a closed set, and still one the request cannot
-  // influence.
-  if (!expect.depositorAddresses.includes(tx.from)) {
-    return reject(
-      'not_sent_by_depositor',
-      'The transaction was not sent by one of your linked wallets.',
-    );
-  }
-
+  // NOTE (server-39): we deliberately do NOT require `tx.from` to be a linked
+  // wallet. For an ERC-4337 / smart-account deposit the transaction is submitted
+  // by a bundler/relayer, so `tx.from` is the bundler — not the player — and an
+  // equality (or even membership) test on `tx.from` wrongly rejected those
+  // deposits (`not_sent_by_depositor`) even though the player's own account
+  // moved the tokens. Ownership is proved by the Transfer log's `from` below
+  // (`transfer.from` membership), which is the wallet whose balance actually
+  // fell and the address a refund must go back to.
   const toEscrow = tx.erc20Transfers.filter((t) => t.to === expect.depositAddress);
   if (toEscrow.length === 0) {
     return reject('no_transfer_to_escrow', 'No token transfer to the escrow address was found.');

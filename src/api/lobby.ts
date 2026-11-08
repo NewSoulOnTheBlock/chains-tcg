@@ -34,6 +34,7 @@
 
 import { get, post } from './http.js';
 import { ApiError } from './errors.js';
+import { guardAs, hasArray, isCreatedMatch, isJoinedMatch, isSeatInfo } from './guards.js';
 
 export type MatchMode = 'casual' | 'ranked' | 'wager';
 /** `open` → waiting for an opponent; `live` → playable; then terminal. */
@@ -150,13 +151,17 @@ export async function getLobby(
   const { matches } = await get<{ matches: LobbyEntry[] }>('/games/lobby', {
     query: { limit: options.limit },
     signal: options.signal,
+    parse: guardAs<{ matches: LobbyEntry[] }>('{ matches: [] }', hasArray('matches')),
   });
   return matches;
 }
 
 /** `GET /games/invites` — matches addressed to the caller by display name. */
 export async function getInvites(signal?: AbortSignal): Promise<LobbyEntry[]> {
-  const { matches } = await get<{ matches: LobbyEntry[] }>('/games/invites', { signal });
+  const { matches } = await get<{ matches: LobbyEntry[] }>('/games/invites', {
+    signal,
+    parse: guardAs<{ matches: LobbyEntry[] }>('{ matches: [] }', hasArray('matches')),
+  });
   return matches;
 }
 
@@ -178,7 +183,10 @@ export function create(options: CreateOptions = {}, signal?: AbortSignal): Promi
   if (options.unlisted !== undefined) body.unlisted = options.unlisted;
   if (options.invitedDisplayName !== undefined) body.invitedDisplayName = options.invitedDisplayName;
   if (options.wagerAmountBase !== undefined) body.wagerAmountBase = options.wagerAmountBase;
-  return post<CreatedMatch>('/games/create', body, { signal });
+  return post<CreatedMatch>('/games/create', body, {
+    signal,
+    parse: guardAs<CreatedMatch>('CreatedMatch', isCreatedMatch),
+  });
 }
 
 /**
@@ -194,7 +202,10 @@ export function create(options: CreateOptions = {}, signal?: AbortSignal): Promi
  * `reason: 'match_not_open' | 'already_seated' | 'match_incomplete'`.
  */
 export function join(matchId: string, signal?: AbortSignal): Promise<JoinedMatch> {
-  return post<JoinedMatch>(`/games/${encodeURIComponent(matchId)}/join`, {}, { signal });
+  return post<JoinedMatch>(`/games/${encodeURIComponent(matchId)}/join`, {}, {
+    signal,
+    parse: guardAs<JoinedMatch>('JoinedMatch', isJoinedMatch),
+  });
 }
 
 /**
@@ -208,7 +219,10 @@ export function join(matchId: string, signal?: AbortSignal): Promise<JoinedMatch
  * permissions message.
  */
 export function getSeat(matchId: string, signal?: AbortSignal): Promise<SeatInfo> {
-  return get<SeatInfo>(`/games/${encodeURIComponent(matchId)}/seat`, { signal });
+  return get<SeatInfo>(`/games/${encodeURIComponent(matchId)}/seat`, {
+    signal,
+    parse: guardAs<SeatInfo>('SeatInfo', isSeatInfo),
+  });
 }
 
 /**

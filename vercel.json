@@ -6,5 +6,27 @@
   "rewrites": [
     { "source": "/gw/:path*", "destination": "https://api.ocva.online/:path*" },
     { "source": "/((?!.*\\.).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy-Report-Only",
+          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; media-src 'self' blob: mediastream:; worker-src 'self' blob:; frame-src 'self' https://auth.privy.io https://*.privy.io; connect-src 'self' https://api.ocva.online wss://api.ocva.online https://auth.privy.io https://*.privy.io wss://*.privy.io https://rpc.mainnet.chain.robinhood.com https://robinhoodchain.blockscout.com https://solana-rpc.publicnode.com https://solana.drpc.org https://solana-mainnet.public.blastapi.io https://api.mainnet-beta.solana.com https://mainnet.helius-rpc.com https://0.peerjs.com wss://0.peerjs.com stun: turn: turns:; upgrade-insecure-requests"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=63072000; includeSubDomains; preload"
+        },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        {
+          "key": "Permissions-Policy",
+          "value": "microphone=(self), camera=(), geolocation=(), payment=(), usb=()"
+        },
+        { "key": "X-Frame-Options", "value": "DENY" }
+      ]
+    }
   ]
 }

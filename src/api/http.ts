@@ -29,7 +29,6 @@ import { API_BASE } from './config.js';
 import {
   ApiError,
   SessionExpiredError,
-  parseRetryAfter,
   toApiError,
   toNetworkError,
 } from './errors.js';
@@ -44,7 +43,7 @@ export type AuthMode =
   /** Never attach a token. Used by the auth endpoints themselves. */
   | 'none';
 
-export interface RequestOptions {
+export interface RequestOptions<T = unknown> {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** JSON request body. Omitted entirely when `undefined`. */
   body?: unknown;
@@ -54,6 +53,21 @@ export interface RequestOptions {
   auth?: AuthMode;
   /** Abort support, e.g. from a React effect cleanup. */
   signal?: AbortSignal;
+  /**
+   * Abort the fetch after this many ms (combined with `signal`). Defaults to
+   * `DEFAULT_TIMEOUT_MS`; pass `0` to disable (e.g. a deliberately long poll
+   * that manages its own lifetime). A timeout surfaces as
+   * `ApiError{code:'timeout', status:0}`, distinct from a caller abort.
+   */
+  timeoutMs?: number;
+  /**
+   * Optional runtime validator for a 2xx body. When present, the parsed JSON is
+   * passed through it before being returned; a thrown/`false` result becomes
+   * `ApiError{code:'invalid_response'}` instead of a `TypeError` surfacing far
+   * from the fetch. Use hand-written guards (see `guards.ts`) on the
+   * match/money/ranked routes — a shape drift there must not crash a caller.
+   */
+  parse?: (raw: unknown) => T;
   /**
    * Allow a bounded retry when the server answers 429.
    *
@@ -75,8 +89,46 @@ const IDEMPOTENT = new Set(['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE']);
 const MAX_429_RETRIES = 2;
 /** Refuse to sit on a request longer than this; surface the error instead. */
 const MAX_RETRY_WAIT_MS = 10_000;
-/** Used when a 429 arrives with no `Retry-After` header. */
+/** Used when a 429 arrives with no `Retry-After` header or body hint. */
 const DEFAULT_RETRY_WAIT_MS = 1_000;
+/** A fetch with no caller timeout is aborted after this long, as `code:'timeout'`. */
+const DEFAULT_TIMEOUT_MS = 20_000;
+/** The single-flight refresh fetch gets its own, tighter bound. */
+const REFRESH_TIMEOUT_MS = 15_000;
+
+/**
+ * An `AbortSignal` that fires after `ms`, or `undefined` for `ms <= 0`.
+ *
+ * Prefers the platform `AbortSignal.timeout` (Node 18+, every live browser) and
+ * falls back to a controller for any environment that lacks it, so the test
+ * runner and older runtimes behave identically.
+ */
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  if (ms <= 0) return undefined;
+  try {
+    const AS = globalThis.AbortSignal as typeof AbortSignal & { timeout?: (ms: number) => AbortSignal };
+    if (typeof AS?.timeout === 'function') return AS.timeout(ms);
+  } catch {
+    /* fall through to the manual controller */
+  }
+  const ac = new AbortController();
+  setTimeout(() => ac.abort(new DOMException('The operation timed out.', 'TimeoutError')), ms);
+  return ac.signal;
+}
+
+/** Combine abort signals into one, preferring the platform `AbortSignal.any`. */
+function anySignal(signals: AbortSignal[]): AbortSignal | undefined {
+  if (signals.length === 0) return undefined;
+  if (signals.length === 1) return signals[0];
+  const AS = globalThis.AbortSignal as typeof AbortSignal & { any?: (s: AbortSignal[]) => AbortSignal };
+  if (typeof AS?.any === 'function') return AS.any(signals);
+  const ac = new AbortController();
+  for (const s of signals) {
+    if (s.aborted) { ac.abort(s.reason); break; }
+    s.addEventListener('abort', () => ac.abort(s.reason), { once: true });
+  }
+  return ac.signal;
+}
 
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -110,17 +162,32 @@ export function refreshSession(): Promise<boolean> {
   if (refreshInFlight) return refreshInFlight;
 
   refreshInFlight = (async (): Promise<boolean> => {
-    const session = getSession();
-    if (!session) return false;
     try {
-      const res = await fetch(`${API_BASE}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ refreshToken: session.refreshToken }),
-      });
+      const session = getSession();
+      if (!session) return false;
+
+      let res: Response;
+      try {
+        res = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ refreshToken: session.refreshToken }),
+          // Bound the one request every concurrent 401 blocks on — a hung
+          // /auth/refresh otherwise wedges the whole app (client-api-04).
+          signal: timeoutSignal(REFRESH_TIMEOUT_MS),
+        });
+      } catch {
+        // Network blip, offline, DNS, or our own timeout. The refresh token was
+        // NOT accepted, so the family is not at risk, and nothing here proves
+        // the token is dead. Do NOT clear the session — a transient drop on
+        // mobile must not force a fresh wallet signature (client-api-04). The
+        // caller surfaces a network error and the user can retry.
+        return false;
+      }
+
       if (!res.ok) {
-        // 401 here means the token was expired, already used, or its family
-        // was revoked. None of those are recoverable without a new signature.
+        // A real HTTP rejection: expired, already used, or family revoked. None
+        // of those are recoverable without a new signature.
         clearSession();
         return false;
       }
@@ -133,13 +200,6 @@ export function refreshSession(): Promise<boolean> {
       // the family the next time it was presented.
       updateTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
       return true;
-    } catch {
-      // A network blip is not proof the token is dead — but we cannot
-      // distinguish it here, and retrying is the thing that burns the family.
-      // Fail closed: the user re-signs, which is recoverable. A retry storm is
-      // not.
-      clearSession();
-      return false;
     } finally {
       // Cleared in `finally` so the NEXT 401 after this settles starts a fresh
       // attempt rather than reusing a stale resolved promise.
@@ -169,18 +229,43 @@ function buildUrl(path: string, query?: RequestOptions['query']): string {
   return qs ? `${url}?${qs}` : url;
 }
 
-async function parseBody<T>(res: Response): Promise<T> {
-  if (res.status === 204) return undefined as T;
+async function parseBody(res: Response): Promise<unknown> {
+  if (res.status === 204) return undefined;
   const text = await res.text();
-  if (!text) return undefined as T;
+  if (!text) return undefined;
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(text) as unknown;
   } catch {
     throw new ApiError({
       status: res.status,
       code: 'invalid_response',
       message: 'The server returned a response that was not valid JSON.',
       details: { snippet: text.slice(0, 200) },
+    });
+  }
+}
+
+/**
+ * Run an optional caller-supplied validator over a parsed 2xx body.
+ *
+ * A validator that throws (or a guard that returns `false`, which we treat as a
+ * throw) becomes an `ApiError{code:'invalid_response'}` so a shape drift on a
+ * match/money/ranked route is a handled error at the fetch, not a
+ * `TypeError: Cannot destructure` deep in a component (client-api-06).
+ */
+function applyParse<T>(raw: unknown, parse: ((raw: unknown) => T) | undefined, label: string, status: number): T {
+  if (!parse) return raw as T;
+  try {
+    const out = parse(raw);
+    if (out === false) throw new Error('response failed validation');
+    return out;
+  } catch (cause) {
+    throw new ApiError({
+      status,
+      code: 'invalid_response',
+      message: 'The server returned data in an unexpected shape.',
+      details: { cause: cause instanceof Error ? cause.message : String(cause) },
+      requestPath: label,
     });
   }
 }
@@ -193,7 +278,7 @@ async function parseBody<T>(res: Response): Promise<T> {
  * Throws `ApiError` for every failure mode, including network failures
  * (`status: 0`) and unrecoverable auth (`SessionExpiredError`).
  */
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+export async function request<T>(path: string, options: RequestOptions<T> = {}): Promise<T> {
   const method = options.method ?? 'GET';
   const authMode = options.auth ?? 'required';
   const url = buildUrl(path, options.query);
@@ -221,22 +306,40 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       if (tokenUsed) headers.Authorization = `Bearer ${tokenUsed}`;
     }
 
+    // Bound every fetch so a stalled gateway cannot wedge the UI with a spinner
+    // that never resolves (client-api-03). The caller's own signal still wins.
+    const tSignal = timeoutSignal(options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const fetchSignal = anySignal(
+      [options.signal, tSignal].filter((s): s is AbortSignal => s !== undefined),
+    );
+
     let res: Response;
     try {
       res = await fetch(url, {
         method,
         headers,
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
-        signal: options.signal,
+        signal: fetchSignal,
         // The API is a different origin and uses bearer tokens, not cookies.
         credentials: 'omit',
         mode: 'cors',
       });
     } catch (cause) {
+      // Our timeout fired (and the caller did not abort): surface it distinctly
+      // so the UI can say "timed out" rather than a generic network error.
+      if (tSignal?.aborted && !options.signal?.aborted) {
+        throw new ApiError({
+          status: 0,
+          code: 'timeout',
+          message: 'The request timed out. Check your connection and try again.',
+          details: { cause: cause instanceof Error ? cause.message : String(cause) },
+          requestPath: label,
+        });
+      }
       throw toNetworkError(cause, label);
     }
 
-    if (res.ok) return parseBody<T>(res);
+    if (res.ok) return applyParse<T>(await parseBody(res), options.parse, label, res.status);
 
     // ── 401: refresh once, then replay ────────────────────────────────────
     if (res.status === 401 && authMode === 'required') {
@@ -256,14 +359,21 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
         // All concurrent 401s await the SAME promise → exactly one refresh.
         const ok = await refreshSession();
         if (ok) continue;
-        // Refresh failed; the session is already cleared. Do NOT try again —
-        // reuse of a refresh token revokes the whole family server-side.
-        throw new SessionExpiredError(label);
+        // Refresh did not succeed. If it cleared the session, the token is
+        // genuinely dead — surface SessionExpiredError and do NOT try again
+        // (reuse revokes the whole family). If the session SURVIVED, the
+        // refresh failed for a transient reason (network/timeout, which no
+        // longer clears — client-api-04): that must not read as "expired", so
+        // surface the original 401 and let the user retry with the session
+        // still in place.
+        if (getSession() === null) throw new SessionExpiredError(label);
+        throw err;
       }
 
-      // Either we already tried, or there was no session to begin with.
+      // No session to begin with. Nothing to clear, and clearing would emit a
+      // spurious sign-out that yanks a signed-out player off their screen
+      // (client-api-27). Just report that auth was required.
       if (currentToken === null) {
-        clearSession();
         throw new SessionExpiredError(label);
       }
       throw err;
@@ -271,23 +381,19 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
     // ── 429: honour Retry-After, bounded ──────────────────────────────────
     if (res.status === 429 && allowRetry && rateLimitRetries < MAX_429_RETRIES) {
-      const retryAfter = parseRetryAfter(res.headers.get('Retry-After'));
-      // Consume the body before sleeping.
-      await res.text().catch(() => '');
-      const waitMs = retryAfter !== null ? retryAfter * 1000 : DEFAULT_RETRY_WAIT_MS;
+      // Parse the body ONCE via toApiError, which reads the delay from the
+      // `Retry-After` header OR the body's `details.retryAfterSec` (the rate
+      // limiter only puts it in the body — client-api-05). The resulting error
+      // carries that same `retryAfter`, so if we give up it reaches the UI.
+      const err = await toApiError(res, label);
+      const waitMs = err.retryAfter !== null ? err.retryAfter * 1000 : DEFAULT_RETRY_WAIT_MS;
       if (waitMs <= MAX_RETRY_WAIT_MS) {
         rateLimitRetries += 1;
         await sleep(waitMs, options.signal);
         continue;
       }
       // Server wants us to wait longer than we are willing to block a UI for.
-      throw new ApiError({
-        status: 429,
-        code: 'rate_limited',
-        message: `Rate limited. Try again in ${retryAfter ?? '?'} seconds.`,
-        retryAfter,
-        requestPath: label,
-      });
+      throw err;
     }
 
     throw await toApiError(res, label);
@@ -296,17 +402,17 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
 // ── Convenience verbs ───────────────────────────────────────────────────────
 
-export const get = <T>(path: string, options?: Omit<RequestOptions, 'method' | 'body'>): Promise<T> =>
+export const get = <T>(path: string, options?: Omit<RequestOptions<T>, 'method' | 'body'>): Promise<T> =>
   request<T>(path, { ...options, method: 'GET' });
 
-export const post = <T>(path: string, body?: unknown, options?: Omit<RequestOptions, 'method' | 'body'>): Promise<T> =>
+export const post = <T>(path: string, body?: unknown, options?: Omit<RequestOptions<T>, 'method' | 'body'>): Promise<T> =>
   request<T>(path, { ...options, method: 'POST', body });
 
-export const put = <T>(path: string, body?: unknown, options?: Omit<RequestOptions, 'method' | 'body'>): Promise<T> =>
+export const put = <T>(path: string, body?: unknown, options?: Omit<RequestOptions<T>, 'method' | 'body'>): Promise<T> =>
   request<T>(path, { ...options, method: 'PUT', body });
 
-export const patch = <T>(path: string, body?: unknown, options?: Omit<RequestOptions, 'method' | 'body'>): Promise<T> =>
+export const patch = <T>(path: string, body?: unknown, options?: Omit<RequestOptions<T>, 'method' | 'body'>): Promise<T> =>
   request<T>(path, { ...options, method: 'PATCH', body });
 
-export const del = <T>(path: string, options?: Omit<RequestOptions, 'method' | 'body'>): Promise<T> =>
+export const del = <T>(path: string, options?: Omit<RequestOptions<T>, 'method' | 'body'>): Promise<T> =>
   request<T>(path, { ...options, method: 'DELETE' });

@@ -1,0 +1,134 @@
+[
+  {
+    "id": "hygiene-01",
+    "status": "resolved",
+    "note": "Added vitest.config.ts with test.include ['src/**/*.test.ts'] and exclude ['new-backend/**','node_modules/**','dist/**'], environment node. Root `npm test` is now GREEN: 10 files / 203 tests pass, exit 0, and it no longer sweeps new-backend (which previously failed 20 files on @chains/shared).",
+    "files": ["vitest.config.ts"]
+  },
+  {
+    "id": "hygiene-02",
+    "status": "other-owner",
+    "note": "Card-catalogue duplication (src/cards.ts vs new-backend/services/*/game/cards.ts). Owned by the engine/catalogue agent (new-backend/ is out of hygiene scope). Not touched.",
+    "files": []
+  },
+  {
+    "id": "hygiene-03",
+    "status": "other-owner",
+    "note": "Missing tests for Game.ts/bot.ts/etc. Owned by the engine agent. Observed their new src/Game.test.ts already present and passing (11 tests) during this run.",
+    "files": []
+  },
+  {
+    "id": "hygiene-04",
+    "status": "resolved",
+    "note": "Verified the 91 root-level public/cards/*.png|jpg are unreferenced by the live frontend (grepped each basename across src/ api/ index.html public/*.json public/*.html = 0 hits; the only matches are new-backend's STALE vendored cards.ts pointing at dead .png paths, which is hygiene-02's resync, and new-backend serves no static art). git rm'd all 91 plus the unreferenced public/intro.mp4 (LFS). du public: 422M -> 247M (~175M freed). Kept login-theme.mp3, battle-music.mp3, masterquest-map.png, egregore-bg.png, wizard-battle-bg.png, sproto-gremlin.png (all referenced in src/).",
+    "files": ["public/cards/*.png", "public/cards/*.jpg", "public/intro.mp4"]
+  },
+  {
+    "id": "hygiene-05",
+    "status": "resolved",
+    "note": "rules-intro.mp4 is ~180MB (git lfs ls-files confirms LFS; file size 180,432,291 bytes), OVER Vercel's ~172MB static limit, so it stays listed in .vercelignore (updated the stale 'served from Render' comment). Wrote a request to the front-end owner (requests/from-hygiene-to-frontend-rules-video.md) to degrade the 3 references (App.tsx:900, App.tsx:1759, Board.tsx:3219) gracefully via VITE_RULES_VIDEO_URL. Choice documented in .vercelignore.",
+    "files": [".vercelignore"]
+  },
+  {
+    "id": "hygiene-06",
+    "status": "resolved",
+    "note": "Added a bypass to the dev proxy so /api/chat and /api/presence (Vercel functions, not gateway routes) are NOT proxied upstream; they fall through to the Vite server. Documented with a comment explaining prod=Vercel-function vs gateway.",
+    "files": ["vite.config.ts"]
+  },
+  {
+    "id": "hygiene-07",
+    "status": "resolved",
+    "note": "Server agent deleted src/server.ts and src/db.ts, so dropped the now-dangling tsconfig.json excludes (exclude key removed; include ['src'] stays). Added tsconfig.api.json (types node, lib DOM for Web Request/Response/fetch, include ['api']) so api/*.ts typecheck. `npx tsc --noEmit -p tsconfig.api.json` = 0 errors. Wired both into the new `typecheck` npm script.",
+    "files": ["tsconfig.json", "tsconfig.api.json", "package.json"]
+  },
+  {
+    "id": "hygiene-08",
+    "status": "resolved",
+    "note": "Index tracked docs/CARDS.txt (uppercase) while disk had docs/cards.txt (lowercase, the regenerated content) — one physical file on this case-insensitive FS. Two-step renamed the on-disk file to the uppercase tracked name docs/CARDS.txt and staged it, so disk and index agree and there is no Linux/CI case clash. No script in scripts/ or src/ reads either name (grep = 0). Did NOT `git rm` cards.txt (that would delete the shared file and lose the edits).",
+    "files": ["docs/CARDS.txt"]
+  },
+  {
+    "id": "hygiene-09",
+    "status": "resolved",
+    "note": "Rewrote README.md for the current product: Egregore TCG, five Sproto factions with internal keys (bnb/Spirit, sol/Rebel, eth/Jester, robinhood/Wealth, base/Knowledge), Vercel SPA + /gw rewrite, api/chat+presence Vercel functions on Neon, new-backend as the live API deployed independently (not from this repo), the 1064x1478 WebP FULL_CARDS art pipeline, dev/test/typecheck/lint/build commands, and the review-doc location. Removed all Render/Supabase/masterstcg/OCVA content.",
+    "files": ["README.md"]
+  },
+  {
+    "id": "hygiene-10",
+    "status": "other-owner",
+    "note": "render.yaml is the server agent's delete (confirmed staged as 'D render.yaml' in git status). Not touched.",
+    "files": []
+  },
+  {
+    "id": "hygiene-11",
+    "status": "resolved",
+    "note": "Added biome.json (recommended lint rules; formatter.enabled=false and organizeImports off so the repo is NOT reformatted; ignores node_modules/dist/public/new-backend/solana/contracts/docs). Added .editorconfig and .gitattributes (`* text=auto eol=lf`). Added .github/workflows/ci.yml: job1 (npm ci && typecheck && test && build), job2 (cd new-backend && npm ci && typecheck && npx vitest run), both on push + PR. Added `lint` and `typecheck` scripts. `npm run lint` runs and reports 367 pre-existing findings in src/ (CI does not gate on lint).",
+    "files": ["biome.json", ".editorconfig", ".gitattributes", ".github/workflows/ci.yml", "package.json"]
+  },
+  {
+    "id": "hygiene-12",
+    "status": "resolved",
+    "note": "Added build.rollupOptions.output.manualChunks splitting react/react-dom/scheduler, boardgame.io+socket.io/engine.io, @solana/*, viem, three+@react-three, ogl, @privy-io, motion into separate vendor chunks, with a comment. Verified via `npx vite build --outDir <scratchpad>/dist-hygiene` (built in 35s, exit 0; the build had to retry because the front-end agent transiently had a duplicate RulebookPage in App.tsx). Vendors are now isolated from the app entry: react 142.8kB(45.7 gz), boardgame+socket.io 133.9kB(42.1), @solana 86.3kB(21.7), motion 126kB(41.2), three+@react-three 756.4kB(209.3), viem 860.3kB(239.5), privy 2,807.7kB(844.4, already React.lazy). Largest app chunk ~497.5kB(146.9 gz) vs the old single 1,448kB(443 gz) entry. ogl had no chunk (not in the current import graph). three/viem/core/privy still trip the 500kB warn but are no longer in the initial entry.",
+    "files": ["vite.config.ts"]
+  },
+  {
+    "id": "hygiene-13",
+    "status": "resolved",
+    "note": "Added docs/SECURITY.md recording that SECURITY_AUDIT.pdf dates to 2026-07-27 (commit 62834ca) with 51 commits since (git rev-list --count 62834ca..HEAD = 51), and that a re-audit is needed scoped to Privy auth, the Vercel pg functions (api/chat.ts, api/presence.ts) and the EVM packs/contracts. No conclusions fabricated; points to the 2026-11-01 review for current findings.",
+    "files": ["docs/SECURITY.md"]
+  },
+  {
+    "id": "hygiene-14",
+    "status": "resolved",
+    "note": "git add'd the 34 untracked WebP under public/cards/knowledge (17) and public/cards/wealth (17) so they travel with the uncommitted cards.ts catalogue. Staged as additions (not committed).",
+    "files": ["public/cards/knowledge/", "public/cards/wealth/"]
+  },
+  {
+    "id": "hygiene-15",
+    "status": "resolved",
+    "note": "Removed the bogus `anchor` (Sails.js/Waterline validator, not @coral-xyz/anchor) dependency. Grep confirmed 0 imports in src/api/scripts. Done in the dependency pass (same as contracts-22).",
+    "files": ["package.json"]
+  },
+  {
+    "id": "hygiene-16",
+    "status": "resolved",
+    "note": "Removed unused hard deps bufferutil and utf-8-validate (0 imports; also removed their vite external + optimizeDeps.exclude entries). Removed koa-static + @types/koa-static (legacy Koa server only, now deleted; per server agent's server.md request; 0 koa refs in src/). Declared bs58 ^4.0.1 (used by scripts/*.mts; src/api/auth.ts inlines its own base58, so dev-only -> devDependencies). Also removed the legacy dev:server/serve/start scripts. `pg` kept (api/ uses it). npm install succeeded (added 2, removed 13).",
+    "files": ["package.json", "vite.config.ts"]
+  },
+  {
+    "id": "hygiene-17",
+    "status": "other-owner",
+    "note": "The /gw dead-rewrite check and the SPA fallback regex live in vercel.json (server agent). Wrote requests/from-hygiene-to-server-vercel-json.md: flagged that the SPA regex drops dotted paths, and that /gw is NOT actually dead (.env.production sets VITE_API_BASE=/gw), so it must not be removed without changing that var. Also noted the missing headers/CSP block (client-api-02). Not touched by hygiene.",
+    "files": []
+  },
+  {
+    "id": "hygiene-18",
+    "status": "resolved",
+    "note": ".gitignore: added `.boost/` (was untracked+unignored), removed the dangerous bare `frontend`/`backend` patterns (verified no such paths exist), and generalized `tsconfig.tsbuildinfo` to `*.tsbuildinfo` (covers tsconfig.api.* too).",
+    "files": [".gitignore"]
+  },
+  {
+    "id": "hygiene-19",
+    "status": "resolved",
+    "note": "Replaced the mp4-only .gitattributes with `* text=auto eol=lf` plus binary markers for png/jpg/jpeg/webp/gif/ico/woff/woff2/ttf/otf/glb/gltf/mp3/wav/ogg/pdf, keeping the *.mp4 LFS filter. Stops the CRLF whole-file diffs.",
+    "files": [".gitattributes"]
+  },
+  {
+    "id": "hygiene-20",
+    "status": "resolved",
+    "note": "Removed the unreferenced public/intro.mp4 (2.1MB LFS; 0 refs, rules-intro excluded) in the hygiene-04 pass. The MP3s (login-theme.mp3 8MB, battle-music.mp3 4.3MB) and backdrop PNGs (masterquest-map/egregore-bg/wizard-battle-bg/sproto-gremlin) ARE referenced in src/ and were kept; re-encoding/WebP conversion is deferred because it would require src edits (not owned) and is a lossy/low-severity change.",
+    "files": ["public/intro.mp4"]
+  },
+  {
+    "id": "hygiene-21",
+    "status": "resolved",
+    "note": "Added a Status header to the two owned scripts (render-cards.mjs = current dev utility, export-masterquest-lore.mts = current one-shot) and added scripts/README.md listing every script's purpose and liveness (EVM-era scripts marked deployed-but-unused, sproto Solana scripts marked legacy). The non-owned scripts were left in place; no hardcoded secrets found (all read process.env).",
+    "files": ["scripts/render-cards.mjs", "scripts/export-masterquest-lore.mts", "scripts/README.md"]
+  },
+  {
+    "id": "contracts-22",
+    "status": "resolved",
+    "note": "Removed the `anchor` npm dependency (the unrelated Sails.js validator, not @coral-xyz/anchor; 0 imports). Done in the dependency pass; npm install clean. Same change as hygiene-15.",
+    "files": ["package.json"]
+  }
+]

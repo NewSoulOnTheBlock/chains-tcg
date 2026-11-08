@@ -19,11 +19,32 @@ const log = createLogger({ service: 'game' }).child({ component: 'bgio-store' })
  * the migration has not run the service fails to boot instead of silently
  * writing into `public`.
  */
+/**
+ * Mirror the shared pool's `sslConfig()` so the connection carrying live match
+ * state has the SAME TLS guarantee as every other connection to this database
+ * (server-29). Previously every non-'disable' value mapped to
+ * rejectUnauthorized:false, so `PGSSL=require` silently got UNVERIFIED TLS here
+ * while the shared pool verified the CA.
+ *   disable   -> no TLS
+ *   require   -> TLS, verify the CA
+ *   no-verify -> TLS, do not verify the CA
+ */
+function bgioDialectOptions(): Record<string, unknown> {
+  switch (config.PGSSL) {
+    case 'disable':
+      return {};
+    case 'no-verify':
+      return { ssl: { require: true, rejectUnauthorized: false } };
+    case 'require':
+    default:
+      return { ssl: { require: true, rejectUnauthorized: true } };
+  }
+}
+
 export const store = new PostgresStore(config.DATABASE_URL, {
   logging: false,
   define: { schema: config.BGIO_SCHEMA },
-  dialectOptions:
-    config.PGSSL !== 'disable' ? { ssl: { require: true, rejectUnauthorized: false } } : {},
+  dialectOptions: bgioDialectOptions(),
   pool: { max: 5, idle: 30_000, acquire: 10_000 },
 });
 

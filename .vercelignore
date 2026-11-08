@@ -1,5 +1,9 @@
-# Exceeds Vercel's static file-size limit (~172 MB). Served from the Render
-# deployment instead; on Vercel the rules-intro video simply won't load.
+# rules-intro.mp4 is ~180 MB — over Vercel's static file-size limit (~172 MB)
+# and stored in Git LFS, so a Vercel build from git would only get the pointer.
+# It is kept out of the deploy here; the three in-app references to
+# /rules-intro.mp4 need to degrade gracefully (serve it from object storage via
+# an env var, or hide the player when absent). See hygiene-05 and the request to
+# the front-end owner in review/requests/.
 public/rules-intro.mp4
 
 # Build artifacts / deps — Vercel installs + builds remotely.

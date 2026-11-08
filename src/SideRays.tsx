@@ -212,12 +212,15 @@ void main() {
 
       const loop = (t: number) => {
         if (!rendererRef.current || !uniformsRef.current || !meshRef.current) return;
+        animationIdRef.current = requestAnimationFrame(loop);
+        // Pause GPU work while the tab is hidden; the loop keeps ticking so it
+        // resumes rendering when the tab is shown again (Task 4: perf).
+        if (document.hidden) return;
         uniforms.iTime.value = t * 0.001;
         try {
           renderer.render({ scene: mesh });
-          animationIdRef.current = requestAnimationFrame(loop);
         } catch {
-          return;
+          if (animationIdRef.current) { cancelAnimationFrame(animationIdRef.current); animationIdRef.current = null; }
         }
       };
 

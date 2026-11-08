@@ -580,24 +580,31 @@ function toQueue(r: RawQueue): QueueRow {
  * client that re-joins on a timer never becomes eligible for a wider bracket and
  * waits forever at a bracket that has no opponents in it.
  */
-export async function enqueue(e: {
-  profileId: string;
-  seasonId: string;
-  deckId: string;
-  rating: number;
-  region: string;
-}): Promise<QueueRow> {
-  const r = await queryOne<RawQueue>(
-    `INSERT INTO game.ranked_queue (profile_id, season_id, deck_id, rating, region)
+export async function enqueue(
+  e: {
+    profileId: string;
+    seasonId: string;
+    deckId: string;
+    rating: number;
+    region: string;
+  },
+  c?: PoolClient,
+): Promise<QueueRow> {
+  // Accept an optional client so the live-match check and the enqueue can run in
+  // ONE transaction (server-31): otherwise a player paired between the check and
+  // this INSERT ends up both seated and queued.
+  const text = `INSERT INTO game.ranked_queue (profile_id, season_id, deck_id, rating, region)
      VALUES ($1::bigint, $2, $3::bigint, $4, $5)
      ON CONFLICT (profile_id) DO UPDATE
        SET season_id = EXCLUDED.season_id,
            deck_id   = EXCLUDED.deck_id,
            rating    = EXCLUDED.rating,
            region    = EXCLUDED.region
-     RETURNING ${QUEUE_COLS}`,
-    [e.profileId, e.seasonId, e.deckId, e.rating, e.region],
-  );
+     RETURNING ${QUEUE_COLS}`;
+  const params = [e.profileId, e.seasonId, e.deckId, e.rating, e.region];
+  const r = c
+    ? ((await c.query<RawQueue>(text, params)).rows[0] ?? null)
+    : await queryOne<RawQueue>(text, params);
   if (!r) throw new Error('ranked queue insert returned no row');
   return toQueue(r);
 }
@@ -650,10 +657,25 @@ export async function listQueueRegions(): Promise<string[]> {
  * pairers never hand the same player to two matches. That is the same mechanism
  * the legacy matchmaker used, and it is the one part of it that was right.
  */
+/**
+ * A profile that already holds a live ranked match must never be claimed from
+ * the queue (server-31): the TOCTOU on the join path can leave a seated player
+ * still queued, and seating them again would create a second live ranked match
+ * they cannot be at. The pairer excludes them here so the stale queue row is
+ * simply skipped (and reaped later) instead of being paired.
+ */
+const NOT_SEATED = `NOT EXISTS (
+  SELECT 1 FROM game.matches gm
+   WHERE gm.mode = 'ranked' AND gm.status = 'live'
+     AND (gm.seat0_profile = game.ranked_queue.profile_id
+          OR gm.seat1_profile = game.ranked_queue.profile_id)
+)`;
+
 export async function claimSeed(c: PoolClient, region: string): Promise<QueueRow | null> {
   const { rows } = await c.query<RawQueue>(
     `SELECT ${QUEUE_COLS} FROM game.ranked_queue
       WHERE region = $1
+        AND ${NOT_SEATED}
       ORDER BY queued_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED`,
@@ -675,6 +697,7 @@ export async function claimOpponent(
       WHERE region = $1
         AND profile_id <> $2::bigint
         AND abs(rating - $3) <= $4
+        AND ${NOT_SEATED}
       ORDER BY abs(rating - $3) ASC, queued_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED`,
@@ -770,17 +793,15 @@ export async function insertLiveRankedMatch(
 }
 
 /** The caller's current live ranked match, if they are seated in one. */
-export async function liveRankedMatchFor(profileId: string): Promise<{
+export async function liveRankedMatchFor(
+  profileId: string,
+  c?: PoolClient,
+): Promise<{
   matchID: string;
   seat: 0 | 1;
   opponentDisplayName: string | null;
 } | null> {
-  const r = await queryOne<{
-    id: string;
-    is_seat0: boolean;
-    opponent_name: string | null;
-  }>(
-    `SELECT m.id,
+  const sql = `SELECT m.id,
             (m.seat0_profile = $1::bigint) AS is_seat0,
             opp.display_name AS opponent_name
        FROM game.matches m
@@ -791,9 +812,11 @@ export async function liveRankedMatchFor(profileId: string): Promise<{
         AND m.status = 'live'
         AND (m.seat0_profile = $1::bigint OR m.seat1_profile = $1::bigint)
       ORDER BY m.started_at DESC NULLS LAST
-      LIMIT 1`,
-    [profileId],
-  );
+      LIMIT 1`;
+  type Row = { id: string; is_seat0: boolean; opponent_name: string | null };
+  const r = c
+    ? ((await c.query<Row>(sql, [profileId])).rows[0] ?? null)
+    : await queryOne<Row>(sql, [profileId]);
   if (!r) return null;
   return {
     matchID: r.id,

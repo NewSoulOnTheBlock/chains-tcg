@@ -28,9 +28,10 @@
 
 import {
   createPublicClient, createWalletClient, custom, http, defineChain,
-  parseEther, parseAbi, decodeEventLog, type Address,
+  parseAbi, decodeEventLog, type Address,
 } from 'viem';
 import { ROBINHOOD_CHAIN_PARAMS } from './wallet';
+import { readEnv } from './api/config';
 import { CARDS } from './cards';
 
 /**
@@ -53,7 +54,7 @@ export function robinhoodTxUrl(hash: string): string {
  *
  * Note this is INDEPENDENT of the backend's own booster tickets
  * (`/wager/boosters/*`), which report `mintingEnabled: false` and never issue
- * an NFT — see `src/boosters-api.ts`. These are two different products.
+ * an NFT (see `src/api/wager.ts`). These are two different products.
  */
 // OFF while packs move to Solana / $GORE (see docs/solana-migration.md). The
 // Boosters page shows COMING SOON and `open()` refuses to mint.
@@ -63,14 +64,24 @@ export const PACK_MINTING_AVAILABLE: boolean = false;
 export const PACK_MINTING_UNAVAILABLE_MESSAGE =
   'Booster packs are on their way. Minting opens soon.';
 
-export const CARD_PACK = ((import.meta.env.VITE_CARD_PACK as string) ||
+/**
+ * CardPack address. Read via the sanctioned `readEnv` (config.ts) so Vite and
+ * Node (vitest / tsx) agree on it and a test or script can override it through
+ * `process.env.VITE_CARD_PACK`; a bare `import.meta.env` read could not be
+ * overridden that way (client-api-15). The literal is the one documented mainnet
+ * fallback.
+ */
+export const CARD_PACK = ((readEnv('VITE_CARD_PACK') as string | undefined) ||
   '0x57200fb533b33823f8bd2ac8f3649e3b643830b3') as Address;
+/** Display-only default price. NOT used as an on-chain fallback — see fetchPackPrice. */
 export const PACK_PRICE_ETH = '0.0035';
 export const ROBINHOOD_CHAIN_ID = 4663;
 /** Robinhood Chain testnet, for reference — this build targets mainnet only. */
 export const ROBINHOOD_TESTNET_CHAIN_ID = 46630;
 // Gas limit we submit mintPack with (this chain's estimateGas is unreliable).
 export const MINT_GAS_LIMIT = 1_500_000n;
+/** Cap the receipt wait so a dropped tx doesn't spin the UI forever. */
+export const RECEIPT_TIMEOUT_MS = 120_000;
 
 export const robinhoodChain = defineChain({
   id: ROBINHOOD_CHAIN_ID, name: 'Robinhood Chain',
@@ -98,23 +109,56 @@ function walletClient() {
   return createWalletClient({ chain: robinhoodChain, transport: custom(eth) });
 }
 
-async function ensureChain() {
+/**
+ * Ensure the wallet is on Robinhood Chain, FAILING LOUDLY if it is not.
+ *
+ * The old version swallowed every switch error except 4902, so a user rejection
+ * (4001) or a wallet that ignored the request fell straight through to
+ * `writeContract`, which could send 0.0035 ETH on whatever chain the wallet was
+ * actually on (client-api-13). Now a rejection throws, and — like
+ * `connectRobinhoodChain` in wallet.ts — we read `eth_chainId` BACK and refuse
+ * to proceed unless it is 4663, because `wallet_addEthereumChain` can resolve
+ * without selecting the network.
+ */
+async function ensureChain(): Promise<void> {
   const eth = (window as any).ethereum;
+  if (!eth) throw new Error('No EVM wallet detected. Install MetaMask.');
+
+  if ((await getWalletChainId()) === ROBINHOOD_CHAIN_ID) return;
+
   try {
     await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x1237' }] });
   } catch (e: any) {
-    if (e?.code === 4902) {
-      await eth.request({
-        method: 'wallet_addEthereumChain',
-        params: [ROBINHOOD_CHAIN_PARAMS],
-      });
+    if (e?.code === 4902 || /Unrecognized chain|not been added/i.test(String(e?.message ?? ''))) {
+      await eth.request({ method: 'wallet_addEthereumChain', params: [ROBINHOOD_CHAIN_PARAMS] });
+    } else {
+      throw new Error(
+        `Could not switch to Robinhood Chain (${ROBINHOOD_CHAIN_ID}). Approve the network switch in your wallet and try again.`,
+      );
     }
+  }
+
+  const after = await getWalletChainId();
+  if (after !== ROBINHOOD_CHAIN_ID) {
+    throw new Error(
+      `Your wallet is still on chain ${after ?? '?'}. Booster mint only works on Robinhood Chain (${ROBINHOOD_CHAIN_ID}) — switch networks and try again.`,
+    );
   }
 }
 
+/**
+ * The CURRENT on-chain pack price. THROWS on an RPC failure rather than
+ * guessing: the old fallback to a hardcoded 0.0035 ETH let a stale guess be
+ * sent as `value` when the real price had changed, so the tx reverted and the
+ * user ate the gas (client-api-14). Block the buy instead and let the caller
+ * surface the error; `PACK_PRICE_ETH` is for DISPLAY only.
+ */
 export async function fetchPackPrice(): Promise<bigint> {
-  try { return await pub.readContract({ address: CARD_PACK, abi: packAbi, functionName: 'packPrice' }); }
-  catch { return parseEther(PACK_PRICE_ETH); }
+  try {
+    return await pub.readContract({ address: CARD_PACK, abi: packAbi, functionName: 'packPrice' });
+  } catch {
+    throw new Error('Could not read the current pack price from the chain. Please try again in a moment.');
+  }
 }
 
 /** Native ETH balance of an address on Robinhood Chain. */
@@ -186,16 +230,40 @@ export async function mintPack(onHash?: (hash: `0x${string}`) => void): Promise<
   const [account] = await wc.getAddresses();
   const price = await fetchPackPrice(); // recheck price immediately before submit
 
+  // Simulate (eth_call) FIRST: if the mint would revert — wrong price, sold
+  // out, paused — this throws here, free, instead of after the user has signed
+  // and paid gas for an on-chain revert (client-api-14).
+  await pub.simulateContract({
+    account, address: CARD_PACK, abi: packAbi, functionName: 'mintPack', value: price, gas: MINT_GAS_LIMIT,
+  });
+
   const hash = await wc.writeContract({ account, address: CARD_PACK, abi: packAbi, functionName: 'mintPack', value: price, gas: MINT_GAS_LIMIT });
   onHash?.(hash);
-  const rcpt = await pub.waitForTransactionReceipt({ hash });
-  if (rcpt.status !== 'success') throw new Error('Transaction reverted on-chain.');
-  return decodePackFromReceipt(rcpt.logs as any);
+  return waitAndDecode(hash);
 }
 
 /** Resume a pending mint after a refresh: wait for the known hash and decode. */
 export async function resumePack(hash: `0x${string}`): Promise<RevealedCard[]> {
-  const rcpt = await pub.waitForTransactionReceipt({ hash });
+  return waitAndDecode(hash);
+}
+
+/**
+ * Wait for a mint receipt with a bounded timeout and decode it.
+ *
+ * `waitForTransactionReceipt` with no `timeout` polls indefinitely, so a hash
+ * dropped from the mempool leaves the UI's pending state unresolved forever
+ * (client-api-14). Time out instead and tell the user to check the explorer;
+ * `resumePack(hash)` can retry later.
+ */
+async function waitAndDecode(hash: `0x${string}`): Promise<RevealedCard[]> {
+  let rcpt;
+  try {
+    rcpt = await pub.waitForTransactionReceipt({ hash, timeout: RECEIPT_TIMEOUT_MS });
+  } catch {
+    throw new Error(
+      `Still waiting on your mint. It may still confirm — check ${robinhoodTxUrl(hash)} and reopen Boosters to resume.`,
+    );
+  }
   if (rcpt.status !== 'success') throw new Error('Transaction reverted on-chain.');
   return decodePackFromReceipt(rcpt.logs as any);
 }

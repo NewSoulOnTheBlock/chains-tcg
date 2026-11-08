@@ -92,16 +92,6 @@ export interface JoinResult {
 export async function joinQueue(profileId: string, region: QueueRegion): Promise<JoinResult> {
   const season = await ensureActiveSeason();
 
-  // Already playing? Queueing while seated would pair a player into a second
-  // match they cannot be at, and both would then rate.
-  const live = await repo.liveRankedMatchFor(profileId);
-  if (live) {
-    throw AppError.conflict('You are already in a ranked match', {
-      reason: 'already_in_match',
-      matchID: live.matchID,
-    });
-  }
-
   // Resolved server-side. `assertSeatableDeck` throws `no_active_deck` /
   // `invalid_active_deck`; `assertDeckOwnership` throws `unowned_cards` with the
   // offending cards named. All three are 400s the client can render directly.
@@ -109,19 +99,32 @@ export async function joinQueue(profileId: string, region: QueueRegion): Promise
   assertSeatableDeck(deck);
   await assertDeckOwnership(profileId, deck, 'ranked');
 
-  const entry = await withTransaction(async (c) => {
+  // The live-match check AND the enqueue run in ONE transaction (server-31):
+  // checking outside the transaction let the pairer seat the player between the
+  // check and the INSERT, leaving them both seated and queued. The pairer also
+  // excludes profiles with a live ranked match (claimSeed/claimOpponent), so a
+  // row that slips in despite this is skipped rather than double-seated.
+  const row = await withTransaction(async (c) => {
+    const live = await repo.liveRankedMatchFor(profileId, c);
+    if (live) {
+      throw AppError.conflict('You are already in a ranked match', {
+        reason: 'already_in_match',
+        matchID: live.matchID,
+      });
+    }
     await repo.ensureStanding(c, season.id, profileId, config.RANKED_PLACEMENT_MATCHES);
     const standing = await repo.getStanding(season.id, profileId, c);
     if (!standing) throw AppError.internal('Could not open a ranked standing');
-    return { rating: standing.rating };
-  });
-
-  const row = await repo.enqueue({
-    profileId,
-    seasonId: season.id,
-    deckId: deck.id,
-    rating: entry.rating,
-    region,
+    return repo.enqueue(
+      {
+        profileId,
+        seasonId: season.id,
+        deckId: deck.id,
+        rating: standing.rating,
+        region,
+      },
+      c,
+    );
   });
 
   log.info('ranked queue join', { profileId, region, seasonId: season.id });

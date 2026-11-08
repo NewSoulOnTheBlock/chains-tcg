@@ -1,0 +1,188 @@
+[
+  {
+    "id": "client-api-01",
+    "status": "skipped",
+    "note": "Not ours — 'Remember me' lives in App.tsx (another agent owns it). session.ts already exposes getPersistence()/setPersistence() for the correct fix.",
+    "files": []
+  },
+  {
+    "id": "client-api-02",
+    "status": "partial",
+    "note": "session.ts comment corrected: it no longer claims the gateway sets a CSP and now points to the vercel.json headers block. The actual headers block in vercel.json is the server agent's; left a spec in requests/client-api.md.",
+    "files": ["src/api/session.ts"]
+  },
+  {
+    "id": "client-api-03",
+    "status": "fixed",
+    "note": "request() now combines the caller signal with AbortSignal.timeout(DEFAULT_TIMEOUT_MS=20s) via AbortSignal.any (both with fallbacks); a timeout surfaces as ApiError{code:'timeout',status:0}, distinct from a caller abort.",
+    "files": ["src/api/http.ts"]
+  },
+  {
+    "id": "client-api-04",
+    "status": "fixed",
+    "note": "refreshSession() gives the /auth/refresh fetch a 15s timeout and, on a thrown network/timeout error, returns false WITHOUT clearing the session. request() then surfaces the original 401 (not SessionExpiredError) when the session survived, so a transient blip no longer forces a re-sign.",
+    "files": ["src/api/http.ts"]
+  },
+  {
+    "id": "client-api-05",
+    "status": "fixed",
+    "note": "429 path now parses the body once via toApiError (which honours header Retry-After OR body details.retryAfterSec) and uses err.retryAfter for both the sleep and the thrown error, so a body-only delay is respected and reaches the UI.",
+    "files": ["src/api/http.ts"]
+  },
+  {
+    "id": "client-api-06",
+    "status": "fixed",
+    "note": "Added optional per-request `parse` validator; a throw/false becomes ApiError{code:'invalid_response'}. Hand-written guards (new src/api/guards.ts, no new deps) wired into the match/money/ranked routes: lobby create/join/getSeat/getLobby/getInvites, wager getStakes/createEscrow/getEscrow/submitDeposit, ranked getMe/joinQueue.",
+    "files": ["src/api/http.ts", "src/api/guards.ts", "src/api/lobby.ts", "src/api/wager.ts", "src/api/ranked.ts"]
+  },
+  {
+    "id": "client-api-07",
+    "status": "fixed",
+    "note": "Added src/api/http.test.ts using the isRefreshing() seam and a stubbed fetch: one /auth/refresh for ten parallel 401s + replay, failed refresh clears+SessionExpiredError, network-fail refresh does NOT clear, 401 replay without refresh when the token rotated, GET 429 retry, POST not retried + body retryAfterSec surfaced, and invalid_response from parse. 7 tests pass.",
+    "files": ["src/api/http.test.ts"]
+  },
+  {
+    "id": "client-api-08",
+    "status": "fixed",
+    "note": "The cross-tab storage listener now wraps JSON.parse in try/catch and treats an unparseable value as null (signed out), so a non-JSON write from another tab/extension/devtools no longer throws uncaught in the auth layer.",
+    "files": ["src/api/session.ts"]
+  },
+  {
+    "id": "client-api-09",
+    "status": "fixed",
+    "note": "presence.ts heartbeat beat() now refreshes the token once (via refreshSession, single-flight with http.ts) and retries on a 401, has an 8s AbortSignal timeout, and still stops on a hidden tab. The POST's online response also feeds the shared count store.",
+    "files": ["src/presence.ts"]
+  },
+  {
+    "id": "client-api-10",
+    "status": "skipped",
+    "note": "Not ours — api/presence.ts (Vercel function TLS + raw-token cache) is the server agent's. Noted the required ssl verify-full + SHA-256 token cache in requests/client-api.md.",
+    "files": []
+  },
+  {
+    "id": "client-api-11",
+    "status": "fixed",
+    "note": "Confirmed via grep that no UI (App/Settings/Boosters) calls any Solana connector. Removed @solana/web3.js and all Solana code from wallet.ts (connectSolana*, Wallet-Standard discovery, getSolanaWallet, getPhantom, detectSolanaWallets, wrapWalletStandard). booster-mint.ts keeps its own @solana/web3.js (server-side mint). Main bundle no longer pulls web3.js via wallet.ts.",
+    "files": ["src/wallet.ts", "src/api/auth.ts"]
+  },
+  {
+    "id": "client-api-12",
+    "status": "fixed",
+    "note": "Deleted src/boosters-api.ts (no importers) and src/wager-program.ts. Only remaining wager-program importer was solana/scripts/initialize.ts (outside tsconfig include, retired stack) — flagged in requests/client-api.md. Updated pack-evm.ts's comment that referenced boosters-api.ts.",
+    "files": ["src/boosters-api.ts", "src/wager-program.ts", "src/pack-evm.ts"]
+  },
+  {
+    "id": "client-api-13",
+    "status": "fixed",
+    "note": "pack-evm.ts ensureChain() now throws on a switch rejection (no longer swallows everything but 4902) and reads eth_chainId BACK, refusing to proceed unless the wallet is confirmed on 4663.",
+    "files": ["src/pack-evm.ts"]
+  },
+  {
+    "id": "client-api-14",
+    "status": "fixed",
+    "note": "fetchPackPrice() now THROWS on RPC failure instead of returning the hardcoded 0.0035 ETH; mintPack() simulateContract()s before writeContract (reverts caught for free, no gas); receipts wait with a RECEIPT_TIMEOUT_MS=120s bound (waitAndDecode) and surface a 'check the explorer / resume' error on timeout. PACK_PRICE_ETH kept for display only.",
+    "files": ["src/pack-evm.ts"]
+  },
+  {
+    "id": "client-api-15",
+    "status": "fixed",
+    "note": "CARD_PACK now reads via readEnv('VITE_CARD_PACK') (config.ts), so vitest/tsx can override it through process.env; documented fallback address retained.",
+    "files": ["src/pack-evm.ts"]
+  },
+  {
+    "id": "client-api-16",
+    "status": "skipped",
+    "note": "Not ours and already resolved by deletion — src/server-custodial.ts (legacy Koa server) is staged for deletion by the server agent (git shows 'D'); the file no longer exists on disk.",
+    "files": []
+  },
+  {
+    "id": "client-api-17",
+    "status": "fixed",
+    "note": "mintTicketNft() generates the asset signer ONCE outside the loop; on any failure it fetchAsset()s that fixed address and returns it if the tx already landed (no re-send). It only rotates RPCs for pre-broadcast failures (auth/rate-limit/transport); a confirmation timeout now throws for manual reconciliation instead of risking a double mint on another RPC.",
+    "files": ["src/booster-mint.ts"]
+  },
+  {
+    "id": "client-api-18",
+    "status": "fixed",
+    "note": "The sold-out gate that misused BOOSTER_MINTED_OFFSET lived in the now-deleted legacy server.ts, so the real sellable-supply bug is gone. In booster-mint.ts the offset comment now states it is display-only and MUST NOT enter any supply gate, and the stale 'default 2000' comment is corrected to 100.",
+    "files": ["src/booster-mint.ts"]
+  },
+  {
+    "id": "client-api-19",
+    "status": "fixed",
+    "note": "masterUi lived in src/wager-program.ts, which was DELETED as a dead module (client-api-12). The float-math bug cannot manifest in removed code, so it is resolved by deletion rather than rewrite.",
+    "files": ["src/wager-program.ts"]
+  },
+  {
+    "id": "client-api-20",
+    "status": "fixed",
+    "note": "refreshCollection/syncCollection now short-circuit ONLY on SessionExpiredError (the case onSessionChange actually handles). Any other 401 commits a non-loading state with an error message instead of leaving the spinner stuck.",
+    "files": ["src/collection.ts"]
+  },
+  {
+    "id": "client-api-21",
+    "status": "fixed",
+    "note": "Added a confirmedSource module flag; ownershipKnown() now returns false while the snapshot came from the editable localStorage cache ('cache') and only true once a real server snapshot lands ('server'). Deck caps / 'you do not own X' therefore no longer come from a devtools-editable value.",
+    "files": ["src/collection.ts"]
+  },
+  {
+    "id": "client-api-22",
+    "status": "fixed",
+    "note": "wallet.ts discovers injected wallets via EIP-6963, connectRobinhoodChain() pins the chosen provider (_activeEvmProvider) and returns it, and signMessageEvm(message,address,provider?) defaults to getActiveEvmProvider() rather than a bare globalThis.ethereum — so the account that connected and the key that signs are the same wallet. listEvmProviders() is exposed for a UI picker (optional App/Settings wiring noted in requests).",
+    "files": ["src/wallet.ts", "src/api/auth.ts"]
+  },
+  {
+    "id": "client-api-23",
+    "status": "fixed",
+    "note": "connectRobinhoodChain() now lowercases the returned address, matching connectEvm, Session.address and the downstream sameAddress/cache-key comparisons, so one casing convention holds everywhere.",
+    "files": ["src/wallet.ts"]
+  },
+  {
+    "id": "client-api-24",
+    "status": "fixed",
+    "note": "config.ts comments rewritten to describe the real setup (production VITE_API_BASE=/gw via the Vercel rewrite, .env.production TRACKED, absolute VITE_SOCKET_URL for sockets). defaultBase replaced by resolveBase(), which THROWS for a non-localhost origin with no VITE_API_BASE instead of silently defaulting to production.",
+    "files": ["src/api/config.ts"]
+  },
+  {
+    "id": "client-api-25",
+    "status": "fixed",
+    "note": "PrivyBoundary.componentDidCatch(error, info) now console.error's the error and component stack (guarded) instead of an empty body, so an SDK crash is debuggable.",
+    "files": ["src/privy/runtime.tsx"]
+  },
+  {
+    "id": "client-api-26",
+    "status": "fixed",
+    "note": "The fallback-copy test now asserts linkedWalletErrorText(failure('some_future_reason'),'link') === errorText(failure(...)) (true delegation) and that the output does not contain the reason slug, instead of only typeof/length.",
+    "files": ["src/linked-wallets.test.ts"]
+  },
+  {
+    "id": "client-api-27",
+    "status": "fixed",
+    "note": "A required call while signed out (currentToken === null) now just throws SessionExpiredError without calling clearSession(), so no spurious onSessionChange fires to yank a signed-out player off their screen.",
+    "files": ["src/api/http.ts"]
+  },
+  {
+    "id": "client-api-28",
+    "status": "fixed",
+    "note": "useOnlineCount() now subscribes to a single module-level store with ONE shared poller (started on first subscriber, stopped on last, with an AbortController per read). Multiple mounts no longer multiply the 30s GET, and the heartbeat POST's response feeds the same store.",
+    "files": ["src/presence.ts"]
+  },
+  {
+    "id": "engine-20",
+    "status": "fixed",
+    "note": "refreshCollection() captures currentAddress() before the request and drops the response (success or failure) if the identity changed; resetForIdentity() clears inFlight and bumps a refreshSeq so a stale request's finally cannot null a newer handle, and so a late response cannot overwrite the new wallet's snapshot/cache.",
+    "files": ["src/collection.ts"]
+  },
+  {
+    "id": "contracts-13",
+    "status": "fixed",
+    "note": "Resolved by deleting src/wager-program.ts (the classic-SPL-Token Anchor client). The dead module that conflicted with the custodial path's Token-2022 usage no longer exists; the server-custodial.ts counterpart is also deleted (legacy server). Any revived Solana wager program must pin the verified token program in one shared constant.",
+    "files": ["src/wager-program.ts"]
+  },
+  {
+    "id": "contracts-20",
+    "status": "fixed",
+    "note": "booster-mint.ts comments corrected: BOOSTER_PRICE_SOL is documented as SOL (charged as lamports), explicitly NOT ETH and UNRELATED to pack-evm.ts's 0.0035 ETH CardPack price. The 6-decimal $MASTER conflation source (wager-program.ts, MASTER_DECIMALS=6) was deleted; MasterToken.sol (18-decimal EVM) is the contracts agent's file.",
+    "files": ["src/booster-mint.ts"]
+  }
+]

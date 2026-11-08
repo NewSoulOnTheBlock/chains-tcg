@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ApiError } from './api';
+import { errorText } from './error-text';
 import {
   UNLINK_CONSEQUENCES,
   UNLINK_SHORT_WARNING,
@@ -117,10 +118,14 @@ describe('each named refusal has real words', () => {
     expect(isChainVerificationFailure(failure('address_already_linked'))).toBe(false);
   });
 
-  it('an unnamed failure falls through to the generic mapper, not to silence', () => {
-    const text = linkedWalletErrorText(failure('some_future_reason'), 'link');
-    expect(typeof text).toBe('string');
-    expect(text.length).toBeGreaterThan(0);
+  it('an unnamed failure DELEGATES to the generic mapper (not raw prose or the slug)', () => {
+    const err = failure('some_future_reason');
+    const text = linkedWalletErrorText(err, 'link');
+    // The behaviour the name promises: it DELEGATES to the generic mapper
+    // verbatim rather than inventing link-specific copy, and the machine-
+    // readable reason slug never leaks into player-facing text (client-api-26).
+    expect(text).toBe(errorText(err));
+    expect(text).not.toContain('some_future_reason');
   });
 });
 

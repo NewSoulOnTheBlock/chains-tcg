@@ -41,6 +41,29 @@ Generated fresh: `JWT_SECRET`, `POSTGRES_PASSWORD`, `MATCH_RESULT_HMAC_SECRET`,
 `BOOSTER_PACK_SEED_SECRET`, `RPC_PROXY_INTERNAL_TOKEN`, `WAGER_ESCROW_KEYPAIR`,
 `BOOSTER_TREASURY_KEYPAIR`.
 
+### 2a. Escrow signing-key isolation (server-37)
+
+`WAGER_ESCROW_KEYPAIR` signs every payout and, when funded, is drainable by
+anyone who can read it. Treat it as the single most sensitive value here.
+
+- **File must be mode 600, owned by the service user.** The wager service now
+  enforces this at boot: set `WAGER_KEY_ENV_FILE=/opt/chains-tcg/.env` and it
+  calls `stat()` on that path and **refuses to start** if the file is group- or
+  other-readable (any of mode `0o077`). This turns a `chmod 644` slip into a
+  failed boot instead of a silent key leak. (POSIX only; a Windows dev box skips
+  the check.)
+- **Placeholder keys cannot boot silently.** The service refuses to start if the
+  escrow/treasury address is one of the documented throwaway keypairs
+  (§"Placeholder wager keypairs"), unless `ALLOW_PLACEHOLDER_WAGER_KEYS=1` is set
+  to opt in to a deliberate no-real-money deployment. A real, funded launch sets
+  neither of these addresses and must NOT set that flag.
+- **Do not co-locate on a shared host.** INTEGRATION.md §9 lists the shared-host
+  root-SSH exposure as the top risk; a funded wager wallet should move behind a
+  KMS/HSM signer (or an on-chain escrow contract) before real stakes grow. Until
+  then, keep the host single-tenant and rotate the placeholder keys.
+- Never bake the key into an image, a compose file, or a committed `.env`; it is
+  injected only via the root-owned `/opt/chains-tcg/.env` read at container start.
+
 Production values that matter for correctness:
 
 ```

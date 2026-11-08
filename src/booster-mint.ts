@@ -21,11 +21,15 @@
 //   VITE_SOLANA_RPC / SOLANA_RPC / HELIUS_API_KEY          RPC endpoint.
 //
 // Optional env:
-//   BOOSTER_PRICE_SOL        Pack price, denominated in ETH for Robinhood Chain
-//                            (default 0.0035). Env name kept for back-compat with
-//                            the legacy Solana payment path (still charged on-chain
-//                            as this many SOL until the EVM payment migration lands).
-//   BOOSTER_SUPPLY_CAP       Max tickets mintable (default 2000).
+//   BOOSTER_PRICE_SOL        Pack price in SOL (default 0.0035), charged on-chain
+//                            as that many SOL via lamports (see
+//                            BOOSTER_PRICE_LAMPORTS). It is NOT denominated in ETH
+//                            and is UNRELATED to the EVM CardPack's 0.0035 ETH
+//                            price in pack-evm.ts — the two products share only
+//                            the numeral, not the unit (contracts-20). Rename to
+//                            BOOSTER_PRICE_SOL vs CARD_PACK_PRICE_ETH if they ever
+//                            diverge.
+//   BOOSTER_SUPPLY_CAP       Max tickets mintable (default 100).
 //   BOOSTER_METADATA_URI     Override the NFT metadata URI (default
 //                            https://www.masterstcg.com/booster-ticket.json).
 
@@ -36,15 +40,19 @@ import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
 import {
   generateSigner, keypairIdentity, publicKey as umiPublicKey,
 } from '@metaplex-foundation/umi';
-import { create, mplCore } from '@metaplex-foundation/mpl-core';
+import { create, fetchAsset, mplCore } from '@metaplex-foundation/mpl-core';
 
 // ── Config ─────────────────────────────────────────────────────────────────
 
 export const BOOSTER_PRICE_SOL = Number(process.env.BOOSTER_PRICE_SOL ?? 0.0035);
 export const BOOSTER_PRICE_LAMPORTS = Math.round(BOOSTER_PRICE_SOL * 1e9);
 export const BOOSTER_SUPPLY_CAP = Number(process.env.BOOSTER_SUPPLY_CAP ?? 100);
-// Display-only offset added to the on-chain mint count for marketing/scarcity.
-// Real mints still tick the count upward on top of this baseline.
+// DISPLAY-ONLY offset added to the on-chain mint count for marketing/scarcity.
+// It is a presentation number and MUST NOT enter any sold-out / supply gate:
+// the deleted legacy server compared `supply + OFFSET >= CAP`, which silently
+// cut real sellable supply from 100 to 63 (client-api-18). Any sold-out check
+// must compare the REAL mint count against BOOSTER_SUPPLY_CAP and add this only
+// when formatting a count for the buyer.
 export const BOOSTER_MINTED_OFFSET = Number(process.env.BOOSTER_MINTED_OFFSET ?? 37);
 
 const METADATA_URI = process.env.BOOSTER_METADATA_URI
@@ -289,16 +297,26 @@ export async function mintTicketNft(
   ownerAddress: string, ticketNumber: number,
 ): Promise<MintedTicket> {
   const urls = mintRpcOrder();
+  const owner = umiPublicKey(ownerAddress);
+
+  // Generate the asset signer ONCE, outside the loop. Re-generating it per RPC
+  // is what let a tx that timed out on RPC A (but still landed) be minted AGAIN
+  // on RPC B against a fresh asset — two Core NFTs, and the treasury billed rent
+  // twice, for one payment (client-api-17). With one fixed asset address we can
+  // instead ASK the chain whether it already exists before ever re-sending.
+  const firstUmi = umiFor(urls[0]);
+  const asset = generateSigner(firstUmi);
+
   let lastErr: any = null;
-  for (const url of urls) {
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    const u = i === 0 ? firstUmi : umiFor(url);
     try {
-      const u = umiFor(url);
-      const asset = generateSigner(u);
       const res = await create(u, {
         asset,
         name: `Booster Pack Ticket #${ticketNumber}`,
         uri: METADATA_URI,
-        owner: umiPublicKey(ownerAddress),
+        owner,
       }).sendAndConfirm(u, { confirm: { commitment: 'confirmed' } });
       console.log(`[booster-mint] minted #${ticketNumber} via ${url}`);
       return {
@@ -307,11 +325,35 @@ export async function mintTicketNft(
       };
     } catch (e: any) {
       const msg = String(e?.message ?? e);
-      // Helpful diagnostics for the most common failure modes.
-      const looksLikeAuth = /401|invalid api key|unauthor/i.test(msg);
+      lastErr = e;
+
+      // Did a previous attempt's transaction actually land? If the asset exists
+      // on-chain, the mint succeeded — returning it is the ONLY safe move;
+      // re-sending would double-mint. (A down RPC just throws here → treated as
+      // "not found" and handled by the pre/post-broadcast split below.)
+      try {
+        const existing = await fetchAsset(u, asset.publicKey);
+        if (existing) {
+          console.warn(`[booster-mint] #${ticketNumber} already landed as ${asset.publicKey.toString()}; not re-sending`);
+          return { mintAddress: asset.publicKey.toString(), signature: '' };
+        }
+      } catch { /* asset genuinely absent, or this RPC is unreachable */ }
+
+      // Only rotate RPCs for PRE-broadcast failures (auth, rate-limit, transport
+      // before the tx was sent). Anything else — a confirmation timeout above
+      // all — may already be in flight, so retrying on another RPC risks the
+      // double mint. Surface it for manual reconciliation instead.
+      const preBroadcast =
+        /401|invalid api key|unauthor|403|429|rate limit|too many|fetch failed|failed to fetch|econnrefused|enotfound|getaddrinfo|socket hang up|network/i.test(msg);
+      if (!preBroadcast) {
+        throw new Error(
+          `booster mint #${ticketNumber} may have been broadcast but did not confirm (${msg}). ` +
+            `Check asset ${asset.publicKey.toString()} before retrying — do not blindly re-mint.`,
+        );
+      }
+      const looksLikeAuth = /401|403|invalid api key|unauthor/i.test(msg);
       const looksLikeRate = /429|rate limit|too many/i.test(msg);
       console.warn(`[booster-mint] mint via ${url} failed${looksLikeAuth ? ' (auth)' : looksLikeRate ? ' (rate-limit)' : ''}: ${msg}`);
-      lastErr = e;
       continue;
     }
   }

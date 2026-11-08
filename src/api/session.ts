@@ -51,10 +51,14 @@
 // product decision; making it for them silently is what M-4 is about.
 //
 // What none of this fixes: any storage readable by JavaScript is readable by
-// injected JavaScript. The real mitigation for M-4 is the gateway's CSP
-// (`default-src 'self'; script-src 'self'`), which is what actually keeps
-// third-party script out of the page. Storage choice only bounds the blast
-// radius after that has already failed.
+// injected JavaScript. The real mitigation for M-4 is a Content-Security-Policy
+// that keeps third-party script out of the page. The page is served by Vercel,
+// NOT the gateway, so that CSP (plus HSTS / X-Content-Type-Options /
+// frame-ancestors) must be delivered as response headers from the deployment —
+// see the `headers` block in `vercel.json`. Do not assume a CSP exists just
+// because this comment used to claim the gateway set one; verify it in
+// vercel.json. Storage choice only bounds the blast radius after script
+// injection has already happened.
 //
 // Why not cookies at all: the API is a different origin from the web app
 // (`api.ocva.online` vs `ocva.online`), there is no shared cookie domain, and
@@ -176,7 +180,14 @@ function ensureInit(): void {
     globalThis.addEventListener?.('storage', (ev) => {
       const e = ev as StorageEvent;
       if (e.key !== STORAGE_KEY || mode !== 'local') return;
-      const next = e.newValue ? (JSON.parse(e.newValue) as unknown) : null;
+      // Another tab, an extension, or a devtools edit can write a non-JSON
+      // value under this key; a bare JSON.parse would throw UNCAUGHT inside the
+      // auth layer of every other open tab. Guard it and treat anything
+      // unparseable as signed out (client-api-08).
+      let next: unknown = null;
+      if (e.newValue) {
+        try { next = JSON.parse(e.newValue) as unknown; } catch { next = null; }
+      }
       current = isSession(next) ? next : null;
       emit();
     });

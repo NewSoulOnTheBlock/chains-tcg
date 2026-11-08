@@ -317,7 +317,8 @@ const Lightfall = ({
       } else {
         lastTimeRef.current = t;
       }
-      if (!paused && programRef.current && meshRef.current) {
+      // Pause GPU work while the tab is hidden (Task 4: perf).
+      if (!paused && !document.hidden && programRef.current && meshRef.current) {
         try {
           renderer.render({ scene: meshRef.current });
         } catch (e) {
@@ -331,6 +332,9 @@ const Lightfall = ({
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (mouseInteraction) canvas.removeEventListener('pointermove', onPointerMove);
       ro.disconnect();
+      // Explicitly drop the WebGL context so the GPU resources are freed on
+      // unmount rather than waiting for GC (Task 4: perf).
+      try { gl.getExtension('WEBGL_lose_context')?.loseContext(); } catch { /* noop */ }
       if (canvas.parentElement === container) container.removeChild(canvas);
       const callIfFn = (obj: any, key: string) => {
         if (obj && typeof obj[key] === 'function') obj[key].call(obj);

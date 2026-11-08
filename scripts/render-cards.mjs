@@ -1,5 +1,8 @@
 // scripts/render-cards.mjs
 //
+// Status: DEV UTILITY (current). Renders the live catalogue via the Vite dev
+// server; the only consumer of the `playwright` + `wait-on` devDependencies.
+//
 // Composite-PNG generator for every card in the catalogue.
 //
 // What it does:

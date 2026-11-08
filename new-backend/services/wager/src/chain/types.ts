@@ -80,8 +80,17 @@ export interface ChainSender {
   /**
    * Build + sign (but do NOT send) one ERC-20 transfer at an explicit nonce.
    * The caller allocates the nonce so it can be persisted with the hash.
+   *
+   * `feeEscalationAttempt` (optional) drives replace-by-fee: a replacement at the
+   * SAME nonce must carry a strictly higher fee than the attempt it replaces, so
+   * the sender escalates the fee by this count. 0/undefined is the first attempt.
    */
-  prepareTransfer(args: { to: string; amountBase: bigint; nonce: number }): Promise<PreparedTx>;
+  prepareTransfer(args: {
+    to: string;
+    amountBase: bigint;
+    nonce: number;
+    feeEscalationAttempt?: number;
+  }): Promise<PreparedTx>;
   /** Broadcast already-signed bytes. Safe to call repeatedly. */
   broadcast(prepared: PreparedTx): Promise<void>;
   /** 'pending' until the transaction is mined. */

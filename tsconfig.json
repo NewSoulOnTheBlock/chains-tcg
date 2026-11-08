@@ -19,6 +19,5 @@
     "allowSyntheticDefaultImports": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["src"],
-  "exclude": ["src/server.ts", "src/db.ts"]
+  "include": ["src"]
 }

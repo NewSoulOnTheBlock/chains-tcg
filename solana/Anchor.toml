@@ -17,8 +17,11 @@ master_wager = "9JnG7C3uBVnMgx5tSAxSb9ccSuwCC4LkmyV26goXe1pC"
 [registry]
 url = "https://api.apr.dev"
 
+# Default to localnet so `anchor test` / `anchor deploy` / `anchor migrate` never touch
+# mainnet by accident (contracts-18). Target mainnet EXPLICITLY, e.g.:
+#   anchor deploy --provider.cluster mainnet
 [provider]
-cluster = "mainnet"
+cluster = "localnet"
 wallet = '~\.config\solana\id.json'
 
 [scripts]

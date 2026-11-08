@@ -1,0 +1,110 @@
+[
+  {
+    "id": "frontend-07",
+    "status": "partial",
+    "note": "Removed the dead Side, Zone and PlayerHeaderTargetable components from Board.tsx. The orphaned WebGL effect files (Lightfall/Iridescence/SideRays etc.) are intentionally RETAINED because Task 4 requires perf-guarding them. App.tsx's dead-code block (~1,400 lines) and enabling noUnusedLocals are another owner's file — see requests/board.md.",
+    "files": ["src/Board.tsx"]
+  },
+  {
+    "id": "frontend-08",
+    "status": "fixed",
+    "note": "Hand-strip ResizeObserver effect now has a [mobile] dependency (the strip only exists on mobile) instead of running on every board render, and the setter is guarded (h => h === next ? h : next) to stop the measure/render ping-pong.",
+    "files": ["src/Board.tsx"]
+  },
+  {
+    "id": "frontend-09",
+    "status": "fixed",
+    "note": "Hand cards are now keyed by a stable per-occurrence key (defId#n via handKeys()) instead of array index, at all four sites: desktop fan, mobile strip, MobileHandSheet and MulliganModal. No uid in G was needed. Drag/hover/fan-transition state no longer sticks to the wrong card after a play shifts the hand.",
+    "files": ["src/Board.tsx"]
+  },
+  {
+    "id": "frontend-10",
+    "status": "fixed",
+    "note": "Extracted one master-mute implementation to src/components/mute.ts (applyMasterMute + useMasterMute: persist, blanket-mute every audio/video, dispatch PREFS_EVENT). Boosters now uses useMasterMute (its copy had dropped the PREFS_EVENT dispatch — the actual bug) and Settings' toggleMasterMute calls applyMasterMute. PREFS_EVENT moved into mute.ts and is re-exported from Settings so App's import is unchanged. App.tsx's three copies are another owner's — requested.",
+    "files": ["src/components/mute.ts", "src/Boosters.tsx", "src/Settings.tsx"]
+  },
+  {
+    "id": "frontend-11",
+    "status": "fixed",
+    "note": "One shared useMediaQuery backed by a module-level MediaQueryList+subscriber cache in src/components/responsive.ts, with named breakpoints (BP) and useIsMobile/useIsShort. Board and Boosters now import it (Boosters uses BP.vault=900). All cards calling useIsMobile share one MediaQueryList + one native listener instead of allocating two per card; the shared CardFace also accepts an optional `compact` prop so a parent can skip per-card subscription entirely. App.tsx's copy is another owner's — requested.",
+    "files": ["src/components/responsive.ts", "src/Board.tsx", "src/Boosters.tsx"]
+  },
+  {
+    "id": "frontend-12",
+    "status": "fixed",
+    "note": "Added src/components/CardFace.tsx as the canonical face (FULL_CARDS edge-to-edge + templated frame + sigil fallback) plus shared CostPips / cardText / totalCost helpers. Board now imports this CardFace (its three local renderers CardFace/FullCardFaceContent/TemplatedCardFaceContent were deleted); CardPreview composes CostPips+cardText; Tutorial uses cardText. Board's MiniCard (tiny battlefield tile) and Boosters' RevealCard (flip-reveal) are deliberately kept as distinct small renderers — they are not full faces and carry no cost-pip duplication. App.tsx's HubCardTile/LibraryRow/DeckBuilderCard are another owner's — requested.",
+    "files": ["src/components/CardFace.tsx", "src/Board.tsx", "src/CardPreview.tsx", "src/Tutorial.tsx"]
+  },
+  {
+    "id": "frontend-16",
+    "status": "fixed",
+    "note": "Added src/components/useFlash.ts (useFlash/useFlashFlag: timer in a ref, cleared on re-trigger and unmount). Applied to Board's targeting-notice flash, Boosters copyAddr + PendingHash copy, and Settings copyWallet + toast. App.tsx's copy sites are another owner's — requested.",
+    "files": ["src/components/useFlash.ts", "src/Board.tsx", "src/Boosters.tsx", "src/Settings.tsx"]
+  },
+  {
+    "id": "frontend-17",
+    "status": "fixed",
+    "note": "TurnBanner's visible countdown is now driven by the server clock G.turnDeadline (same source the force-end button uses), onEndTurn is held in a ref so the ticking interval is not torn down on every parent render, and the reset depends only on [turn, myTurn] — it no longer jumps back to 60 when the opponent enters/leaves the blockers stage. The chip only shows when turnDeadline > 0; one shared nowMs tick powers both the auto-end and the AFK force-end countdowns.",
+    "files": ["src/Board.tsx"]
+  },
+  {
+    "id": "frontend-18",
+    "status": "fixed",
+    "note": "Removed Board's `as any` escape hatches: added local PublicGState (GState + optional deckCounts/voice, feature-detected) so (G as any).deckCounts became G.deckCounts; typed gameover as a local GameOver on WagerPayoutModal/WinnerShareModal; typed CombatStrip's ctx as boardgame.io Ctx; typed TurnBanner myProfile/oppProfile as Profile|null. Boosters keeps one `(window as any).ethereum` pending a window.ethereum ambient type in vite-env.d.ts (not my file) — requested.",
+    "files": ["src/Board.tsx"]
+  },
+  {
+    "id": "frontend-19",
+    "status": "fixed",
+    "note": "Added src/components/Modal.tsx (role=dialog, aria-modal, aria-labelledby/label, initial focus, Escape, Tab focus-trap, focus restore). Routed all my modals through it: Board's WagerPayoutModal, WinnerShareModal, MulliganModal (blocking, no onClose/Escape), MobileHandSheet (bottom-sheet) and RulesDrawer (side drawer); Boosters' ModalShell; Masterquest's modalShell. App.tsx's SoloSetupModal/ProfileEditModal/SavedDeckLibrary/DeckWorkspace drawer are another owner's — requested.",
+    "files": ["src/components/Modal.tsx", "src/Board.tsx", "src/Boosters.tsx", "src/masterquest/MasterquestPage.tsx"]
+  },
+  {
+    "id": "frontend-20",
+    "status": "fixed",
+    "note": "MasterquestPage's SVG site nodes are now keyboard-operable: each <g> gets role=button, tabIndex (0 when cleared/unlocked, -1 when locked), aria-label `Site N: name (state)`, aria-disabled, and an Enter/Space handler. Board's CardFace/MiniCard already had role=button. App.tsx's HubCardTile is another owner's — requested.",
+    "files": ["src/masterquest/MasterquestPage.tsx"]
+  },
+  {
+    "id": "frontend-23",
+    "status": "fixed",
+    "note": "Board.refreshProfiles now skips the guaranteed-404 fetches (solo matches, `Player N` placeholders, and Bot names) and drops any response that lands after the effect is torn down via an alive guard.",
+    "files": ["src/Board.tsx"]
+  },
+  {
+    "id": "frontend-25",
+    "status": "fixed",
+    "note": "Added a comment where Board writes ocva.daily.<date>.win explaining it is purely cosmetic / client-trusted and must be moved server-side (GET /api/matches) before it gates any reward. The matching comment on ActivityPanel lives in App.tsx (another owner) — requested. No behavior change; result reporting remains correctly server-owned.",
+    "files": ["src/Board.tsx"]
+  },
+  {
+    "id": "frontend-28",
+    "status": "fixed",
+    "note": "Action-log rows are now keyed by absolute log index (max(0, len-200)+i) instead of the sliced array index, so a new entry appends one row rather than re-keying/re-styling all 200.",
+    "files": ["src/Board.tsx"]
+  },
+  {
+    "id": "frontend-13",
+    "status": "skipped",
+    "note": "Root error boundary belongs in index.tsx / App.tsx, which are owned by another agent — requested in board.md. All localStorage reads in MY files are try/catch-guarded, so they won't be the throw that blanks the app.",
+    "files": []
+  },
+  {
+    "id": "concede-wiring",
+    "status": "fixed",
+    "note": "Task 2: ChainsBoard adds a window listener for CustomEvent `egregore:concede` that calls moves.concede() when the match is live (!ctx.gameover), feature-detected via `typeof moves.concede === 'function'`, and removes the listener on unmount. The engine owner has already added the move (Game.test.ts exercises it).",
+    "files": ["src/Board.tsx"]
+  },
+  {
+    "id": "new-voice-chat",
+    "status": "fixed",
+    "note": "Task 3: rebuilt src/Voice.tsx securely with zero backend. On enable it generates a random 32-char [A-Za-z0-9_-] peer id via crypto.getRandomValues and publishes it with moves.announceVoicePeer(peerId) (feature-detected); reads the opponent id from G.voice[opponentID] (feature-detected via `voicePeers` prop defaulting to {}). Only the lower playerID dials, once/if the opponent id is known, re-dialing when the opponent re-announces. The inbound peer.on('call') handler ANSWERS ONLY IF call.peer === G.voice[opponentID], else closes — the H-6 fix. Mute toggle, push-to-talk (hold V), per-call status (mic/connecting/live/opponent-not-in-voice/error), remote volume slider, visible 'opponent in voice' indicator, iOS play-after-gesture, lazy peerjs import, prefs persisted to localStorage with try/catch, full teardown on unmount/disable. Mounted in ChainsBoard for both desktop and phone whenever it is a real two-seat match (matchID && playerID && !isSolo); the old VOICE_CHAT_ENABLED=false gate and 'unsafe, keep unmounted' comments are gone and the security model is documented at the top of Voice.tsx.",
+    "files": ["src/Voice.tsx", "src/Board.tsx"]
+  },
+  {
+    "id": "webgl-perf",
+    "status": "fixed",
+    "note": "Task 4: every WebGL effect I own now cancels rAF on unmount (already did), disposes its GL context via WEBGL_lose_context on unmount (added to Lightfall; Iridescence and SideRays already had it), and pauses rendering while document.hidden (Lightfall guards the render call; Iridescence returns early in its rAF loop; SideRays reschedules the loop at the top then skips the render when hidden so it resumes on show). PixelTrail uses react-three-fiber's <Canvas>, which owns its own context/rAF lifecycle; BorderGlow/ShinyText are CSS/rAF-value animations, not WebGL.",
+    "files": ["src/Lightfall.tsx", "src/Iridescence.tsx", "src/SideRays.tsx"]
+  }
+]

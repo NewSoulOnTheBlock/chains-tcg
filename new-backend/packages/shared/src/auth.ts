@@ -13,6 +13,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IRouter, NextFunction, Request, RequestHandler, Response } from 'express';
 import { AppError } from './errors.js';
 import { isOperatorAddress, parseOperatorAddresses } from './env.js';
+import { getRedis } from './redis.js';
 
 /* -------------------------------------------------------------------------- */
 /* Claims                                                                     */
@@ -257,7 +258,44 @@ function bearerToken(req: Request): string | null {
   return value.length > 0 ? value : null;
 }
 
-/** Reject the request unless it carries a valid access token. */
+/* -------------------------------------------------------------------------- */
+/* Access-token revocation (server-36)                                        */
+/* -------------------------------------------------------------------------- */
+
+const REVOKED_PREFIX = 'auth:revoked:';
+
+/** Redis key under which a revoked access token's `jti` is parked until exp. */
+export function revokedJtiKey(jti: string): string {
+  return `${REVOKED_PREFIX}${jti}`;
+}
+
+/**
+ * Revoke an access token by its `jti` for the remainder of its life.
+ * `/auth/logout` calls this so a stolen 15-minute access token stops working
+ * the instant the session is torn down, instead of surviving until `exp`.
+ */
+export async function revokeJti(jti: string, ttlSec: number): Promise<void> {
+  if (!jti) return;
+  const ttl = Math.max(1, Math.ceil(ttlSec));
+  await getRedis().set(revokedJtiKey(jti), '1', { EX: ttl });
+}
+
+/**
+ * Has this `jti` been revoked? Fails OPEN (returns false) if Redis is
+ * unreachable: a revocation-set outage must not lock every signed-in player
+ * out, and access tokens are short-lived, so the blast radius is bounded.
+ */
+async function isJtiRevoked(jti: string): Promise<boolean> {
+  if (!jti) return false;
+  try {
+    const v = await getRedis().get(revokedJtiKey(jti));
+    return v !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** Reject the request unless it carries a valid, non-revoked access token. */
 export function requireAuth(): RequestHandler {
   return (req: Request, _res: Response, next: NextFunction) => {
     const token = bearerToken(req);
@@ -265,12 +303,22 @@ export function requireAuth(): RequestHandler {
       next(AppError.unauthorized('Missing Authorization: Bearer <accessToken> header'));
       return;
     }
+    let ctx: AuthContext;
     try {
-      req.auth = verifyAccessToken(token);
-      next();
+      ctx = verifyAccessToken(token);
     } catch (err) {
       next(err);
+      return;
     }
+    // Revocation check (server-36): a logged-out jti must stop working before exp.
+    void isJtiRevoked(ctx.jti).then((revoked) => {
+      if (revoked) {
+        next(AppError.unauthorized('Access token has been revoked — sign in again'));
+        return;
+      }
+      req.auth = ctx;
+      next();
+    });
   };
 }
 
@@ -286,12 +334,19 @@ export function optionalAuth(): RequestHandler {
       next();
       return;
     }
+    let ctx: AuthContext;
     try {
-      req.auth = verifyAccessToken(token);
+      ctx = verifyAccessToken(token);
     } catch {
       // A bad token on an optional route is simply "not signed in".
+      next();
+      return;
     }
-    next();
+    void isJtiRevoked(ctx.jti).then((revoked) => {
+      // A revoked token is likewise just "not signed in" on an optional route.
+      if (!revoked) req.auth = ctx;
+      next();
+    });
   };
 }
 

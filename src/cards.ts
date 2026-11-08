@@ -66,124 +66,127 @@ export interface CardDef {
   effect?: EffectId;       // for moves + machines
   /** Optional art URL (e.g. CMC logo for meme coins). Falls back to chain glyph on error. */
   image?: string;
+  /**
+   * `image` is a complete rendered card (frame, name, cost, type, rules text
+   * and P/T all baked in), not just the art window. Renderers draw it edge to
+   * edge and skip their own frame chrome, overlaying only live state (damage,
+   * tapped, summoning sick).
+   */
+  fullCard?: boolean;
 }
 
 /**
- * Token logo sourced from CoinMarketCap, vendored into `public/cards/` at
- * build-authoring time rather than hotlinked from s2.coinmarketcap.com — the
- * production gateway's `default-src 'self'` CSP blocks third-party img hosts.
- * The argument is still the CMC coin id so the provenance stays greppable.
+ * Card art keyed by card id. Cards without an entry render their faction sigil
+ * (src/chain-logos.tsx) everywhere: hand, field, previews, deckbuilder, packs.
  *
- * Adding a new one: `curl -o public/cards/cmc-<id>.png
- * https://s2.coinmarketcap.com/static/img/coins/128x128/<id>.png`.
+ * Emptied 2026-10-24: the whole art set is being replaced. Add entries back as
+ * `card_id: '/cards/<file>?v=1'` (files in public/cards/) as the new art lands.
+ * The production CSP is `default-src 'self'`, so art must be vendored into
+ * public/, never hotlinked.
  */
-const cmc = (id: number) => `/cards/cmc-${id}.png`;
+const IMAGES: Record<string, string> = {};
 
-/** Image overrides keyed by card id. Cards without an entry render the chain glyph. */
-const IMAGES: Record<string, string> = {
-  // Nodes have no art entry: they render their faction sigil (src/chain-logos.tsx).
+/**
+ * Complete rendered cards keyed by card id (see `CardDef.fullCard`). These are
+ * the card-forge exports: 1064x1478 WebP, frame + text baked in, vendored in
+ * public/cards/<faction>/. A card listed here renders the file edge to edge
+ * everywhere instead of the composited frame.
+ */
+const FULL_CARDS: Record<string, string> = {
+  // Rebel (internal key `sol`) — landed 2026-10-28.
+  node_sol:      '/cards/rebel/rebel-node.webp?v=1',
+  sol_pnut:      '/cards/rebel/spark-gremlin.webp?v=1',
+  sol_popcat:    '/cards/rebel/riot-drummer.webp?v=1',
+  sol_mew:       '/cards/rebel/graffiti-sproto.webp?v=1',
+  sol_bome:      '/cards/rebel/molotov-mixer.webp?v=1',
+  sol_wif:       '/cards/rebel/shadow.webp?v=1',
+  sol_fartcoin:  '/cards/rebel/firestarter-sproto.webp?v=1',
+  sol_goat:      '/cards/rebel/rebel-warlord.webp?v=1',
+  sol_priority:  '/cards/rebel/black-market-forge.webp?v=1',
+  sol_oracle:    '/cards/rebel/pirate-radio.webp?v=1',
+  sol_tgbot:     '/cards/rebel/burning-banner.webp?v=1',
+  sol_bounce:    '/cards/rebel/scatter.webp?v=1',
+  sol_tgpump:    '/cards/rebel/cheap-shot.webp?v=1',
+  sol_validator: '/cards/rebel/shadow-mode.webp?v=1',
+  // Still on the faction sigil (no render yet): sol_bonk (Brick Tosser),
+  // sol_amm (War Drums), sol_zap (Firebomb).
 
-  // BnB memes
-  bnb_babydoge: '/cards/babydoge.png?v=1',
-  bnb_broccoli: '/cards/broccoli.png?v=1',
-  bnb_tut:      cmc(33687),
-  bnb_tst:      '/cards/tst.png?v=1',
-  bnb_banana:   '/cards/banana.jpg?v=1',
-  bnb_mubarak:  '/cards/bocca.jpg?v=1',
-  bnb_cheems:   '/cards/cheems.png?v=1',
-  bnb_floki:    cmc(10804),
+  // Jester (internal key `eth`) — landed 2026-10-28.
+  node_eth:           '/cards/jester/jester-node.webp?v=1',
+  eth_andy:           '/cards/jester/pocket-jester.webp?v=1',
+  eth_apu:            '/cards/jester/mask-collector.webp?v=1',
+  eth_wojak:          '/cards/jester/weeping-clown.webp?v=1',
+  eth_turbo:          '/cards/jester/knife-juggler.webp?v=1',
+  eth_mog:            '/cards/jester/hoba-carpenter.webp?v=1',
+  eth_shib:           '/cards/jester/carbonara-mussolini.webp?v=1',
+  eth_pepe:           '/cards/jester/harry-horcrux.webp?v=1',
+  eth_sproto_gremlin: '/cards/jester/sproto-gremlin.webp?v=1',
+  eth_eip1559:        '/cards/jester/trick-deck.webp?v=1',
+  eth_temple:         '/cards/jester/carnival-of-masks.webp?v=1',
+  eth_l2:             '/cards/jester/trapdoor-stage.webp?v=1',
+  eth_smite:          '/cards/jester/punchline.webp?v=1',
+  eth_heal:           '/cards/jester/fake-death.webp?v=1',
+  eth_exploit:        '/cards/jester/sabotage.webp?v=1',
+  eth_shield:         '/cards/jester/mirror-mask.webp?v=1',
+  // Still on the faction sigil (no render yet): eth_yield (Jack-in-the-Box).
 
-  // Solana memes
-  sol_pnut:     '/cards/pnut.webp?v=2',
-  sol_bonk:     '/cards/bonk.png?v=1',
-  sol_popcat:   '/cards/popcat.png?v=1',
-  sol_mew:      '/cards/mew.png?v=1',
-  sol_bome:     '/cards/bome.png?v=3',
-  sol_wif:      '/cards/shadow.jpg?v=1',
-  sol_fartcoin: '/cards/fartcoin.png?v=1',
-  sol_goat:     cmc(33440),
+  // Spirit (internal key `bnb`) — landed 2026-10-28, complete.
+  node_bnb:      '/cards/spirit/spirit-node.webp?v=1',
+  bnb_babydoge:  '/cards/spirit/candle-acolyte.webp?v=1',
+  bnb_broccoli:  '/cards/spirit/halo-hatchling.webp?v=1',
+  bnb_tut:       '/cards/spirit/choir-sproto.webp?v=1',
+  bnb_tst:       '/cards/spirit/pilgrim-sproto.webp?v=1',
+  bnb_banana:    '/cards/spirit/lantern-warden.webp?v=1',
+  bnb_mubarak:   '/cards/spirit/bocca-de-verita.webp?v=1',
+  bnb_cheems:    '/cards/spirit/seraph-sproto.webp?v=1',
+  bnb_floki:     '/cards/spirit/more-light.webp?v=1',
+  bnb_farm:      '/cards/spirit/shrine-of-many.webp?v=1',
+  bnb_bridge:    '/cards/spirit/pilgrim-road.webp?v=1',
+  bnb_sniper:    '/cards/spirit/dawn-bell.webp?v=1',
+  bnb_mmalgo:    '/cards/spirit/banner-of-the-host.webp?v=1',
+  bnb_rugpull:   '/cards/spirit/exorcism.webp?v=1',
+  bnb_airdrop:   '/cards/spirit/revelation.webp?v=1',
+  bnb_honeypot:  '/cards/spirit/blinding-dawn.webp?v=1',
+  bnb_liquidity: '/cards/spirit/retain.webp?v=1',
 
-  // Robinhood memes (meme-stocks — emoji glyph art)
-  robinhood_hood:    '/cards/robinhood_hood.png?v=1',
-  robinhood_ozzy:    '/cards/robinhood_ozzy.png?v=1',
-  robinhood_cashcat: '/cards/robinhood_cashcat.png?v=1',
-  robinhood_kitty:   '/cards/robinhood_kitty.png?v=1',
-  robinhood_tendies: '/cards/robinhood_tendies.png?v=1',
-  robinhood_moon:    '/cards/robinhood_moon.png?v=1',
-  robinhood_yolo:    '/cards/robinhood_yolo.png?v=1',
-  robinhood_ape:     '/cards/robinhood_ape.png?v=1',
+  // Wealth (internal key `robinhood`) — landed 2026-10-31.
+  node_robinhood:       '/cards/wealth/wealth-node.webp?v=1',
+  robinhood_hood:       '/cards/wealth/coin-sprout.webp?v=1',
+  robinhood_ozzy:       '/cards/wealth/vault-toad.webp?v=1',
+  robinhood_cashcat:    '/cards/wealth/golden-grub.webp?v=1',
+  robinhood_kitty:      '/cards/wealth/orchard-keeper.webp?v=1',
+  robinhood_tendies:    '/cards/wealth/harvest-sproto.webp?v=1',
+  robinhood_moon:       '/cards/wealth/treasure-golem.webp?v=1',
+  robinhood_ape:        '/cards/wealth/old-money.webp?v=1',
+  robinhood_dividend:   '/cards/wealth/treasury.webp?v=1',
+  robinhood_options:    '/cards/wealth/golden-spurs.webp?v=1',
+  robinhood_fractional: '/cards/wealth/ledger-of-plenty.webp?v=1',
+  robinhood_margin:     '/cards/wealth/fertile-grove.webp?v=1',
+  robinhood_buydip:     '/cards/wealth/bountiful-harvest.webp?v=1',
+  robinhood_gamma:      '/cards/wealth/stampede.webp?v=1',
+  robinhood_pfof:       '/cards/wealth/count-the-coins.webp?v=1',
+  robinhood_diamond:    '/cards/wealth/gold-plating.webp?v=1',
+  // Still on the faction sigil (no render yet): robinhood_yolo (Gilded Boar).
 
-  // Ethereum memes
-  eth_andy:     '/cards/andy.png?v=1',
-  eth_apu:      '/cards/apu.webp?v=1',
-  eth_wojak:    '/cards/wojak.png?v=2',
-  eth_turbo:    '/cards/turbo.png?v=1',
-  eth_mog:      '/cards/hoba.jpg?v=1',
-  eth_shib:     '/cards/carbonara.jpg?v=1',
-  eth_pepe:     '/cards/pepe.png?v=1',
-
-  // Base memes (BRETT keeps its painted art, rest emoji glyph)
-  base_brett:   '/cards/brett.png?v=1',
-  base_degen:   '/cards/base_degen.png?v=1',
-  base_toshi:   '/cards/base_toshi.png?v=1',
-  base_miggles: '/cards/base_miggles.png?v=1',
-  base_keycat:  '/cards/base_keycat.png?v=1',
-  base_normie:  '/cards/base_normie.png?v=1',
-  base_doginme: '/cards/base_doginme.png?v=1',
-  base_based:   '/cards/base_based.png?v=1',
-
-  // ── BnB machines/moves ──
-  bnb_farm:     '/cards/volume_bot.png?v=1',
-  bnb_bridge:   '/cards/token_launchpad.png?v=1',
-  bnb_sniper:   '/cards/sniper_bot.png?v=1',
-  bnb_mmalgo:   '/cards/market_maker_algo.png?v=1',
-  bnb_rugpull:  '/cards/rug_pull.png?v=1',
-  bnb_airdrop:  '/cards/airdrop_farm.png?v=1',
-  bnb_honeypot: '/cards/honeypot.png?v=1',
-
-  // ── Solana machines/moves ──
-  sol_priority: '/cards/mev-bundler.png?v=1',
-  sol_oracle:   '/cards/ai-trading-agent.png?v=1',
-  sol_amm:      '/cards/amm-router.png?v=1',
-  sol_tgbot:    '/cards/telegram-bot-suite.png?v=1',
-  sol_zap:      '/cards/snipe.png?v=1',
-  sol_bounce:   '/cards/sol_bounce.png?v=1',
-  sol_tgpump:   '/cards/sol_tgpump.png?v=1',
-
-  // ── Robinhood machines/moves/aura ──
-  robinhood_dividend:   '/cards/robinhood_dividend.png?v=1',
-  robinhood_options:    '/cards/robinhood_options.png?v=1',
-  robinhood_fractional: '/cards/robinhood_fractional.png?v=1',
-  robinhood_margin:     '/cards/robinhood_margin.png?v=1',
-  robinhood_buydip:     '/cards/robinhood_buydip.png?v=1',
-  robinhood_gamma:      '/cards/robinhood_gamma.png?v=1',
-  robinhood_pfof:       '/cards/robinhood_pfof.png?v=1',
-  robinhood_diamond:    '/cards/robinhood_diamond.png?v=1',
-
-  // ── Ethereum machines/moves ──
-  eth_eip1559:  '/cards/smart_contract_suite.png?v=1',
-  eth_temple:   '/cards/eth_temple.png?v=1',
-  eth_l2:       '/cards/layer2_rollup.png?v=1',
-  eth_yield:    '/cards/eth_yield.png?v=1',
-  eth_smite:    '/cards/eth_smite.png?v=1',
-  eth_heal:     '/cards/dca_in.png?v=1',
-  eth_exploit:  '/cards/exploit_disclosure.png?v=1',
-
-  // ── Base machines/moves/aura ──
-  base_summer:    '/cards/base_summer.png?v=1',
-  base_frames:    '/cards/base_frames.png?v=1',
-  base_wallet:    '/cards/base_wallet.png?v=1',
-  base_onramp:    '/cards/base_onramp.png?v=1',
-  base_tip:       '/cards/base_tip.png?v=1',
-  base_bridge:    '/cards/base_bridge.png?v=1',
-  base_airdrop:   '/cards/base_airdrop.png?v=1',
-  base_staybased: '/cards/base_staybased.png?v=1',
-  // ── Auras (Genesis set) — emoji-art for now ──
-  bnb_liquidity:  '/cards/retain.jpg?v=1',
-  sol_validator:  '/cards/sol_validator.png?v=1',
-  eth_shield:     '/cards/eth_shield.png?v=1',
-  // ── NFT-linked meme art ──
-  eth_sproto_gremlin: '/sproto-gremlin.png',
+  // Knowledge (internal key `base`) — landed 2026-10-31, complete.
+  node_base:      '/cards/knowledge/knowledge-node.webp?v=1',
+  base_degen:     '/cards/knowledge/ink-imp.webp?v=1',
+  base_toshi:     '/cards/knowledge/page-turner.webp?v=1',
+  base_brett:     '/cards/knowledge/scroll-runner.webp?v=1',
+  base_miggles:   '/cards/knowledge/apprentice-sproto.webp?v=1',
+  base_keycat:    '/cards/knowledge/rune-scribe.webp?v=1',
+  base_normie:    '/cards/knowledge/owl-familiar.webp?v=1',
+  base_doginme:   '/cards/knowledge/tower-sage.webp?v=1',
+  base_based:     '/cards/knowledge/the-archivist.webp?v=1',
+  base_moose:     '/cards/knowledge/oversized-moose.webp?v=1',
+  base_summer:    '/cards/knowledge/great-library.webp?v=1',
+  base_frames:    '/cards/knowledge/crystal-ball.webp?v=1',
+  base_wallet:    '/cards/knowledge/star-chart.webp?v=1',
+  base_onramp:    '/cards/knowledge/portal-circle.webp?v=1',
+  base_tip:       '/cards/knowledge/study-session.webp?v=1',
+  base_bridge:    '/cards/knowledge/banish.webp?v=1',
+  base_airdrop:   '/cards/knowledge/arcane-storm.webp?v=1',
+  base_staybased: '/cards/knowledge/spellblade.webp?v=1',
 };
 
 /**
@@ -298,8 +301,9 @@ const U = (
 export const CARDS: Record<string, CardDef> = {};
 function reg(...cs: CardDef[]) {
   for (const c of cs) {
+    const full = FULL_CARDS[c.id];
     const img = IMAGES[c.id];
-    CARDS[c.id] = img ? { ...c, image: img } : c;
+    CARDS[c.id] = full ? { ...c, image: full, fullCard: true } : img ? { ...c, image: img } : c;
   }
 }
 
@@ -387,7 +391,7 @@ reg(
   M('eth_turbo',   'eth', 'Knife Juggler',     2, 3, 1, 'Drops one every show. On purpose.'),
   M('eth_mog',     'eth', 'Hoba Carpenter',    3, 3, 4, 'Measures once. Builds twice. Laughs at both.'),
   M('eth_shib',    'eth', 'Carbonara Mussolini', 3, 4, 3, '"The Stink Badger Empire is reawakening!"'),
-  M('eth_pepe',    'eth', 'The Last Laugh',    5, 5, 6, 'It was always going to be him.'),
+  M('eth_pepe',    'eth', 'Harry Horcrux',     5, 5, 6, 'It was always going to be him.'),
   // NFT-linked meme — ETB zaps opp + draws a card (Sproto Gremlin NFT mint)
   ME('eth_sproto_gremlin', 'eth', 'Sproto Gremlin', 2, 2, 2, 'etb_zap_2_and_draw',
      'When ~ enters the field, deal 2 damage to your opponent and draw a card.'),
@@ -415,6 +419,7 @@ reg(
   M('base_normie',  'base', 'Owl Familiar',      3, 4, 2, 'Knows what you are thinking. Disapproves.'),
   M('base_doginme', 'base', 'Tower Sage',        4, 4, 4, 'Read every book in the tower. Wrote half of them.'),
   M('base_based',   'base', 'The Archivist',     5, 5, 5, 'Remembers everything. Forgives nothing overdue.'),
+  M('base_moose',   'base', 'Oversized Moose with Socks', 4, 3, 4, "I'm just a 4d entity in a 3d moose dealing with 2d people."),
   // Machines
   A('base_summer', 'base', 'Great Library',  3, 'pump_all_+1+1',       'Everyone studies: your Memes get +1/+1.'),
   A('base_frames', 'base', 'Crystal Ball',   3, 'on_meme_etb_draw',    'When a Meme enters under you, draw a card (once per turn).'),
@@ -430,16 +435,33 @@ reg(
 
 // ── Starter decks ────────────────────────────────────────────────────────────
 
-/** 60-card mono-color starter deck: ~22 nodes + 3 of each Meme + 2 of each Machine/Move. */
+/**
+ * 60-card mono-color starter deck: 3 of each Meme, 2 of each Machine/Move/Aura,
+ * and enough Nodes to reach exactly 60.
+ *
+ * The node count is derived from the spell count (60 minus spells), so NO
+ * non-node card is ever dropped. The old build always laid down 22 nodes then
+ * `.slice(0, 60)`, which silently truncated the last two spells — the single
+ * Aura copies for every faction, plus an Arcane Storm for 9-meme Knowledge
+ * (engine-06). A floor of 18 nodes keeps the mana base sane even for the
+ * largest spell set.
+ */
 export function starterDeck(color: Color): string[] {
-  const nodes = Array(22).fill(`node_${color}`);
   const others = Object.values(CARDS)
     .filter(c => c.color === color && c.type !== 'node')
     .flatMap(c => Array(c.type === 'meme' ? 3 : 2).fill(c.id));
+  const nodeCount = Math.max(18, 60 - others.length);
+  const nodes = Array(nodeCount).fill(`node_${color}`);
   const deck = [...nodes, ...others];
-  // Pad/truncate to exactly 60
+  // Should already be ~60; trim only surplus NODES from the front if a very
+  // large spell set pushes us over, never a spell from the tail.
+  while (deck.length > 60) {
+    const i = deck.indexOf(`node_${color}`);
+    if (i === -1) break;
+    deck.splice(i, 1);
+  }
   while (deck.length < 60) deck.push(`node_${color}`);
-  return deck.slice(0, 60);
+  return deck;
 }
 
 export const STARTER_DECKS: Record<Color, string[]> = {

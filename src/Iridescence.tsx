@@ -110,6 +110,8 @@ export default function Iridescence({
 
     function update(t: number) {
       animateId = requestAnimationFrame(update);
+      // Pause GPU work while the tab is hidden (Task 4: perf).
+      if (document.hidden) return;
       program.uniforms.uTime.value = t * 0.001;
       renderer.render({ scene: mesh });
     }

@@ -1,17 +1,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // VENDORED COPY of <repo>/src/Game.ts — see src/game/cards.ts for why.
 //
-// DELIBERATE DIVERGENCE FROM UPSTREAM (all additive, all server-relevant):
-//   1. `GState.endReason` records WHY the match ended.
-//   2. `drawCard` tags a mill-out as 'deckout'.
-//   3. New `concede` move (a player may forfeit).
-//   4. New `claimTimeout` move (only legal once `turnDeadline` + grace lapsed;
-//      boardgame.io re-runs it on the server, so a client cannot forge it).
-//   5. `endIf` now returns `{ winner|draw, reason }` so the authoritative
-//      result writer can persist `game.match_results.reason` without guessing.
-//   6. Relative imports carry the `.js` extension (this service is ESM/NodeNext)
-//      and `boardgame.io/core` is reached through ./bgio-core.js (see that file).
-// Everything else is byte-identical to upstream.
+// Re-sync with:  cp ../../../src/Game.ts src/game/Game.ts   then re-apply:
+//   • imports reach boardgame.io/core via ./bgio-core.js and cards via ./cards.js
+//     (this service is ESM/NodeNext and needs the .js extension).
+//   • `claimTimeout` move (server-only): lets the player who holds priority claim
+//     the win once the relevant deadline + grace has lapsed. A client cannot
+//     forge it — boardgame.io re-runs it on the authoritative master.
+//   • `endIf` returns `{ winner|draw, reason }` so the result writer can persist
+//     game.match_results.reason without guessing.
+// Everything else is byte-identical to upstream (concede / endReason / voice /
+// the combat-deadline fixes all now live in the shared upstream file).
 // ─────────────────────────────────────────────────────────────────────────────
 // src/Game.ts
 // Chains TCG — Magic-style turn-based card game built on boardgame.io.
@@ -63,6 +62,9 @@ export interface Combat {
   // each defender can only block one attacker, enforced by Game logic
 }
 
+/** How a finished game ended, for the results screen / ranked reason. */
+export type EndReason = 'life' | 'deckout' | 'concede' | 'timeout';
+
 export interface GState {
   // 'players' inside G is *not* the same as the boardgame.io PluginPlayer.
   // We use plain map by playerID for clarity.
@@ -84,20 +86,24 @@ export interface GState {
   /** Per-turn deadline. Once Date.now() >= this, ANY connected player may
    *  force-end the current player's turn (covers AFK / disconnected opponent). */
   turnDeadline?: number;
-  /** ADDED (server): why the match ended. Read by `endIf` and surfaced on
-   *  `ctx.gameover.reason`, which is what the authoritative result writer
-   *  persists into `game.match_results.reason`. Set only by server-re-executed
-   *  reducer code, never by anything a client can put on the wire. */
+  /** Block-assignment deadline. Set when attackers are confirmed; once it lapses
+   *  the attacker may force combat to resolve with whatever blocks exist, so a
+   *  defender cannot stall out a confirmed attack. */
+  blockDeadline?: number;
+  /** Deterministic instance-id counter. Lives in G (not a module global) so uids
+   *  survive persistence and never collide after a server restart. */
+  nextUid: number;
+  /** The ctx.turn value on which the play phase first opened. The starting player
+   *  does not draw on this turn (MTG "play, don't draw"); everyone draws after. */
+  firstPlayTurn?: number;
+  /** Set once a game is decided, for the results screen and ranked reason. */
   endReason?: EndReason;
+  /** In-match voice chat: playerID -> the player's current PeerJS peer id.
+   *  Stripped from spectator views so only the two seats can dial each other. */
+  voice?: Record<string, string>;
+  /** Public deck sizes, injected by playerView (never authored directly). */
+  deckCounts?: Record<string, number>;
 }
-
-/** ADDED (server): the four outcomes `game.match_results.reason` accepts. */
-export type EndReason = 'life' | 'deckout' | 'concede' | 'timeout';
-
-/** ADDED (server): grace period on top of `turnDeadline` before the opponent
- *  may convert an AFK turn into a match win. Generous so a slow-but-present
- *  player is never timed out. */
-export const TIMEOUT_CLAIM_GRACE_MS = 60_000;
 
 /** Mulligan tuning. First mull is free (redraw to 7); subsequent draw 1 fewer, floor at 4. */
 export const MULLIGAN_INITIAL_HAND = 7;
@@ -107,6 +113,11 @@ export const MULLIGAN_TIMEOUT_MS = 10_000;
 /** Hard per-turn deadline after which the OPPONENT may force-end. Wider than the
  *  client-side 60s auto-pass so an actively thinking player isn't punished. */
 export const TURN_TIMEOUT_MS = 90_000;
+/** Once attackers are confirmed, the defender has this long to assign blocks
+ *  before the attacker may force combat to resolve. */
+export const BLOCK_TIMEOUT_MS = 45_000;
+/** Grace beyond a deadline before a timeout win can be claimed (server only). */
+export const TIMEOUT_CLAIM_GRACE_MS = 60_000;
 export function mulliganDrawCount(counts: number): number {
   // counts = times the player has mulliganed (including the one they just took)
   // 1st mull → draw 7, 2nd → 6, 3rd → 5, 4th+ → 4
@@ -115,19 +126,19 @@ export function mulliganDrawCount(counts: number): number {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-let _uid = 0;
-function newUid(prefix = 'i'): string {
-  _uid += 1;
-  return `${prefix}${_uid}`;
-}
-
 function emptyGas(): Record<Color, number> {
   return { bnb: 0, sol: 0, eth: 0, robinhood: 0, base: 0 };
 }
 
-function mkInstance(defId: string, opts: Partial<Instance> = {}): Instance {
+/** Allocate a deterministic instance id from the per-game counter in G. */
+function newUid(G: GState, prefix = 'c'): string {
+  G.nextUid = (G.nextUid ?? 0) + 1;
+  return `${prefix}${G.nextUid}`;
+}
+
+function mkInstance(G: GState, defId: string, opts: Partial<Instance> = {}): Instance {
   return {
-    uid: newUid('c'),
+    uid: newUid(G),
     defId,
     tapped: false,
     damage: 0,
@@ -196,9 +207,16 @@ function drawCard(G: GState, pid: string, n = 1) {
   const deck = G.secret.decks[pid];
   for (let i = 0; i < n; i++) {
     if (deck.length === 0) {
-      // milling out: lose the game on draw from empty deck
+      // On a client view the deck array is stripped to [] but deckCounts still
+      // carries the real remaining size. Never derive a mill-out loss from the
+      // stripped state — only the authoritative master (which has the real
+      // deck) decides a deck-out. This stops every online draw flashing a
+      // self-loss (engine-04).
+      const realCount = G.deckCounts?.[pid];
+      if (typeof realCount === 'number' && realCount > 0) return;
+      // Genuine deck-out: lose the game on draw from an empty deck.
       p.life = Math.min(p.life, 0);
-      if (!G.endReason) G.endReason = 'deckout';   // ADDED (server)
+      G.endReason = 'deckout';
       G.log.push(`Player ${pid} tried to draw from empty deck and loses.`);
       return;
     }
@@ -348,7 +366,7 @@ const playCard: Move<GState> = ({ G, ctx, playerID, random }, handIndex: number,
     const extra = p.machines.filter(m => CARDS[m.defId].effect === 'extra_node_per_turn').length;
     if (p.nodesPlayedThisTurn >= 1 + extra) return INVALID_MOVE;
     p.hand.splice(handIndex, 1);
-    p.nodes.push(mkInstance(defId, { tapped: false }));
+    p.nodes.push(mkInstance(G, defId, { tapped: false }));
     p.nodesPlayedThisTurn += 1;
     G.log.push(`Player ${playerID} plays Node ${def.name}.`);
     return;
@@ -362,7 +380,7 @@ const playCard: Move<GState> = ({ G, ctx, playerID, random }, handIndex: number,
     pay(p, cost);
     p.hand.splice(handIndex, 1);
     const hasHaste = p.machines.some(m => CARDS[m.defId].effect === 'meme_haste');
-    p.memes.push(mkInstance(defId, { summoningSick: !hasHaste }));
+    p.memes.push(mkInstance(G, defId, { summoningSick: !hasHaste }));
     G.log.push(`Player ${playerID} summons ${def.name}.`);
     // Trigger "on meme ETB draw" machines for this player.
     for (const m of p.machines) {
@@ -376,7 +394,9 @@ const playCard: Move<GState> = ({ G, ctx, playerID, random }, handIndex: number,
     // Per-meme ETB triggers carried on the card definition itself.
     if (def.effect === 'etb_zap_2_and_draw') {
       const oppId = otherPlayer(ctx);
-      G.players[oppId].life -= 2;
+      // Route through the damage helper so the log line and any future
+      // player-damage hook fire (engine-18), then draw.
+      dealDamageToPlayer(G, oppId, 2);
       drawCard(G, playerID, 1);
       G.log.push(`${def.name} zaps Player ${oppId} for 2 and draws a card.`);
     }
@@ -386,7 +406,7 @@ const playCard: Move<GState> = ({ G, ctx, playerID, random }, handIndex: number,
   if (def.type === 'machine') {
     pay(p, cost);
     p.hand.splice(handIndex, 1);
-    p.machines.push(mkInstance(defId));
+    p.machines.push(mkInstance(G, defId));
     G.log.push(`Player ${playerID} deploys Machine ${def.name}.`);
     return;
   }
@@ -398,7 +418,7 @@ const playCard: Move<GState> = ({ G, ctx, playerID, random }, handIndex: number,
     if (!found || found.zone !== 'memes') return INVALID_MOVE;
     pay(p, cost);
     p.hand.splice(handIndex, 1);
-    p.machines.push(mkInstance(defId, { attachedTo: targetUid }));
+    p.machines.push(mkInstance(G, defId, { attachedTo: targetUid }));
     // aura_haste: clear summoning sick on attach so it's actually useful.
     if (def.effect === 'aura_haste') {
       const meme = G.players[found.ownerId].memes.find(m => m.uid === targetUid);
@@ -423,7 +443,17 @@ const playCard: Move<GState> = ({ G, ctx, playerID, random }, handIndex: number,
       const found = findOnBattlefield(G, targetUid);
       if (!found || found.zone !== 'machines') return INVALID_MOVE;
     }
-    if (allowsAnyTarget && !targetUid) return INVALID_MOVE;
+    if (allowsAnyTarget) {
+      // Damage must resolve to a real target. Accept either player, or a uid
+      // that is actually a meme on the battlefield. A stale/bogus uid used to
+      // slip through here and burn the card + gas for no effect (engine-10).
+      if (!targetUid) return INVALID_MOVE;
+      const isPlayer = targetUid === '__p0__' || targetUid === '__p1__';
+      if (!isPlayer) {
+        const found = findOnBattlefield(G, targetUid);
+        if (!found || found.zone !== 'memes') return INVALID_MOVE;
+      }
+    }
 
     pay(p, cost);
     p.hand.splice(handIndex, 1);
@@ -536,8 +566,15 @@ const confirmAttackers: Move<GState> = ({ G, ctx, playerID, events }) => {
     if (m) m.tapped = true;
   }
   G.log.push(`Player ${playerID} attacks with ${G.combat.attackers.length} meme(s).`);
+  // The clock now runs on the DEFENDER: they must assign blocks before the
+  // block deadline, after which the attacker may force combat to resolve
+  // (engine-02/03). Refresh the turn deadline so confirming an attack late in
+  // the turn doesn't instantly expose the attacker to a force-end.
+  const now = Date.now();
+  G.blockDeadline = now + BLOCK_TIMEOUT_MS;
+  G.turnDeadline = now + TURN_TIMEOUT_MS;
   // Hand priority to defender for blocks; park attacker in 'afk' so they can
-  // still force-end the turn if the defender stalls.
+  // force combat to resolve if the defender stalls.
   const def = otherPlayer({ currentPlayer: ctx.currentPlayer, playOrder: ctx.playOrder });
   events!.setActivePlayers({
     value: { [ctx.currentPlayer]: 'afk', [def]: 'blockers' },
@@ -570,7 +607,32 @@ const confirmBlocks: Move<GState> = ({ G, ctx, playerID, events }) => {
   resolveCombat(G, ctx);
   G.combat.attackers = [];
   G.combat.blocks = {};
+  G.blockDeadline = undefined;
   // Return priority to attacker; they go back to main, defender parks in 'afk'.
+  events!.setActivePlayers({
+    currentPlayer: Stage.NULL,
+    others: 'afk',
+    revert: false,
+  });
+};
+
+/**
+ * Attacker-side escape hatch: once the block deadline has lapsed, the attacker
+ * (or anyone, after the wider turn deadline) may force the confirmed attack to
+ * resolve with whatever blocks the defender has assigned so far. A stalling
+ * defender can therefore never freeze a confirmed attack, and — unlike the old
+ * forceEndTurn path — the attack is NOT cancelled, so the damage still lands
+ * (engine-02/13).
+ */
+const forceResolveBlocks: Move<GState> = ({ G, ctx, events }) => {
+  if (G.combat.attackers.length === 0) return INVALID_MOVE;
+  const past = (d?: number) => !!d && Date.now() >= d;
+  if (!past(G.blockDeadline) && !past(G.turnDeadline)) return INVALID_MOVE;
+  resolveCombat(G, ctx);
+  G.combat.attackers = [];
+  G.combat.blocks = {};
+  G.blockDeadline = undefined;
+  G.log.push(`Combat force-resolved (block timeout).`);
   events!.setActivePlayers({
     currentPlayer: Stage.NULL,
     others: 'afk',
@@ -726,9 +788,11 @@ const mulligan: Move<GState> = ({ G, playerID, random }) => {
 /** Skip directly from main to end (no attacks this turn). */
 const passTurn: Move<GState> = ({ G, ctx, playerID, events }) => {
   if (playerID == null || ctx.currentPlayer !== playerID) return INVALID_MOVE;
-  // Discard down to 7
+  // Discard down to 7 from the FRONT (oldest) rather than popping the newest
+  // draw, so passing after a big draw no longer silently bins the card you just
+  // drew (engine-12). Players who care which card goes can use discardCard first.
   const p = G.players[playerID];
-  while (p.hand.length > 7) p.graveyard.push(p.hand.pop()!);
+  while (p.hand.length > 7) p.graveyard.push(p.hand.shift()!);
   // Drain floating gas
   p.gas = emptyGas();
   events!.endTurn();
@@ -742,21 +806,28 @@ const passTurn: Move<GState> = ({ G, ctx, playerID, events }) => {
  */
 const forceEndTurn: Move<GState> = ({ G, ctx, events }) => {
   if (!G.turnDeadline || Date.now() < G.turnDeadline) return INVALID_MOVE;
-  // Clean up combat state and end the current player's turn.
+  // If an attack is mid-flight, RESOLVE it rather than discarding it. The old
+  // behaviour let a defender wait out the deadline and wipe a confirmed lethal
+  // attack for zero damage — a free Fog every turn (engine-02). Resolving first
+  // means force-ending during combat still deals the attacker's damage.
+  if (G.combat.attackers.length > 0) {
+    resolveCombat(G, ctx);
+    G.combat.attackers = [];
+    G.combat.blocks = {};
+    G.blockDeadline = undefined;
+  }
+  // Clean up and end the current player's turn.
   const p = G.players[ctx.currentPlayer];
-  while (p.hand.length > 7) p.graveyard.push(p.hand.pop()!);
+  while (p.hand.length > 7) p.graveyard.push(p.hand.shift()!);
   p.gas = emptyGas();
-  G.combat.attackers = [];
-  G.combat.blocks = {};
   G.log.push(`Turn auto-ended for Player ${ctx.currentPlayer} (AFK / timeout).`);
   events!.endTurn();
 };
 
 /**
- * ADDED (server): forfeit. The conceding seat drops to 0 life, which `endIf`
- * turns into a win for the other seat with reason 'concede'. A player can only
- * ever concede for THEMSELVES — `playerID` is supplied by the boardgame.io
- * master from the socket's authenticated credentials, not by the move payload.
+ * Forfeit. A player may concede for THEMSELVES at any time; their life goes to
+ * 0 so endIf hands the win to the opponent with reason 'concede'. playerID is
+ * supplied by boardgame.io, so a client can never concede on another's behalf.
  */
 const concede: Move<GState> = ({ G, playerID }) => {
   if (playerID == null) return INVALID_MOVE;
@@ -768,21 +839,58 @@ const concede: Move<GState> = ({ G, playerID }) => {
 };
 
 /**
- * ADDED (server): claim the win when the opponent has blown through the turn
- * deadline plus the grace period. The legality check is `G.turnDeadline`, which
- * lives in server-held state and is re-evaluated by the master when it replays
- * the move — a client that calls this early just gets INVALID_MOVE.
+ * Publish this seat's current voice-chat peer id so the opponent can dial it.
+ * Only the two seated players can read G.voice (playerView strips it from
+ * spectators), so peer ids are never exposed to onlookers. Callable in any
+ * phase/stage, including during the opponent's turn.
+ */
+const announceVoicePeer: Move<GState> = ({ G, playerID }, peerId: string) => {
+  if (playerID == null) return INVALID_MOVE;
+  if (typeof peerId !== 'string') return INVALID_MOVE;
+  if (peerId.length < 8 || peerId.length > 64 || !/^[A-Za-z0-9_-]+$/.test(peerId)) return INVALID_MOVE;
+  if (!G.voice) G.voice = {};
+  G.voice[playerID] = peerId;
+};
+
+/** Discard a specific card from hand (used to meet the 7-card hand limit by
+ *  choice rather than losing the newest draws). */
+const discardCard: Move<GState> = ({ G, ctx, playerID }, handIndex: number) => {
+  if (playerID == null || ctx.currentPlayer !== playerID) return INVALID_MOVE;
+  const p = G.players[playerID];
+  if (handIndex < 0 || handIndex >= p.hand.length) return INVALID_MOVE;
+  if (p.hand.length <= 7) return INVALID_MOVE;   // only legal while over the limit
+  const [d] = p.hand.splice(handIndex, 1);
+  p.graveyard.push(d);
+  G.log.push(`Player ${playerID} discards a card.`);
+};
+
+/**
+ * ADDED (server): claim the win when the player who holds priority has blown
+ * through their deadline plus the grace period. Targets WHOEVER is on the clock
+ * — while a confirmed attack is pending that is the DEFENDER (block deadline),
+ * so only the attacker may claim; otherwise it is the current player, so only
+ * the non-current player may claim. This stops a defender who stalls in the
+ * blockers stage from timing out the ATTACKER (engine-03). The legality check
+ * reads server-held deadlines and is re-evaluated by the master, so a client
+ * that calls it early just gets INVALID_MOVE.
  */
 const claimTimeout: Move<GState> = ({ G, ctx, playerID }) => {
   if (playerID == null) return INVALID_MOVE;
-  if (playerID === ctx.currentPlayer) return INVALID_MOVE;    // can't time yourself out
-  if (!G.turnDeadline) return INVALID_MOVE;
-  if (Date.now() < G.turnDeadline + TIMEOUT_CLAIM_GRACE_MS) return INVALID_MOVE;
-  const afk = G.players[ctx.currentPlayer];
-  if (!afk || afk.life <= 0) return INVALID_MOVE;
-  afk.life = 0;
+  const attackPending = G.combat.attackers.length > 0;
+  const defender = ctx.playOrder.find(p => p !== ctx.currentPlayer)!;
+  let claimant: string, target: string, deadline: number | undefined;
+  if (attackPending) {
+    claimant = ctx.currentPlayer; target = defender; deadline = G.blockDeadline ?? G.turnDeadline;
+  } else {
+    claimant = defender; target = ctx.currentPlayer; deadline = G.turnDeadline;
+  }
+  if (playerID !== claimant) return INVALID_MOVE;
+  if (!deadline || Date.now() < deadline + TIMEOUT_CLAIM_GRACE_MS) return INVALID_MOVE;
+  const loser = G.players[target];
+  if (!loser || loser.life <= 0) return INVALID_MOVE;
+  loser.life = 0;
   G.endReason = 'timeout';
-  G.log.push(`Player ${ctx.currentPlayer} timed out; Player ${playerID} claims the win.`);
+  G.log.push(`Player ${target} timed out; Player ${claimant} claims the win.`);
 };
 
 /** Enter combat (defender will set blockers via setActivePlayers). */
@@ -849,6 +957,8 @@ export const ChainsTCG: Game<GState> = {
       players,
       secret: { decks },
       combat: { attackers: [], blocks: {} },
+      nextUid: 0,
+      voice: {},
       log: ['Game start.'],
       wager: setupData?.wager
         ? (setupData.wager.kind === 'master' || setupData.wager.kind === 'sol')
@@ -870,13 +980,23 @@ export const ChainsTCG: Game<GState> = {
 
   turn: {
     stages: {
-      // Non-active player sits here during normal play with one available move:
-      // force-end the active player's turn after their AFK deadline lapses.
-      afk: { moves: { forceEndTurn, concede, claimTimeout } },   // ADDED (server): concede/claimTimeout
+      // Non-active player sits here during normal play. They may force-end an
+      // AFK opponent's turn, force a stalled combat to resolve, publish their
+      // voice peer id, or concede — but NOT play cards or block out of turn.
+      afk: { moves: { forceEndTurn, forceResolveBlocks, announceVoicePeer, concede, claimTimeout } },
+      // The defender holds this stage only while an attack is pending. Its move
+      // set is deliberately narrow: assign/confirm blocks (plus voice/concede).
+      // Because it is a declared stage, the defender can no longer fall through
+      // to the play-phase move list and, e.g., forceEndTurn mid-combat
+      // (engine-02/13).
+      blockers: { moves: { declareBlocker, confirmBlocks, announceVoicePeer, concede } },
     },
     onBegin: ({ G, ctx, events }) => {
+      // Untap / draw / seat parking only make sense once the play phase starts.
+      // During pick + mulligan (which run with activePlayers ALL) this hook must
+      // do nothing, or it would draw into the opening hand and mis-set turns.
+      if (ctx.phase !== 'play') return;
       const p = G.players[ctx.currentPlayer];
-      // Untap permanents
       for (const z of ['nodes', 'memes', 'machines'] as Zone[]) {
         for (const inst of p[z]) {
           inst.tapped = false;
@@ -885,20 +1005,21 @@ export const ChainsTCG: Game<GState> = {
         }
       }
       p.nodesPlayedThisTurn = 0;
-      // Draw (skip on the very first turn of the game for the starting player)
-      if (ctx.turn !== 1) drawCard(G, ctx.currentPlayer, 1);
+      // The starting player does not draw on the first play turn (MTG "play,
+      // don't draw"). ctx.turn is well past 1 by the time play opens because the
+      // pick/mulligan phases consume turns, so key off the recorded first play
+      // turn instead of a hard-coded 1 (engine-01).
+      if (G.firstPlayTurn === undefined) G.firstPlayTurn = ctx.turn;
+      if (ctx.turn !== G.firstPlayTurn) drawCard(G, ctx.currentPlayer, 1);
       // Reset the per-turn AFK deadline so an inactive opponent can be force-ended.
       G.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
-      // During the play phase, park the non-active player in the 'afk' stage so
-      // they have permission to call forceEndTurn. Pick/mulligan phases override
-      // active players themselves and shouldn't be touched here.
-      if (ctx.phase === 'play') {
-        events!.setActivePlayers({
-          currentPlayer: Stage.NULL,
-          others: 'afk',
-          revert: false,
-        });
-      }
+      G.blockDeadline = undefined;
+      // Park the non-active player in 'afk' so they have the out-of-turn moves.
+      events!.setActivePlayers({
+        currentPlayer: Stage.NULL,
+        others: 'afk',
+        revert: false,
+      });
       G.log.push(`— Turn ${ctx.turn}: Player ${ctx.currentPlayer} (${p.color}) —`);
     },
     onEnd: ({ G, ctx }) => {
@@ -917,6 +1038,7 @@ export const ChainsTCG: Game<GState> = {
     confirmAttackers,
     declareBlocker,
     confirmBlocks,
+    forceResolveBlocks,
     passTurn,
     goToCombat,
     chooseColor,
@@ -924,14 +1046,16 @@ export const ChainsTCG: Game<GState> = {
     mulligan,
     forceKeepOpponent,
     forceEndTurn,
-    concede,        // ADDED (server)
-    claimTimeout,   // ADDED (server)
+    concede,
+    discardCard,
+    announceVoicePeer,
+    claimTimeout,
   },
 
   phases: {
     pick: {
       start: true,
-      moves: { chooseColor, concede },   // ADDED (server): concede
+      moves: { chooseColor },
       turn: {
         // Both players act simultaneously during deck selection.
         activePlayers: ActivePlayers.ALL,
@@ -940,7 +1064,7 @@ export const ChainsTCG: Game<GState> = {
       next: 'mulligan',
     },
     mulligan: {
-      moves: { keepHand, mulligan, forceKeepOpponent, concede },   // ADDED (server): concede
+      moves: { keepHand, mulligan, forceKeepOpponent },
       onBegin: ({ G }) => {
         // Start the auto-keep deadline as soon as the mulligan phase opens.
         G.mulligan.deadline = Date.now() + MULLIGAN_TIMEOUT_MS;
@@ -956,9 +1080,9 @@ export const ChainsTCG: Game<GState> = {
       moves: {
         playCard, tapNode,
         declareAttacker, confirmAttackers,
-        declareBlocker, confirmBlocks,
+        declareBlocker, confirmBlocks, forceResolveBlocks,
         passTurn, goToCombat, forceEndTurn,
-        concede, claimTimeout,   // ADDED (server)
+        concede, discardCard, announceVoicePeer, claimTimeout,
       },
     },
   },
@@ -966,8 +1090,6 @@ export const ChainsTCG: Game<GState> = {
   endIf: ({ G, ctx }) => {
     const losers = Object.entries(G.players).filter(([, p]) => p.life <= 0).map(([pid]) => pid);
     if (losers.length === 0) return;
-    // ADDED (server): `reason` rides along on ctx.gameover so the result writer
-    // records WHY without re-deriving it from state. Defaults to 'life'.
     const reason: EndReason = G.endReason ?? 'life';
     if (losers.length === ctx.numPlayers) return { draw: true, reason };
     const winner = ctx.playOrder.find(p => !losers.includes(p))!;
@@ -984,7 +1106,10 @@ export const ChainsTCG: Game<GState> = {
       viewG.secret.decks[pid] = [];   // wipe contents
     }
     // Inject a public deck-size view
-    (viewG as any).deckCounts = deckCounts;
+    viewG.deckCounts = deckCounts;
+    // Voice peer ids are only for the two seated players. A spectator (no
+    // playerID) must never learn them, or anyone watching could dial a seat.
+    if (playerID == null) viewG.voice = {};
     // Hide opponents' hands → keep length only.
     for (const pid of Object.keys(viewG.players)) {
       if (pid !== playerID) {
@@ -998,3 +1123,4 @@ export const ChainsTCG: Game<GState> = {
 
 export type { CardDef } from './cards.js';
 export { CARDS, COLORS, COLOR_META, STARTER_DECKS } from './cards.js';
+export { concede, discardCard, announceVoicePeer, forceResolveBlocks };

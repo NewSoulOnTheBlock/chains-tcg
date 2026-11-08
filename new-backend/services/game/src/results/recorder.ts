@@ -1,4 +1,4 @@
-import { withTransaction, isForeignKeyViolation, createLogger } from '@chains/shared';
+import { withTransaction, isForeignKeyViolation, createLogger, query } from '@chains/shared';
 import { config } from '../config.js';
 import { store } from '../bgio/store.js';
 import { ChainsTCG } from '../game/Game.js';
@@ -217,8 +217,38 @@ export class ResultRecorder {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private stopped = false;
-  /** ms since epoch; 0 means "scan everything" (first pass after boot). */
+  /** ms since epoch; 0 means "scan everything" (only before the cursor is seeded). */
   private cursor = 0;
+  private seeded = false;
+
+  /**
+   * Seed the cursor from the newest result we have already recorded (server-38).
+   *
+   * Without this, `cursor = 0` makes the FIRST pass after every boot list every
+   * gameover match ever stored and re-fetch + re-lock each one, which becomes a
+   * long burst of Postgres work as the Games table grows. Starting at
+   * `MAX(finished_at)` (the overlap in `sweep()` still re-covers the recent
+   * window) scans only matches that finished while we were down.
+   */
+  private async seedCursor(): Promise<void> {
+    try {
+      const { rows } = await query<{ ms: string | null }>(
+        `select (extract(epoch from max(finished_at)) * 1000)::bigint::text as ms
+           from game.match_results`,
+      );
+      const ms = rows[0]?.ms ? Number(rows[0].ms) : 0;
+      this.cursor = Number.isFinite(ms) && ms > 0 ? ms : 0;
+      log.info('result recorder cursor seeded', { cursorMs: this.cursor });
+    } catch (err) {
+      // Could not read the high-water mark: fall back to a full first scan.
+      this.cursor = 0;
+      log.warn('result cursor seed failed; first pass will scan all', {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      this.seeded = true;
+    }
+  }
 
   start(): void {
     this.stopped = false;
@@ -226,6 +256,7 @@ export class ResultRecorder {
       if (this.stopped || this.running) return;
       this.running = true;
       try {
+        if (!this.seeded) await this.seedCursor();
         await this.sweep();
       } catch (err) {
         log.error('result sweep failed', {

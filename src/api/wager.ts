@@ -45,6 +45,7 @@
 
 import { get, post } from './http.js';
 import { ApiError } from './errors.js';
+import { guardAs, isDepositResult, isStakes, isWrappedEscrow } from './guards.js';
 import type { Seat } from './lobby.js';
 
 export type { Seat } from './lobby.js';
@@ -140,7 +141,7 @@ export function isDepositRejection(err: unknown): err is ApiError {
  * hardcode a tier index.
  */
 export function getStakes(signal?: AbortSignal): Promise<Stakes> {
-  return get<Stakes>('/wager/stakes', { signal });
+  return get<Stakes>('/wager/stakes', { signal, parse: guardAs<Stakes>('Stakes', isStakes) });
 }
 
 /**
@@ -168,7 +169,7 @@ export async function createEscrow(
     '/wager/escrows',
     // `tier` MUST be a JSON number — there is no server-side coercion.
     { matchId: params.matchId, tier: params.tier },
-    { signal },
+    { signal, parse: guardAs<{ escrow: Escrow }>('{ escrow: Escrow }', isWrappedEscrow) },
   );
   return escrow;
 }
@@ -184,7 +185,7 @@ export async function createEscrow(
 export async function getEscrow(id: string, signal?: AbortSignal): Promise<Escrow> {
   const { escrow } = await get<{ escrow: Escrow }>(
     `/wager/escrows/${encodeURIComponent(id)}`,
-    { signal },
+    { signal, parse: guardAs<{ escrow: Escrow }>('{ escrow: Escrow }', isWrappedEscrow) },
   );
   return escrow;
 }
@@ -211,7 +212,7 @@ export function submitDeposit(
   return post<DepositResult>(
     `/wager/escrows/${encodeURIComponent(id)}/deposits`,
     { txHash: body.txHash },
-    { signal, retryOn429: false },
+    { signal, retryOn429: false, parse: guardAs<DepositResult>('DepositResult', isDepositResult) },
   );
 }
 

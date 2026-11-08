@@ -93,15 +93,32 @@ describe('on-chain card index', () => {
     console.warn('[wager] root src/cards.ts not on disk — card index provenance test SKIPPED');
   }
 
-  provenance('re-derives byte-for-byte from the root catalogue', async () => {
-    // The exact derivation `scripts/gen-nft-metadata.mts` performs.
+  provenance('preserves the on-chain order of every minted card (append-only catalogue)', async () => {
+    // The CardPack at 0x5720…30b3 was deployed with the 80 non-node cards in
+    // CARD_INDEX. The gameplay catalogue can legitimately grow AFTER that deploy
+    // (e.g. `base_moose`, a Knowledge meme added 2026-10-31) — such a card is
+    // NOT in the deployed mint space and must never be minted against this
+    // contract until a redeploy regenerates CARD_INDEX + CARD_COUNT.
+    //
+    // The money-critical guarantee is unchanged: none of the 80 on-chain indices
+    // may shift. We assert that by filtering the live derivation down to the
+    // frozen set and requiring BYTE-FOR-BYTE equality with CARD_INDEX — so a
+    // reorder or deletion of any minted card still fails loudly, while a new
+    // non-mintable card is allowed to appear anywhere in the catalogue.
     const mod = (await import(ROOT_CATALOGUE)) as {
       CARDS: Record<string, { id: string; type: string }>;
     };
-    const derived = Object.values(mod.CARDS)
+    const frozen = new Set<string>(CARD_INDEX);
+    const derivedNonNode = Object.values(mod.CARDS)
       .filter((c) => c.type !== 'node')
       .map((c) => c.id);
-    expect(derived).toEqual([...CARD_INDEX]);
+    const derivedMinted = derivedNonNode.filter((id) => frozen.has(id));
+    // Every minted card is still present, still unique, still in the same order.
+    expect(derivedMinted).toEqual([...CARD_INDEX]);
+    // Any catalogue cards NOT in the frozen set are post-deploy, non-mintable
+    // additions; record them so a reviewer sees what is outside the mint space.
+    const postDeploy = derivedNonNode.filter((id) => !frozen.has(id));
+    expect(postDeploy.every((id) => !CARD_INDEX.includes(id))).toBe(true);
   });
 
   const live = process.env.CHAIN_LIVE_TESTS === '1' ? it : it.skip;

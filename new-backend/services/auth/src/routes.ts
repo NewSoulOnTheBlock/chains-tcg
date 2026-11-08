@@ -28,6 +28,7 @@ import {
   deriveRoles,
   normalizeAddress,
   rateLimit,
+  revokeJti,
   route,
   signAccessToken,
   strictBody,
@@ -51,7 +52,7 @@ import {
 import { redisOnChainBudget } from './chain/onChainBudget.js';
 import { env } from './env.js';
 import { buildSignInMessage } from './message.js';
-import { consumeNonce, issueNonce, type NoncePurpose } from './nonce.js';
+import { peekNonce, finalizeNonce, issueNonce, type NoncePurpose } from './nonce.js';
 import { deriveProfileRoles, findOrCreateProfile, findProfileById } from './profiles.js';
 import { createSession, revokeFamilyBySessionId, revokeFamilyByToken, rotateSession } from './sessions.js';
 import { verifyWalletSignature } from './signature.js';
@@ -169,8 +170,10 @@ async function proveAddress(
     message?: string;
   },
 ) {
-  // Atomically consume the challenge. A replay finds nothing here.
-  const record = await consumeNonce(input.chain, input.address, input.nonce, input.purpose);
+  // Read the challenge but DO NOT consume it yet (server-28). A request with a
+  // bad signature must not be able to burn a victim's pending challenge, so the
+  // nonce is only consumed by `finalizeNonce` once the signature is proved.
+  const record = await peekNonce(input.chain, input.address, input.nonce, input.purpose);
 
   // Re-derive the message from the server's own stored fields. Anything the
   // client sent is only ever compared, never used.
@@ -199,7 +202,7 @@ async function proveAddress(
     throw AppError.unauthorized('Sign-in challenge is no longer valid — request a new nonce');
   }
 
-  return verifyWalletSignature({
+  const proved = await verifyWalletSignature({
     chain: input.chain,
     address: input.address,
     message,
@@ -213,6 +216,13 @@ async function proveAddress(
     }),
     log: req.log,
   });
+
+  // The signature is proved — only NOW do we burn the single-use challenge
+  // (server-28). A failed verifyWalletSignature throws above and leaves the
+  // challenge intact for the legitimate owner's real attempt.
+  await finalizeNonce(input.chain, input.address, record);
+
+  return proved;
 }
 
 function accessTokenResponse(input: {
@@ -397,6 +407,15 @@ export function mountAuthRoutes(app: Express): void {
       let revoked = await revokeFamilyBySessionId(auth.jti, auth.profileId);
       if (body.refreshToken) {
         revoked += await revokeFamilyByToken(body.refreshToken);
+      }
+
+      // Also revoke the ACCESS token immediately (server-36). The refresh family
+      // is dead above, but the 15-minute access token (jti = session id) would
+      // otherwise keep working on every service until exp. Park the jti in the
+      // revocation set for the remainder of its life so requireAuth rejects it now.
+      const remainingSec = auth.expiresAt - Math.floor(Date.now() / 1000);
+      if (remainingSec > 0) {
+        await revokeJti(auth.jti, remainingSec);
       }
 
       req.log.info('logout', { profile_id: auth.profileId, sessions_revoked: revoked });

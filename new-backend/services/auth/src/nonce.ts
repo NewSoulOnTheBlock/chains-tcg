@@ -111,17 +111,29 @@ export async function issueNonce(
 }
 
 /**
- * Atomically consume the outstanding nonce for (chain, address).
- * Throws `unauthorized` if there is none, if it was already used, or if the
- * caller named a different nonce than the one the server is holding.
+ * READ (do not consume) the outstanding challenge for (chain, address) and
+ * validate every server-held field.
+ *
+ * ── WHY THIS DOES NOT DELETE (server-28) ───────────────────────────────────
+ * `/auth/verify` is public and used to do a `GETDEL` here BEFORE the signature
+ * was checked, so anyone who knew a victim's wallet address could POST a garbage
+ * signature while the victim was signing and destroy the victim's pending
+ * challenge (their real verify then failed with "No active sign-in challenge").
+ * The nonce is now only burned by `finalizeNonce`, called AFTER the signature is
+ * proved, so an unauthenticated caller with a bad signature can no longer burn
+ * someone else's challenge.
+ *
+ * Throws `unauthorized` if there is no challenge, if it names a different nonce
+ * than the one the server holds, or if it is for the wrong address/chain/purpose
+ * or has expired.
  */
-export async function consumeNonce(
+export async function peekNonce(
   chain: string,
   address: string,
   expectedNonce: string | undefined,
   expectedPurpose: NoncePurpose,
 ): Promise<NonceRecord> {
-  const raw = await getDel(redisKey(chain, address));
+  const raw = await getRedis().get(redisKey(chain, address));
   if (!raw) {
     throw AppError.unauthorized('No active sign-in challenge — request a new nonce');
   }
@@ -139,15 +151,46 @@ export async function consumeNonce(
   if (record.address !== address || record.chain !== chain) {
     throw AppError.unauthorized('Sign-in challenge mismatch — request a new nonce');
   }
-  // A `signin` signature is not a `link` authorisation and vice versa. The
-  // nonce is consumed either way — this is checked AFTER the GETDEL — so an
-  // attacker replaying a captured signature at the wrong endpoint destroys the
-  // challenge instead of getting a second attempt at the right one.
+  // A `signin` signature is not a `link` authorisation and vice versa.
   if ((record.purpose ?? 'signin') !== expectedPurpose) {
     throw AppError.unauthorized('Sign-in challenge mismatch — request a new nonce');
   }
   if (Date.parse(record.expiresAt) <= Date.now()) {
     throw AppError.unauthorized('Sign-in challenge expired — request a new nonce');
+  }
+
+  return record;
+}
+
+/**
+ * Burn a challenge that has just been PROVED by a valid signature. Enforces
+ * single use with the SAME two independent guards as before:
+ *   * the Redis `GETDEL`, atomic, so two concurrent valid verifies of the same
+ *     captured signature cannot both win; and
+ *   * the Postgres `consumed_at` update, independent of Redis state.
+ *
+ * The `record` is the one `peekNonce` returned; if `issueNonce` replaced it in
+ * the window between peek and finalize, the GETDEL returns the NEW record and the
+ * nonce comparison rejects, so a proof is never applied to a different challenge.
+ */
+export async function finalizeNonce(
+  chain: string,
+  address: string,
+  record: NonceRecord,
+): Promise<void> {
+  const raw = await getDel(redisKey(chain, address));
+  if (!raw) {
+    throw AppError.unauthorized('Sign-in challenge already used — request a new nonce');
+  }
+  try {
+    const current = JSON.parse(raw) as NonceRecord;
+    if (current.nonce !== record.nonce) {
+      throw AppError.unauthorized('Sign-in challenge is no longer valid — request a new nonce');
+    }
+  } catch (e) {
+    if (e instanceof AppError) throw e;
+    // Unparseable stored value: fall through to the Postgres guard, which keys
+    // on the proved record's own nonce.
   }
 
   // Second guard, independent of Redis state.
@@ -163,8 +206,6 @@ export async function consumeNonce(
   if (consumed.rowCount !== 1) {
     throw AppError.unauthorized('Sign-in challenge already used — request a new nonce');
   }
-
-  return record;
 }
 
 /** Housekeeping: drop expired audit rows. Safe to call on a timer. */
