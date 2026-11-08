@@ -16,7 +16,8 @@
     "build:shared": "npm run build --workspace @chains/shared",
     "typecheck": "npm run build:shared && npm run typecheck --workspaces --if-present",
     "migrate": "node db/migrate.mjs",
-    "dev:auth": "npm run dev --workspace @chains/auth"
+    "dev:auth": "npm run dev --workspace @chains/auth",
+    "test": "vitest run"
   },
   "devDependencies": {
     "typescript": "^5.9.2",

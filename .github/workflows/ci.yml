@@ -39,4 +39,4 @@ jobs:
           cache-dependency-path: new-backend/package-lock.json
       - run: npm ci
       - run: npm run typecheck
-      - run: npx vitest run
+      - run: npm test
