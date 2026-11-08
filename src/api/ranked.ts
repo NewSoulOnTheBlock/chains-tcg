@@ -42,6 +42,7 @@
 
 import { del, get, post } from './http.js';
 import { ApiError } from './errors.js';
+import { guardAs, isQueueTicket, isRankedMe } from './guards.js';
 
 // ── Ladder shape ────────────────────────────────────────────────────────────
 
@@ -398,7 +399,7 @@ export async function getProfile(displayName: string, signal?: AbortSignal): Pro
 export async function getMe(signal?: AbortSignal): Promise<OwnRankedProfile> {
   const body = await get<{ profile?: OwnRankedProfile } & Partial<OwnRankedProfile>>(
     '/games/ranked/me',
-    { signal },
+    { signal, parse: guardAs<{ profile?: OwnRankedProfile } & Partial<OwnRankedProfile>>('OwnRankedProfile', isRankedMe) },
   );
   return (body.profile ?? body) as OwnRankedProfile;
 }
@@ -441,7 +442,10 @@ export function joinQueue(
 ): Promise<QueueTicket> {
   const body: Record<string, unknown> = {};
   if (options.region !== undefined) body.region = options.region;
-  return post<QueueTicket>('/games/ranked/queue', body, { signal });
+  return post<QueueTicket>('/games/ranked/queue', body, {
+    signal,
+    parse: guardAs<QueueTicket>('QueueTicket', isQueueTicket),
+  });
 }
 
 /**

@@ -148,6 +148,45 @@ const FULL_CARDS: Record<string, string> = {
   bnb_airdrop:   '/cards/spirit/revelation.webp?v=1',
   bnb_honeypot:  '/cards/spirit/blinding-dawn.webp?v=1',
   bnb_liquidity: '/cards/spirit/retain.webp?v=1',
+
+  // Wealth (internal key `robinhood`) — landed 2026-10-31.
+  node_robinhood:       '/cards/wealth/wealth-node.webp?v=1',
+  robinhood_hood:       '/cards/wealth/coin-sprout.webp?v=1',
+  robinhood_ozzy:       '/cards/wealth/vault-toad.webp?v=1',
+  robinhood_cashcat:    '/cards/wealth/golden-grub.webp?v=1',
+  robinhood_kitty:      '/cards/wealth/orchard-keeper.webp?v=1',
+  robinhood_tendies:    '/cards/wealth/harvest-sproto.webp?v=1',
+  robinhood_moon:       '/cards/wealth/treasure-golem.webp?v=1',
+  robinhood_ape:        '/cards/wealth/old-money.webp?v=1',
+  robinhood_dividend:   '/cards/wealth/treasury.webp?v=1',
+  robinhood_options:    '/cards/wealth/golden-spurs.webp?v=1',
+  robinhood_fractional: '/cards/wealth/ledger-of-plenty.webp?v=1',
+  robinhood_margin:     '/cards/wealth/fertile-grove.webp?v=1',
+  robinhood_buydip:     '/cards/wealth/bountiful-harvest.webp?v=1',
+  robinhood_gamma:      '/cards/wealth/stampede.webp?v=1',
+  robinhood_pfof:       '/cards/wealth/count-the-coins.webp?v=1',
+  robinhood_diamond:    '/cards/wealth/gold-plating.webp?v=1',
+  // Still on the faction sigil (no render yet): robinhood_yolo (Gilded Boar).
+
+  // Knowledge (internal key `base`) — landed 2026-10-31, complete.
+  node_base:      '/cards/knowledge/knowledge-node.webp?v=1',
+  base_degen:     '/cards/knowledge/ink-imp.webp?v=1',
+  base_toshi:     '/cards/knowledge/page-turner.webp?v=1',
+  base_brett:     '/cards/knowledge/scroll-runner.webp?v=1',
+  base_miggles:   '/cards/knowledge/apprentice-sproto.webp?v=1',
+  base_keycat:    '/cards/knowledge/rune-scribe.webp?v=1',
+  base_normie:    '/cards/knowledge/owl-familiar.webp?v=1',
+  base_doginme:   '/cards/knowledge/tower-sage.webp?v=1',
+  base_based:     '/cards/knowledge/the-archivist.webp?v=1',
+  base_moose:     '/cards/knowledge/oversized-moose.webp?v=1',
+  base_summer:    '/cards/knowledge/great-library.webp?v=1',
+  base_frames:    '/cards/knowledge/crystal-ball.webp?v=1',
+  base_wallet:    '/cards/knowledge/star-chart.webp?v=1',
+  base_onramp:    '/cards/knowledge/portal-circle.webp?v=1',
+  base_tip:       '/cards/knowledge/study-session.webp?v=1',
+  base_bridge:    '/cards/knowledge/banish.webp?v=1',
+  base_airdrop:   '/cards/knowledge/arcane-storm.webp?v=1',
+  base_staybased: '/cards/knowledge/spellblade.webp?v=1',
 };
 
 /**
@@ -380,6 +419,7 @@ reg(
   M('base_normie',  'base', 'Owl Familiar',      3, 4, 2, 'Knows what you are thinking. Disapproves.'),
   M('base_doginme', 'base', 'Tower Sage',        4, 4, 4, 'Read every book in the tower. Wrote half of them.'),
   M('base_based',   'base', 'The Archivist',     5, 5, 5, 'Remembers everything. Forgives nothing overdue.'),
+  M('base_moose',   'base', 'Oversized Moose with Socks', 4, 3, 4, "I'm just a 4d entity in a 3d moose dealing with 2d people."),
   // Machines
   A('base_summer', 'base', 'Great Library',  3, 'pump_all_+1+1',       'Everyone studies: your Memes get +1/+1.'),
   A('base_frames', 'base', 'Crystal Ball',   3, 'on_meme_etb_draw',    'When a Meme enters under you, draw a card (once per turn).'),
@@ -395,16 +435,33 @@ reg(
 
 // ── Starter decks ────────────────────────────────────────────────────────────
 
-/** 60-card mono-color starter deck: ~22 nodes + 3 of each Meme + 2 of each Machine/Move. */
+/**
+ * 60-card mono-color starter deck: 3 of each Meme, 2 of each Machine/Move/Aura,
+ * and enough Nodes to reach exactly 60.
+ *
+ * The node count is derived from the spell count (60 minus spells), so NO
+ * non-node card is ever dropped. The old build always laid down 22 nodes then
+ * `.slice(0, 60)`, which silently truncated the last two spells — the single
+ * Aura copies for every faction, plus an Arcane Storm for 9-meme Knowledge
+ * (engine-06). A floor of 18 nodes keeps the mana base sane even for the
+ * largest spell set.
+ */
 export function starterDeck(color: Color): string[] {
-  const nodes = Array(22).fill(`node_${color}`);
   const others = Object.values(CARDS)
     .filter(c => c.color === color && c.type !== 'node')
     .flatMap(c => Array(c.type === 'meme' ? 3 : 2).fill(c.id));
+  const nodeCount = Math.max(18, 60 - others.length);
+  const nodes = Array(nodeCount).fill(`node_${color}`);
   const deck = [...nodes, ...others];
-  // Pad/truncate to exactly 60
+  // Should already be ~60; trim only surplus NODES from the front if a very
+  // large spell set pushes us over, never a spell from the tail.
+  while (deck.length > 60) {
+    const i = deck.indexOf(`node_${color}`);
+    if (i === -1) break;
+    deck.splice(i, 1);
+  }
   while (deck.length < 60) deck.push(`node_${color}`);
-  return deck.slice(0, 60);
+  return deck;
 }
 
 export const STARTER_DECKS: Record<Color, string[]> = {

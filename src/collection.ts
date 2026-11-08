@@ -56,7 +56,7 @@ import {
   type DeckIssue, type DeckValidation,
 } from './cards';
 import {
-  collection as collectionApi, ApiError, getSession, isSignedIn, onSessionChange,
+  collection as collectionApi, ApiError, SessionExpiredError, getSession, isSignedIn, onSessionChange,
   type SyncResult,
 } from './api';
 import { errorText } from './error-text';
@@ -229,6 +229,13 @@ const PENDING_TTL_MS = 5 * 60_000;
 let confirmed: Collection = {};
 /** The server's `synced` bit: has a chain sync ever completed for this player? */
 let snapshotConfirmed = false;
+/**
+ * Where `confirmed` currently came from. The localStorage cache is editable in
+ * devtools, so a value hydrated from it must NOT drive an ownership decision
+ * (deck caps, "you do not own X"). `ownershipKnown()` stays false until a real
+ * server response lands, at which point this flips to `'server'` (client-api-21).
+ */
+let confirmedSource: CollectionSource = 'signed-out';
 /** Display metadata for the confirmed snapshot. Both null iff never synced. */
 let snapshotAt: string | null = null;
 let snapshotBlock: number | null = null;
@@ -282,11 +289,18 @@ function commit(next: CollectionState): void {
 /** Re-read the identity and rebuild from cache. Called on sign-in/sign-out. */
 function resetForIdentity(): void {
   pendingMint = null;
+  // Abandon any in-flight refresh issued for the PREVIOUS identity: its response
+  // must not land under the new one (engine-20). Bump the sequence so the stale
+  // request's `finally` cannot null a newer handle, and drop ours; the write is
+  // also guarded on the captured address in `refreshCollection`.
+  inFlight = null;
+  refreshSeq++;
   if (!safeIsSignedIn()) {
     confirmed = {};
     snapshotConfirmed = false;
     snapshotAt = null;
     snapshotBlock = null;
+    confirmedSource = 'signed-out';
     commit(buildState('signed-out', false, null));
     return;
   }
@@ -295,6 +309,8 @@ function resetForIdentity(): void {
   snapshotConfirmed = cached?.confirmed ?? false;
   snapshotAt = cached?.syncedAt ?? null;
   snapshotBlock = cached?.syncedBlock ?? null;
+  // Hydrated from the editable cache — display only, not an ownership input.
+  confirmedSource = 'cache';
   commit(buildState('cache', false, null));
 }
 
@@ -331,6 +347,7 @@ export function applyServerSnapshot(
   snapshotConfirmed = view.synced === true || view.syncedAt !== null || opts.confirmedBySync === true;
   snapshotAt = view.syncedAt;
   snapshotBlock = typeof view.syncedBlock === 'number' ? view.syncedBlock : null;
+  confirmedSource = 'server'; // authoritative now — ownership decisions may use it
   if (safeIsSignedIn()) {
     writeCache({
       cards: confirmed, syncedAt: snapshotAt, syncedBlock: snapshotBlock,
@@ -386,7 +403,10 @@ export function useCollection(): CollectionState {
  */
 export function ownershipKnown(): boolean {
   ensureHydrated();
-  return snapshotConfirmed;
+  // Only a confirmed SERVER snapshot is authoritative. A snapshot restored from
+  // the editable localStorage cache paints the UI but must not gate caps or
+  // raise "you do not own X" until the server has answered (client-api-21).
+  return snapshotConfirmed && confirmedSource === 'server';
 }
 
 /**
@@ -456,6 +476,9 @@ export function validateOwnedDeck(cards: string[]): DeckValidation {
 // ── Writes ──────────────────────────────────────────────────────────────────
 
 let inFlight: Promise<void> | null = null;
+/** Bumped whenever a refresh is superseded (new one, or identity change), so a
+ *  late request's `finally` cannot null out a newer request's handle. */
+let refreshSeq = 0;
 
 /**
  * `GET /wager/collection` — refresh the snapshot from the server.
@@ -470,18 +493,29 @@ export function refreshCollection(): Promise<void> {
   if (!safeIsSignedIn()) { resetForIdentity(); return Promise.resolve(); }
 
   commit(buildState(state.source, true, null));
+  // Capture the identity this request is FOR. If the player signs out / into a
+  // different wallet while it is in flight, the late response must be dropped
+  // rather than overwrite the new identity's snapshot and cache (engine-20).
+  const issuedFor = currentAddress();
+  const seq = ++refreshSeq;
   inFlight = (async () => {
     try {
       const view = await collectionApi.getMine();
+      if (currentAddress() !== issuedFor) return; // identity changed under us
       applyServerSnapshot(view);
     } catch (err) {
-      // A 401 has already cleared the session and fired `onSessionChange`;
-      // the identity reset will land on its own. Anything else: keep showing
-      // what we had. An unreachable API is not evidence of an empty wallet.
-      if (err instanceof ApiError && err.isAuthError) return;
+      if (currentAddress() !== issuedFor) return; // stale failure, ignore
+      // Only a hard session-expiry is handled by the identity reset that
+      // `onSessionChange` fires; short-circuit on that alone. A plain 401 that
+      // did NOT clear the session (a replay still rejected after a refresh) fires
+      // no session event, so we must clear `loading` ourselves or the spinner
+      // sticks until the next focus refresh (client-api-20).
+      if (err instanceof SessionExpiredError) return;
       commit(buildState(state.source === 'server' ? 'server' : 'cache', false, describe(err)));
     } finally {
-      inFlight = null;
+      // Only clear the shared handle if this is still the current refresh;
+      // resetForIdentity / a newer call may have superseded it.
+      if (refreshSeq === seq) inFlight = null;
     }
   })();
   return inFlight;
@@ -510,7 +544,9 @@ export async function syncCollection(): Promise<SyncResult | null> {
     applyServerSnapshot(result, { confirmedBySync: true });
     return result;
   } catch (err) {
-    if (err instanceof ApiError && err.isAuthError) return null;
+    // As in refreshCollection: let the identity reset handle a real expiry, but
+    // clear `loading` ourselves for any other 401 (client-api-20).
+    if (err instanceof SessionExpiredError) return null;
     commit(buildState(state.source, false, describe(err)));
     return null;
   }
@@ -619,6 +655,7 @@ function ensureWired(): void {
 export function __resetCollectionForTests(): void {
   confirmed = {};
   snapshotConfirmed = false;
+  confirmedSource = 'signed-out';
   snapshotAt = null;
   snapshotBlock = null;
   pendingMint = null;

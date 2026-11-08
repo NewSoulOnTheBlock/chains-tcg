@@ -8,12 +8,24 @@
 //
 // Configured via Vite env at build time (INTEGRATION.md §8):
 //
-//   .env.production   VITE_API_BASE=https://api.ocva.online
+//   .env.production   VITE_API_BASE=/gw   (TRACKED in git — see below)
 //   .env.development  VITE_API_BASE=http://localhost:8080
 //
-// The default is the local gateway, so a developer who has never created a
-// `.env` file talks to their own docker-compose stack rather than accidentally
-// writing to the production database.
+// Production does NOT point at `https://api.ocva.online` directly. It uses the
+// same-origin path `/gw`, which Vercel rewrites to the gateway (see the
+// `rewrites` block in `vercel.json`); keeping API calls same-origin avoids CORS
+// preflights and keeps the gateway origin out of the bundle. `.env.production`
+// is TRACKED, not git-ignored (`.gitignore` has `!.env.production`), so a fresh
+// clone builds with `/gw` already set.
+//
+// WebSockets are the exception: Vercel rewrites do not carry them, so the
+// socket needs an ABSOLUTE gateway URL — `VITE_SOCKET_URL`, falling back to
+// `API_BASE` when that is already absolute. See `SOCKET_URL` below.
+//
+// When no base is configured at all, this module throws at import rather than
+// silently defaulting to production — a staging deploy that forgets the env var
+// must fail loudly, not quietly write to the production database. Localhost is
+// the one origin allowed to default (to the local gateway) with no env var.
 
 /**
  * Read a `VITE_*` variable in a way that survives both Vite (`import.meta.env`)
@@ -50,24 +62,28 @@ function normaliseBase(raw: string): string {
  * `${API_BASE}${path}` where `path` always starts with `/`.
  */
 /**
- * Fallback when `VITE_API_BASE` is unset.
+ * Resolve the base when `VITE_API_BASE` is unset.
  *
- * `.env.production` is git-ignored, so a fresh clone — or a host like Vercel
- * that builds from git and injects env vars through its dashboard — can easily
- * build with no value at all. Defaulting to localhost in that case ships a
- * bundle that talks to nothing, and the failure only shows up in the browser.
- *
- * So: a build served from a real origin defaults to the real API, and only a
- * localhost origin defaults to the local gateway. An explicit `VITE_API_BASE`
- * always wins over both.
+ * A localhost origin (and a non-browser context such as the test runner, where
+ * there is no `location`) defaults to the local gateway. A build served from
+ * any OTHER real origin with no configured base is a misconfiguration: rather
+ * than silently default to production — which is how a staging deploy ends up
+ * writing to the production database — throw so the mistake surfaces at build/
+ * boot instead of in a user's browser. Set `VITE_API_BASE` (e.g. `/gw`).
  */
-function defaultBase(): string {
+function resolveBase(): string {
+  const explicit = readEnv('VITE_API_BASE');
+  if (explicit) return explicit;
   const host = (globalThis as { location?: { hostname?: string } }).location?.hostname;
   const isLocal = host === undefined || host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
-  return isLocal ? 'http://localhost:8080' : 'https://api.ocva.online';
+  if (isLocal) return 'http://localhost:8080';
+  throw new Error(
+    `VITE_API_BASE is not set and this is not a localhost origin (${host}). ` +
+      'Refusing to default to production — set VITE_API_BASE (production uses "/gw").',
+  );
 }
 
-export const API_BASE: string = normaliseBase(readEnv('VITE_API_BASE') ?? defaultBase());
+export const API_BASE: string = normaliseBase(resolveBase());
 
 /**
  * Read-only JSON-RPC endpoint (INTEGRATION.md §8.5). Point viem/ethers here

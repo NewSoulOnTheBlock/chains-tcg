@@ -226,7 +226,7 @@ suite('which wallets a profile may pay from', () => {
 
       // The session names the PRIMARY, because that is what /auth/verify puts in
       // the token. The money came from the secondary. Before this fix that was
-      // a 400 deposit_not_sent_by_depositor.
+      // a 400 deposit rejection (deposit_wrong_sender after server-39).
       const result = await submitDeposit(deps, authFor(player, PRIMARY), {
         escrowId: 'escrow-1',
         txHash: '0xpay1',
@@ -275,7 +275,7 @@ suite('which wallets a profile may pay from', () => {
           escrowId: 'escrow-1',
           txHash: '0xpay4',
         }),
-      ).rejects.toMatchObject({ details: { reason: 'deposit_not_sent_by_depositor' } });
+      ).rejects.toMatchObject({ details: { reason: 'deposit_wrong_sender' } });
 
       // And the reservation was rolled back, so an honest retry is still possible.
       expect(await listDeposits(getPool(), 'escrow-1')).toEqual([]);
@@ -289,7 +289,7 @@ suite('which wallets a profile may pay from', () => {
           escrowId: 'escrow-1',
           txHash: '0xpay5',
         }),
-      ).rejects.toMatchObject({ details: { reason: 'deposit_not_sent_by_depositor' } });
+      ).rejects.toMatchObject({ details: { reason: 'deposit_wrong_sender' } });
     });
 
     it('rejects a wallet that WAS linked and has since been unlinked', async () => {
@@ -302,7 +302,7 @@ suite('which wallets a profile may pay from', () => {
           escrowId: 'escrow-1',
           txHash: '0xpay6',
         }),
-      ).rejects.toMatchObject({ details: { reason: 'deposit_not_sent_by_depositor' } });
+      ).rejects.toMatchObject({ details: { reason: 'deposit_wrong_sender' } });
     });
 
     it('C-2 still holds: one transaction cannot fund the other seat', async () => {

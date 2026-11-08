@@ -47,8 +47,36 @@ cards.forEach((c, i) => {
   catalog.push({ index: i, id: c.id, name: c.name });
 });
 
+// contracts-10 / audit L-6: the on-chain card-index space is this catalogue's order. A
+// reorder/insert/deletion would silently remap every already-minted CardPack token to a
+// different card. Treat the committed index.json as a FROZEN manifest: existing indices may
+// never change id; new cards may only be APPENDED. Fail the build otherwise so the drift is
+// caught before it ships (set ALLOW_INDEX_REMAP=1 only for an intentional, un-minted reset).
+const indexPath = path.join(outDir, 'index.json');
+if (fs.existsSync(indexPath) && process.env.ALLOW_INDEX_REMAP !== '1') {
+  const prev = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+  const prevCards: Array<{ index: number; id: string }> = prev.cards || [];
+  if (prevCards.length > catalog.length) {
+    throw new Error(
+      `card catalogue shrank (${catalog.length} < committed ${prevCards.length}); ` +
+      `this would strand minted tokens. Refusing to regenerate the frozen manifest.`,
+    );
+  }
+  for (const p of prevCards) {
+    const now = catalog[p.index];
+    if (!now || now.id !== p.id) {
+      throw new Error(
+        `on-chain index ${p.index} changed card id '${p.id}' -> '${now ? now.id : 'MISSING'}'. ` +
+        `This remaps an already-minted token. Only append new cards; never reorder/delete. ` +
+        `(Set ALLOW_INDEX_REMAP=1 to override for an intentional, un-minted reset.)`,
+      );
+    }
+  }
+  console.log(`manifest check ok: ${prevCards.length} committed indices unchanged`);
+}
+
 fs.writeFileSync(
-  path.join(outDir, 'index.json'),
+  indexPath,
   JSON.stringify({ site: SITE, cardCount: cards.length, baseURI: `${SITE}/nft/`, cards: catalog }, null, 2),
 );
 console.log('cardCount', cards.length, '->', outDir);

@@ -233,8 +233,17 @@ class PrivyBoundary extends React.Component<
   static getDerivedStateFromError(): { failed: boolean } {
     return { failed: true };
   }
-  componentDidCatch(): void {
-    /* Wallet sign-in above is untouched; nothing to do. */
+  componentDidCatch(error: unknown, info: { componentStack?: string }): void {
+    // The subtree still falls back gracefully (wallet sign-in is untouched), but
+    // the crash that got us here — a bad app id, an SDK version mismatch, a hook
+    // error — must not vanish silently, or there is nothing to debug from
+    // (client-api-25). logPrivyFailure already records configuration problems;
+    // this is the catch-all for everything else.
+    try {
+      console.error('[privy] boundary caught', error, info?.componentStack);
+    } catch {
+      /* console may be unavailable */
+    }
   }
   render(): React.ReactNode {
     if (this.state.failed) {

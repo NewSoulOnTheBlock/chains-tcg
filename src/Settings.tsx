@@ -33,6 +33,8 @@ import { APP_AUTH_CHAIN, signMessageEvm } from './api/auth';
 import { connectRobinhoodChain, detectEvmWallet } from './wallet';
 import { refreshCollection } from './collection';
 import { errorText } from './error-text';
+import { PREFS_EVENT, applyMasterMute } from './components/mute';
+import { useFlash, useFlashFlag } from './components/useFlash';
 import {
   UNLINK_CONSEQUENCES, UNLINK_SHORT_WARNING, formatLinkedAt, linkedWalletErrorText,
   sameAddress, sortLinkedAddresses, unlinkBlockedReason, unlinkBlockedText, walletKindLabel,
@@ -68,8 +70,10 @@ export const PREF_KEYS = {
   installDismissed: 'mmtcg.installDismissedUntil',
 } as const;
 
-/** Fired whenever a preference changes so live components can re-read it. */
-export const PREFS_EVENT = 'ocva:prefs-changed';
+/** Fired whenever a preference changes so live components can re-read it.
+ *  Defined in ./components/mute (shared with the master-mute hook/util) and
+ *  re-exported here for the App.tsx importers that still reach for it. */
+export { PREFS_EVENT };
 
 // Flags are stored as '1' / '0' strings to match how the app already writes
 // them (BgMusic, the hub mute button, etc.), NOT as JSON.
@@ -458,7 +462,7 @@ export function SettingsPage({
   // Gameplay
   // Account
   const [prof, setProf] = useState<Profile | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, flashCopied] = useFlashFlag(1600);
   // Linked wallets
   const [addrs, setAddrs] = useState<LinkedAddress[] | null>(null);
   const [addrErr, setAddrErr] = useState('');
@@ -473,7 +477,9 @@ export function SettingsPage({
   const [addrReload, setAddrReload] = useState(0);
   // Data
   const [confirmClear, setConfirmClear] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  // Transient toast + copy flag via the shared useFlash hook: the timer lives in
+  // a ref, cleared on re-trigger and unmount, so no setState-after-unmount (frontend-16).
+  const [toast, flash] = useFlash<string | null>(2200, null);
 
   const canVibrate = hapticsSupported();
   const osReducedMotion = typeof window !== 'undefined'
@@ -514,11 +520,6 @@ export function SettingsPage({
     return () => { window.removeEventListener(PREFS_EVENT, sync); window.removeEventListener('storage', sync); };
   }, []);
 
-  const flash = useCallback((msg: string) => {
-    setToast(msg);
-    window.setTimeout(() => setToast((t) => (t === msg ? null : t)), 2200);
-  }, []);
-
   // ── Writers. Each one persists, then tells live listeners to re-read. ──
   const setFlagPref = useCallback((key: string, on: boolean) => {
     writeFlag(key, on);
@@ -527,12 +528,9 @@ export function SettingsPage({
 
   function toggleMasterMute(next: boolean) {
     setMasterMute(next);
-    setFlagPref(PREF_KEYS.masterMute, next);
-    // Match what the hub / rulebook mute buttons already do so the effect is
-    // immediate on whatever media is mounted right now.
-    try {
-      document.querySelectorAll('audio,video').forEach((a) => { (a as HTMLMediaElement).muted = next; });
-    } catch { /* noop */ }
+    // One shared implementation: persist, blanket-mute every <audio>/<video>
+    // mounted now, and dispatch PREFS_EVENT (frontend-10).
+    applyMasterMute(next);
   }
   function toggleMenuMusic(next: boolean) {
     setMenuMusic(next);
@@ -558,8 +556,7 @@ export function SettingsPage({
     if (!prof?.walletAddress) return;
     try {
       await navigator.clipboard.writeText(prof.walletAddress);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
+      flashCopied();
     } catch { flash('Could not copy — long-press the address instead.'); }
   }
 

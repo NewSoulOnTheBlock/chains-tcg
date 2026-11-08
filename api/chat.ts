@@ -9,12 +9,15 @@
 //
 // ─── ANNOUNCEMENTS ──────────────────────────────────────────────────────────
 // `kind: 'announce'` is accepted from either
-//   • a signed-in player whose wallet address is in CHAT_ADMINS, or
-//   • any caller presenting `x-chat-admin-key: <CHAT_ADMIN_KEY>` (for scripts).
+//   • a signed-in player whose wallet address is in CHAT_ADMINS or whose
+//     immutable profile id is in CHAT_ADMIN_IDS, or
+//   • any caller presenting `x-chat-admin-key: <CHAT_ADMIN_KEY>` (for scripts),
+//     compared in constant time and rate-limited per key.
 //
 // GET  /api/chat?after=<id>   → { messages, admin } newest-last; `after` = delta
 // POST /api/chat { body, kind? }
 
+import crypto from 'node:crypto';
 import pg from 'pg';
 
 const GATEWAY = process.env.CHAT_GATEWAY ?? 'https://api.ocva.online';
@@ -23,50 +26,137 @@ const PAGE = 60;
 /** One message per this many ms per author, and a per-minute ceiling. */
 const MIN_GAP_MS = 2_500;
 const PER_MINUTE = 12;
+/** A modest ceiling for the admin-key (script) path, per key per minute. */
+const KEY_PER_MINUTE = 30;
+/** Hard ceiling on how long an identity may be cached (server-26). */
+const WHO_CACHE_MAX_MS = 5 * 60_000;
 
 let pool: pg.Pool | null = null;
 function db(): pg.Pool {
   if (!pool) {
     const url = process.env.CHAT_DATABASE_URL;
     if (!url) throw new Error('CHAT_DATABASE_URL is not set');
-    pool = new pg.Pool({ connectionString: url, max: 2, ssl: { rejectUnauthorized: false } });
+    pool = new pg.Pool({ connectionString: url, max: 2, ssl: pgSsl() });
   }
   return pool;
+}
+
+// Verify the server's TLS certificate (server-24 / client-api-10). Neon serves a
+// publicly-trusted chain, so `rejectUnauthorized: true` works against the system
+// trust store with no extra config. If a deployment pins an explicit CA, set
+// PG_CA to the PEM bundle; or put `?sslmode=verify-full` in CHAT_DATABASE_URL and
+// pg will honour it. We NEVER fall back to rejectUnauthorized:false.
+function pgSsl(): pg.PoolConfig['ssl'] {
+  const ca = process.env.PG_CA;
+  return ca ? { rejectUnauthorized: true, ca } : { rejectUnauthorized: true };
 }
 
 const admins = (): Set<string> =>
   new Set((process.env.CHAT_ADMINS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 
-// Admins named by their profile display name, committed here so they don't need
-// an env var. Matched case-insensitively against the gateway's `displayName`,
-// which is server-resolved from the caller's token (see whoIs) — a client can't
-// post under someone else's name to borrow admin.
-const NAME_ADMINS = new Set<string>([
-  'anoversizedmoosewithsocks',
-]);
+// Admin is granted by IMMUTABLE profile id (server-23), not by display name.
+// Display names are user-editable via the profile service, so keying admin on a
+// name let anyone who claimed a freed name inherit announce rights. Set
+// CHAT_ADMIN_IDS to a comma-separated list of profile ids (or use CHAT_ADMINS by
+// wallet address).
+const adminIds = (): Set<string> =>
+  new Set((process.env.CHAT_ADMIN_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean));
+
+// MIGRATION NOTE (name -> id): the previous admin was named by display name
+// ('anoversizedmoosewithsocks'). To migrate, resolve that profile's id once and
+// put it in CHAT_ADMIN_IDS. Until then this set exists ONLY to emit a one-time
+// log pointing an operator at the id to add; it grants no privilege.
+const LEGACY_NAME_ADMINS = new Set<string>(['anoversizedmoosewithsocks']);
+const migrationLogged = new Set<string>();
 
 interface Who { id: string; name: string; avatarUrl: string | null; address: string }
 
 // Warm instances reuse this, so a chatty player costs one gateway call per
-// few minutes rather than one per message.
+// few minutes rather than one per message. Keyed on a SHA-256 of the bearer
+// token (never the raw token) and expired at min(5min, the JWT's own exp).
 const whoCache = new Map<string, { who: Who; exp: number }>();
+
+function tokenKey(auth: string): string {
+  return crypto.createHash('sha256').update(auth).digest('hex');
+}
+
+/** The `exp` claim (ms) of a JWT bearer token, or null if unreadable. */
+function jwtExpMs(auth: string): number | null {
+  const m = /^Bearer\s+(.+)$/.exec(auth);
+  if (!m) return null;
+  const parts = m[1].split('.');
+  if (parts.length < 2) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as { exp?: unknown };
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
 
 async function whoIs(auth: string | null): Promise<Who | null> {
   if (!auth?.startsWith('Bearer ')) return null;
-  const hit = whoCache.get(auth);
+  const k = tokenKey(auth);
+  const hit = whoCache.get(k);
   if (hit && hit.exp > Date.now()) return hit.who;
   const res = await fetch(`${GATEWAY}/api/profiles/me`, { headers: { Authorization: auth } });
   if (!res.ok) return null;
   const { profile } = (await res.json()) as { profile?: { id: string; displayName: string; avatarUrl: string | null; address: string } };
   if (!profile?.id) return null;
-  const who = { id: String(profile.id), name: profile.displayName, avatarUrl: profile.avatarUrl, address: profile.address };
-  if (whoCache.size > 2000) whoCache.clear();
-  whoCache.set(auth, { who, exp: Date.now() + 5 * 60_000 });
+  const who: Who = { id: String(profile.id), name: profile.displayName, avatarUrl: profile.avatarUrl, address: profile.address };
+  noteMigration(who);
+  // Cap the cache lifetime at the token's own expiry so a logged-out / expired
+  // token stops resolving as this profile (server-26). Never cache a token that
+  // is already expired.
+  const now = Date.now();
+  const exp = jwtExpMs(auth);
+  const until = exp === null ? now + WHO_CACHE_MAX_MS : Math.min(now + WHO_CACHE_MAX_MS, exp);
+  if (until > now) {
+    if (whoCache.size > 2000) whoCache.clear();
+    whoCache.set(k, { who, exp: until });
+  }
   return who;
 }
 
-const isAdmin = (who: Who | null) =>
-  !!who && (admins().has(who.address.toLowerCase()) || NAME_ADMINS.has((who.name ?? '').trim().toLowerCase()));
+function noteMigration(who: Who): void {
+  const name = (who.name ?? '').trim().toLowerCase();
+  if (!LEGACY_NAME_ADMINS.has(name)) return;
+  if (adminIds().has(who.id)) return;
+  if (migrationLogged.has(who.id)) return;
+  migrationLogged.add(who.id);
+  console.warn(
+    `[chat] admin migration: legacy name admin "${name}" resolves to profile id ${who.id}; ` +
+      'add it to CHAT_ADMIN_IDS to restore announce rights (name-based admin has been removed).',
+  );
+}
+
+const isAdmin = (who: Who | null): boolean =>
+  !!who && (admins().has(who.address.toLowerCase()) || adminIds().has(who.id));
+
+/** Constant-time string compare for the admin key (server-27). */
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
+// Per-key sliding-window rate limit for the admin-key path (server-27). Keyed on
+// a hash of the key so the raw key is not held in a map.
+const keyBeats = new Map<string, number[]>();
+function keyRateOk(keyStr: string): boolean {
+  const h = crypto.createHash('sha256').update(keyStr).digest('hex');
+  const now = Date.now();
+  const arr = (keyBeats.get(h) ?? []).filter((t) => now - t < 60_000);
+  if (arr.length >= KEY_PER_MINUTE) {
+    keyBeats.set(h, arr);
+    return false;
+  }
+  arr.push(now);
+  keyBeats.set(h, arr);
+  if (keyBeats.size > 1000) keyBeats.clear();
+  return true;
+}
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -98,10 +188,19 @@ export async function POST(req: Request): Promise<Response> {
   const kind = payload.kind === 'announce' ? 'announce' : 'chat';
 
   const key = process.env.CHAT_ADMIN_KEY;
-  const byKey = !!key && req.headers.get('x-chat-admin-key') === key;
+  const provided = req.headers.get('x-chat-admin-key');
+  const byKey = !!key && !!provided && safeEqual(provided, key);
+  // A presented-but-wrong admin key is never treated as a signed-in user.
+  if (!byKey && provided) return json({ error: 'unauthorized' }, 401);
+
   const who = byKey ? null : await whoIs(req.headers.get('authorization'));
   if (!byKey && !who) return json({ error: 'unauthorized' }, 401);
   if (kind === 'announce' && !byKey && !isAdmin(who)) return json({ error: 'forbidden' }, 403);
+
+  // Rate-limit both the human path (per author) and the script path (per key).
+  if (byKey) {
+    if (!keyRateOk(key as string)) return json({ error: 'slow_down' }, 429);
+  }
 
   const author = who?.name ?? 'EGREGORE';
   const authorId = who?.id ?? 'system';

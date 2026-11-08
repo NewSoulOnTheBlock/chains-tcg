@@ -4,7 +4,6 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Client } from 'boardgame.io/react';
 import { SocketIO } from 'boardgame.io/multiplayer';
-import { Plaza } from './Plaza';
 import { ChainsTCG } from './Game';
 import { ChainsBoard, MATCH_EXIT_EVENT } from './Board';
 import { CARDS, COLOR_META, COLORS, STARTER_DECKS, BUILDABLE_CARDS, validateDeck, DECK_SIZE, MAX_COPIES_NONBASIC, isBasicNode, type Color, type CardType, type CardDef, type DeckIssue, type DeckValidation } from './cards';
@@ -17,7 +16,7 @@ import {
 import {
   auth, decks as decksApi, lobby as lobbyApi, session as sessionApi,
   ApiError, SOCKET_URL,
-  type AuthChain, type LobbyEntry, type MatchMode, type OwnProfile, type SeatInfo,
+  type LobbyEntry, type MatchMode, type OwnProfile, type SeatInfo,
 } from './api';
 import { errorText, errorHeadline, errorIssues, isDeckBlocked, isHostDeckUnowned } from './error-text';
 // The competitive ladder is LIVE on `/games/ranked/*`. `ranked-client.ts` is a
@@ -34,7 +33,7 @@ import {
   type OwnRankedProfile, type QueueState, type RankedLeaderboard, type RankedMatchEntry,
   type RankedStanding, type SeasonInfo,
 } from './ranked-client';
-import { connectRobinhoodChain, detectEvmWallet, shortAddr, ROBINHOOD_CHAIN } from './wallet';
+import { shortAddr } from './wallet';
 // Blockscout's host, so the token link is never a hardcoded URL.
 // Card ownership is SERVER state now (`src/api/collection.ts`). `useCollection`
 // is a subscription to the cached snapshot; `ownershipIssues` mirrors the
@@ -65,6 +64,8 @@ import {
 } from './icons';
 import { CardHover, CardPreview } from './CardPreview';
 import { SoloClient } from './SoloClient';
+import { ErrorBoundary } from './screens/ErrorBoundary';
+import { useFlash, useAsyncEffect, useIsMobile } from './hooks';
 import { FirstRunTutorial, hasSeenTutorial, markTutorialSeen } from './Tutorial';
 import { usePresenceHeartbeat, useOnlineCount } from './presence';
 import { loadProgress as loadQuestProgress, currentSiteId as questCurrentSiteId } from './masterquest/progress';
@@ -72,14 +73,15 @@ import { SITES as QUEST_SITES, TOTAL_SITES as QUEST_TOTAL } from './masterquest/
 import type { Difficulty } from './bot';
 import type { SoloMode } from './SoloClient';
 import { saveDailyResult, todayKey, todayBest } from './dailyChallenge';
-import { BoostersPage } from './Boosters';
-import { MasterquestPage } from './masterquest/MasterquestPage';
 import ShinyText, { ShinyBrand, ShinyButtonLabel } from './ShinyText';
-// PixelTrail is lazy-loaded — it pulls in three + r3f + drei (~240KB
-// gzipped), which we don't want in the in-game bundle. Loaded on demand
-// only when the Landing screen mounts.
-const PixelTrail = React.lazy(() => import('./PixelTrail'));
-// Privy (email / social / passkey sign-in) is the same story, only heavier:
+// Heavy screens are lazy-loaded (React.lazy) so they land in their own async
+// chunks instead of the entry bundle (frontend-01 decomposition). Boosters
+// pulls in the EVM mint path and Masterquest is a whole campaign; both are
+// reached only from their view branches.
+const BoostersPage = React.lazy(() => import('./Boosters').then((m) => ({ default: m.BoostersPage })));
+const MasterquestPage = React.lazy(() => import('./masterquest/MasterquestPage').then((m) => ({ default: m.MasterquestPage })));
+const RulebookPage = React.lazy(() => import('./screens/Rulebook').then((m) => ({ default: m.RulebookPage })));
+// Privy (email / social / passkey sign-in) is a lazy seam:
 // `./privy/runtime` is the ONLY module that imports `@privy-io/react-auth`,
 // and it is only ever reached through this lazy seam (plus the dynamic
 // `import()` in `logout()`). `./privy/env` is the eager, SDK-free half — the
@@ -89,8 +91,6 @@ import { ArtBackdrop, WIZARD_BATTLE_BG, DRAGON_WIZARD_BG } from './WizardBattleB
 const PrivyLoginPanel = React.lazy(() =>
   import('./privy/runtime').then((m) => ({ default: m.PrivyLoginPanel })),
 );
-import SideRays from './SideRays';
-import Iridescence from './Iridescence';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 // There is no same-origin server any more. The API lives on its own origin
@@ -103,22 +103,11 @@ import Iridescence from './Iridescence';
 // lobby operation goes through `lobbyApi` (`src/api/lobby.ts`).
 const COLOR_ORDER: Color[] = ['bnb', 'sol', 'eth', 'robinhood', 'base'];
 
-// ── Responsive helper ──────────────────────────────────────────────────────
-function useIsMobile(breakpoint = 720) {
-  const [m, setM] = useState(() => typeof window !== 'undefined' && window.innerWidth <= breakpoint);
-  useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
-    const onChange = () => setM(mq.matches);
-    onChange();
-    if (mq.addEventListener) mq.addEventListener('change', onChange);
-    else mq.addListener(onChange);
-    return () => {
-      if (mq.removeEventListener) mq.removeEventListener('change', onChange);
-      else mq.removeListener(onChange);
-    };
-  }, [breakpoint]);
-  return m;
-}
+// The "Enter Plaza" button opens the Memetic Masters HQ on WorkAdventure in a
+// new tab. (The in-app <Plaza> canvas lobby was unreachable dead code and was
+// removed — frontend-06.)
+const WORKADVENTURE_HQ_URL = 'https://play.workadventu.re/@/asdasd-1775062076/asdasd/memetic-masters-hq';
+
 
 /**
  * `true` once the ownership snapshot has finished its FIRST read.
@@ -184,23 +173,6 @@ function seatFrom(info: SeatInfo, playerName: string): Seat {
     playerName,
   };
 }
-
-/**
- * The chain slug sent to `/auth/nonce`, i.e. the server's IDENTITY NAMESPACE.
- *
- * This is `robinhood` — Robinhood Chain, EIP-155 4663, the only network the
- * game runs on — and it is no longer hardcoded at the call site: `signIn()`
- * below derives the slug from the chain id the wallet reports AFTER the network
- * switch, and refuses to sign anything if that is not 4663. This constant is
- * the expected answer, checked against, not asserted.
- *
- * A profile is keyed on `(address, chain)`, so the slug is half the identity.
- * It used to be `ethereum` as a stand-in, which meant the message the user read
- * said "Chain ID: 1" while their wallet sat on 4663 and every account was filed
- * under a chain the app never touches. Backend migration 0009 moved those rows
- * to `robinhood`. Do not change this again without a matching migration.
- */
-const SIGN_IN_CHAIN: AuthChain = auth.APP_AUTH_CHAIN;
 
 // ── Login screen ────────────────────────────────────────────────────────────
 //
@@ -274,8 +246,11 @@ function Login({ onSignedIn }: {
   onSignedIn: (info?: { suggestWalletLink?: boolean }) => void;
 }) {
   const [err, setErr] = useState('');
-  const [stage, setStage] = useState<'idle' | 'connecting' | 'signing'>('idle');
-  const [remember, setRemember] = useState(false);
+  // Initialise from the persisted mode so the checkbox reflects the real saved
+  // preference on load. It used to default to `false` and a mount effect then
+  // flipped persistence back to 'session', silently undoing Remember-me on
+  // every page load (client-api-01).
+  const [remember, setRemember] = useState(() => sessionApi.getPersistence() === 'local');
   /** "How to play" — the first-run tutorial, readable before committing to sign-in. */
   const [guideOpen, setGuideOpen] = useState(false);
   // ── Privy (email / social / passkey) ─────────────────────────────────────
@@ -302,42 +277,12 @@ function Login({ onSignedIn }: {
   // localStorage. The default is sessionStorage — one tab, gone when it closes
   // — because the refresh token is the long-lived credential and leaving it in
   // localStorage is exactly the finding (M-4) this migration exists to fix.
-  useEffect(() => {
-    sessionApi.setPersistence(remember ? 'local' : 'session');
-  }, [remember]);
-
-  /**
-   * Connect the wallet on Robinhood Chain, then sign the server's challenge.
-   *
-   * `connectRobinhoodChain()` switches (or adds) the network and does not
-   * return until it has read `eth_chainId` back and confirmed 4663, so a user
-   * who declines the switch gets a clear error here instead of a signature over
-   * a message describing a network they are not on.
-   *
-   * The slug then comes FROM that chain id, not from a constant. It is the
-   * server's identity namespace — `core.profiles` is `UNIQUE (address, chain)`
-   * — as well as the `Chain ID:` line the user reads, and the two must agree.
-   * The `!== SIGN_IN_CHAIN` check is belt and braces: `connectRobinhoodChain()`
-   * already guarantees it, and if that ever regresses this refuses to sign
-   * rather than quietly minting a second identity for the same wallet.
-   */
-  async function signIn() {
-    setErr(''); setStage('connecting');
-    try {
-      const { address, chainId } = await connectRobinhoodChain();
-      const chain = auth.authChainForEvmChainId(chainId);
-      if (chain === null || chain !== SIGN_IN_CHAIN) {
-        throw new Error(
-          `Wrong network: your wallet is on chain ${chainId}. Switch to Robinhood Chain (${ROBINHOOD_CHAIN.chainId}) and try again.`,
-        );
-      }
-      setStage('signing');
-      await auth.signIn({ address, chain });
-      onSignedIn();
-    } catch (e) {
-      setErr(loginErrorText(e));
-    } finally { setStage('idle'); }
-  }
+  // Persistence is written only when the checkbox is TOGGLED (see below), never
+  // from a mount effect, so a saved 'local' preference survives a reload.
+  const setRememberPref = (next: boolean) => {
+    setRemember(next);
+    sessionApi.setPersistence(next ? 'local' : 'session');
+  };
 
   // ── Login-screen theme music ─────────────────────────────────────────────
   // Browsers block autoplay-with-sound until the user interacts. Strategy:
@@ -388,9 +333,6 @@ function Login({ onSignedIn }: {
   }, [muted]);
 
   const mobile = useIsMobile();
-  const evm = detectEvmWallet();
-  const busy = stage !== 'idle';
-  const label = stage === 'connecting' ? 'Connecting…' : 'Confirm in your wallet…';
 
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'auto', background: '#07060f', fontFamily: F.body, color: '#F8F8F8' }}>
@@ -473,7 +415,7 @@ function Login({ onSignedIn }: {
         )}
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12, color: '#9a94ad', cursor: 'pointer', padding: '6px 2px' }}>
-          <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} disabled={!!busy}
+          <input type="checkbox" checked={remember} onChange={e => setRememberPref(e.target.checked)} disabled={privyBusy}
             style={{ width: 16, height: 16, accentColor: '#8A2BE2' }} />
           Remember me on this device
         </label>
@@ -498,20 +440,6 @@ function Login({ onSignedIn }: {
       )}
     </div>
   );
-}
-
-/**
- * Sign-in failures deserve slightly warmer copy than the generic mapper: the
- * most common one by far is the user closing the wallet popup, and the raw
- * provider text for that ("User rejected the request.") reads like a fault.
- */
-function loginErrorText(e: unknown): string {
-  const code = (e as { code?: unknown } | null)?.code;
-  if (code === 4001) return 'Signature cancelled. Approve the message in your wallet to sign in.';
-  if (e instanceof ApiError && e.status === 401) {
-    return 'That signature was not accepted. Try again — the challenge may have expired.';
-  }
-  return errorText(e);
 }
 
 /**
@@ -655,1366 +583,6 @@ function BattleMusic() {
   return <BgMusic src="/battle-music.mp3" storageKey="battleMuted" showToggle={!mobile} />;
 }
 
-// ── Rules page (Interactive Rulebook) ──────────────────────────────────────
-const RULES_TOKENS = {
-  bg: '#050514',
-  panel: 'rgba(20,20,40,0.85)',
-  panelHi: 'rgba(28,22,58,0.92)',
-  border: 'rgba(212,175,55,0.32)',
-  borderSoft: 'rgba(255,255,255,0.08)',
-  gold: '#D4AF37',
-  goldGlow: 'rgba(212,175,55,0.55)',
-  purple: '#8A2BE2',
-  purpleSoft: 'rgba(138,43,226,0.55)',
-  blue: '#4A90E2',
-  red: '#D94B4B',
-  green: '#4ad58e',
-  text: '#ece1c7',
-  mute: '#9e9382',
-};
-const RULES_FONT = "'Inter', 'Geist', 'Satoshi', system-ui, -apple-system, sans-serif";
-const RULES_HEAD = '"Cinzel", "Times New Roman", serif';
-
-type RulesSectionId = 'goal' | 'setup' | 'cards' | 'gas' | 'turn' | 'advanced' | 'example' | 'cheatsheet';
-
-/**
- * Rules/rulebook copy stores directional arrows as the ASCII markers `->` and
- * `<-` so no pictograph ever lives in a string literal. This renders them as
- * the shared SVG arrows, keeping the on-screen wording identical.
- */
-function arrowize(text: string, keyPrefix = 'a'): React.ReactNode {
-  const parts = String(text).split(/(->|<-)/);
-  if (parts.length === 1) return text;
-  return parts.map((part, i) =>
-    part === '->' ? <ArrowRight key={`${keyPrefix}${i}`} size={13} style={{ margin: '0 4px' }} />
-      : part === '<-' ? <ArrowLeft key={`${keyPrefix}${i}`} size={13} style={{ margin: '0 4px' }} />
-      : <React.Fragment key={`${keyPrefix}${i}`}>{part}</React.Fragment>);
-}
-
-const RULES_NAV: { id: RulesSectionId; label: string; icon: IconKey }[] = [
-  { id: 'goal',       label: 'Goal',           icon: 'trophy' },
-  { id: 'setup',      label: 'Setup',          icon: 'swords' },
-  { id: 'cards',      label: 'Card Types',     icon: 'cards' },
-  { id: 'gas',        label: 'Gas System',     icon: 'fuel' },
-  { id: 'turn',       label: 'Turn Order',     icon: 'refresh' },
-  { id: 'advanced',   label: 'Advanced',       icon: 'book' },
-  { id: 'example',    label: 'Example Turn',   icon: 'gamepad' },
-  { id: 'cheatsheet', label: 'UI Cheat-sheet', icon: 'keyboard' },
-];
-
-const RULES_SEARCH_INDEX: { id: RulesSectionId; text: string }[] = [
-  { id: 'goal',       text: 'goal life 20 reduce opponent zero win last player standing' },
-  { id: 'setup',      text: 'setup faction sproto spirit rebel jester wealth knowledge white red black green blue 60 card deck draw 7 hand 20 life mulligan first player no draw' },
-  { id: 'cards',      text: 'card types node meme machine move land creature artifact enchantment spell instant power toughness permanent one-shot' },
-  { id: 'gas',        text: 'gas mana cost tap node color pool drain end of turn empty mixed' },
-  { id: 'turn',       text: 'turn phase untap draw main combat attack block damage end discard summoning sick haste' },
-  { id: 'advanced',   text: 'advanced summoning sickness haste blockers simultaneous damage graveyard discard max hand 7 discard down' },
-  { id: 'example',    text: 'example turn 1 play red rebel node tap gain gas cast spark gremlin end' },
-  { id: 'cheatsheet', text: 'ui click node tap card hand play meme attack blocker end turn button' },
-];
-
-function RulesPage({ onBack }: { onBack: () => void }) {
-  const [openSection, setOpenSection] = useState<RulesSectionId>('goal');
-  const [search, setSearch] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const searchRef = useRef<HTMLInputElement | null>(null);
-  const sectionRefs = useRef<Record<RulesSectionId, HTMLDivElement | null>>({} as any);
-
-  // Ctrl/Cmd+K to focus search
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setSearchOpen(true);
-        setTimeout(() => searchRef.current?.focus(), 50);
-      }
-      if (e.key === 'Escape') setSearchOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  const filteredNav = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return RULES_NAV;
-    const matches = new Set(RULES_SEARCH_INDEX.filter(s => s.text.includes(q)).map(s => s.id));
-    return RULES_NAV.filter(n => matches.has(n.id) || n.label.toLowerCase().includes(q));
-  }, [search]);
-
-  const goSection = (id: RulesSectionId) => {
-    setOpenSection(id);
-    setTimeout(() => {
-      const el = sectionRefs.current[id];
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 50);
-  };
-
-  const highlight = (text: string) => {
-    const q = search.trim();
-    if (!q) return arrowize(text);
-    const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
-    return text.split(re).map((part, i) =>
-      part.toLowerCase() === q.toLowerCase()
-        ? <mark key={i} style={{ background: 'rgba(212,175,55,0.45)', color: '#fff', padding: '0 2px', borderRadius: 2 }}>{part}</mark>
-        : <React.Fragment key={i}>{arrowize(part, `h${i}`)}</React.Fragment>
-    );
-  };
-
-  return (
-    <div style={{
-      fontFamily: RULES_FONT,
-      background: `radial-gradient(ellipse at top, #1a1240 0%, #0a0a1e 50%, ${RULES_TOKENS.bg} 100%)`,
-      minHeight: '100vh', color: RULES_TOKENS.text, position: 'relative', overflow: 'hidden',
-    }}>
-      {/* Keyframes */}
-      <style>{`
-        @keyframes rulesGlow {
-          0%, 100% { text-shadow: 0 0 22px rgba(212,175,55,0.45), 0 0 4px rgba(212,175,55,0.6); }
-          50%      { text-shadow: 0 0 38px rgba(212,175,55,0.85), 0 0 8px rgba(212,175,55,0.9); }
-        }
-        @keyframes rulesFloat {
-          0%   { transform: translateY(0) translateX(0); opacity: 0; }
-          15%  { opacity: 0.6; }
-          85%  { opacity: 0.5; }
-          100% { transform: translateY(-120vh) translateX(20px); opacity: 0; }
-        }
-        @keyframes rulesFade {
-          from { opacity: 0; transform: translateY(8px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes rulesPulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(212,175,55,0.45); }
-          50%      { box-shadow: 0 0 0 8px rgba(212,175,55,0); }
-        }
-        @keyframes rulesEnergy {
-          0%   { transform: translateY(-100%); opacity: 0; }
-          30%  { opacity: 1; }
-          100% { transform: translateY(100%); opacity: 0; }
-        }
-        @keyframes rulesArrow {
-          0%, 100% { opacity: 0.4; transform: translateY(0); }
-          50%      { opacity: 1;   transform: translateY(3px); }
-        }
-        @keyframes rulesFog {
-          0%   { transform: translateX(-10%); }
-          100% { transform: translateX(10%); }
-        }
-      `}</style>
-
-      {/* Floating embers */}
-      <div aria-hidden style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0 }}>
-        {Array.from({ length: 18 }).map((_, i) => {
-          const left = (i * 53) % 100;
-          const dur = 14 + (i % 7) * 2;
-          const delay = (i % 9) * 1.4;
-          const size = 2 + (i % 4);
-          const tint = i % 3 === 0 ? RULES_TOKENS.purple : RULES_TOKENS.gold;
-          return (
-            <span key={i} style={{
-              position: 'absolute', bottom: -10, left: `${left}%`,
-              width: size, height: size, borderRadius: '50%',
-              background: tint,
-              boxShadow: `0 0 ${size * 3}px ${tint}`,
-              animation: `rulesFloat ${dur}s linear ${delay}s infinite`,
-            }} />
-          );
-        })}
-      </div>
-
-      {/* Drifting fog */}
-      <div aria-hidden style={{
-        position: 'fixed', inset: '-10%',
-        background: 'radial-gradient(circle at 20% 30%, rgba(138,43,226,0.10), transparent 40%), radial-gradient(circle at 80% 70%, rgba(212,175,55,0.08), transparent 45%)',
-        pointerEvents: 'none', zIndex: 0,
-        animation: 'rulesFog 24s ease-in-out infinite alternate',
-      }} />
-
-      {/* Sticky header */}
-      <div style={{
-        padding: '14px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        borderBottom: `1px solid ${RULES_TOKENS.border}`, position: 'sticky', top: 0,
-        background: 'linear-gradient(180deg, rgba(5,5,20,0.95) 0%, rgba(10,10,30,0.85) 100%)',
-        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-        zIndex: 10,
-      }}>
-        <button onClick={onBack} style={ghostBtn}><ArrowLeft size={14} /> Back</button>
-        <div style={{
-          fontFamily: RULES_HEAD, fontWeight: 800, letterSpacing: 4, fontSize: 18,
-          color: RULES_TOKENS.gold,
-          animation: 'rulesGlow 3.6s ease-in-out infinite',
-        }}>RULEBOOK</div>
-        <button
-          onClick={() => { setSearchOpen(v => !v); setTimeout(() => searchRef.current?.focus(), 50); }}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '8px 14px', background: 'rgba(212,175,55,0.10)',
-            border: `1px solid ${RULES_TOKENS.border}`, borderRadius: 8,
-            color: RULES_TOKENS.gold, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-          }}
-          title="Search rules (Ctrl+K)"
-        ><Search size={15} /> <span style={{ opacity: 0.85 }}>Search</span><kbd style={{
-          marginLeft: 4, padding: '2px 6px', fontSize: 10,
-          background: 'rgba(0,0,0,0.4)', borderRadius: 4, color: RULES_TOKENS.mute,
-        }}>Ctrl K</kbd></button>
-      </div>
-
-      {/* Search bar */}
-      {searchOpen && (
-        <div style={{
-          position: 'sticky', top: 58, zIndex: 9,
-          padding: '10px 22px',
-          background: 'rgba(5,5,20,0.85)', backdropFilter: 'blur(8px)',
-          borderBottom: `1px solid ${RULES_TOKENS.borderSoft}`,
-          animation: 'rulesFade 200ms ease',
-        }}>
-          <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', gap: 10, alignItems: 'center' }}>
-            <input
-              ref={searchRef}
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search rules… (e.g. combat, summoning sickness, gas)"
-              style={{
-                flex: 1, padding: '10px 14px', fontSize: 14,
-                background: RULES_TOKENS.panel, color: '#fff',
-                border: `1px solid ${RULES_TOKENS.border}`, borderRadius: 8,
-                outline: 'none', fontFamily: RULES_FONT,
-              }}
-            />
-            <button onClick={() => { setSearch(''); setSearchOpen(false); }} style={ghostBtn}>Close</button>
-          </div>
-        </div>
-      )}
-
-      {/* Intro video */}
-      <div style={{
-        position: 'relative', zIndex: 1,
-        maxWidth: 1100, margin: '20px auto 0', padding: '0 22px',
-      }}>
-        <div style={{
-          borderRadius: 14, overflow: 'hidden',
-          border: `1px solid ${RULES_TOKENS.border}`,
-          boxShadow: `0 0 40px rgba(212,175,55,0.18), 0 8px 28px rgba(0,0,0,0.5)`,
-          background: '#000',
-        }}>
-          <video
-            src="/rules-intro.mp4"
-            controls
-            playsInline
-            preload="metadata"
-            style={{ display: 'block', width: '100%', height: 'auto' }}
-          />
-        </div>
-      </div>
-
-      {/* Hero */}
-      <div style={{
-        position: 'relative', zIndex: 1,
-        maxWidth: 1100, margin: '0 auto', padding: '50px 22px 14px', textAlign: 'center',
-      }}>
-        <div style={{
-          fontFamily: RULES_HEAD, fontWeight: 900, fontSize: 'clamp(34px, 5.5vw, 56px)',
-          letterSpacing: 6, color: RULES_TOKENS.gold,
-          animation: 'rulesGlow 3.6s ease-in-out infinite',
-          background: 'linear-gradient(180deg, #ffe28a 0%, #d4af37 55%, #8a6a16 100%)',
-          WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-          filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.6))',
-        }}>EGREGORE</div>
-        <div style={{
-          fontFamily: RULES_HEAD, fontWeight: 600, fontSize: 20,
-          letterSpacing: 12, color: RULES_TOKENS.purple, marginTop: 4,
-          textShadow: '0 0 18px rgba(138,43,226,0.55)',
-        }}>RULEBOOK</div>
-        <div style={{
-          height: 2, width: 220, margin: '14px auto 0',
-          background: `linear-gradient(90deg, transparent, ${RULES_TOKENS.gold}, transparent)`,
-        }} />
-      </div>
-
-      {/* Quick start panel */}
-      <div style={{ position: 'relative', zIndex: 1, maxWidth: 1100, margin: '24px auto 0', padding: '0 22px' }}>
-        <div style={{
-          background: 'linear-gradient(135deg, rgba(138,43,226,0.20) 0%, rgba(212,175,55,0.12) 100%)',
-          border: `1px solid ${RULES_TOKENS.border}`, borderRadius: 14,
-          padding: '22px 26px', backdropFilter: 'blur(10px)',
-          boxShadow: '0 14px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)',
-        }}>
-          <div style={{
-            fontFamily: RULES_HEAD, fontSize: 18, letterSpacing: 4, fontWeight: 700,
-            color: RULES_TOKENS.gold, textAlign: 'center', marginBottom: 14,
-          }}><span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}><Bolt size={18} /> LEARN IN 30 SECONDS</span></div>
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12,
-          }}>
-            {[
-              { n: 1, t: 'Play Nodes',           c: RULES_TOKENS.gold },
-              { n: 2, t: 'Nodes make Gas',       c: RULES_TOKENS.purple },
-              { n: 3, t: 'Cast Memes',           c: RULES_TOKENS.blue },
-              { n: 4, t: 'Attack Opponent',      c: RULES_TOKENS.red },
-              { n: 5, t: 'Reduce Life 20 -> 0',  c: RULES_TOKENS.green },
-            ].map(s => (
-              <div key={s.n} style={{
-                background: 'rgba(0,0,0,0.35)', borderRadius: 10,
-                border: `1px solid ${s.c}55`, padding: '14px 12px', textAlign: 'center',
-                animation: 'rulesFade 360ms ease both',
-              }}>
-                <div style={{
-                  width: 34, height: 34, borderRadius: '50%', margin: '0 auto 8px',
-                  background: `radial-gradient(circle, ${s.c}, ${s.c}66)`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontWeight: 900, color: '#0a0a14', fontSize: 16,
-                  boxShadow: `0 0 18px ${s.c}77`,
-                }}>{s.n}</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{arrowize(s.t, `qs${s.n}`)}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{
-            marginTop: 14, textAlign: 'center', fontSize: 13, color: RULES_TOKENS.mute, fontStyle: 'italic',
-          }}>Last player standing wins.</div>
-        </div>
-      </div>
-
-      {/* Body: sticky nav + sections */}
-      <div style={{
-        position: 'relative', zIndex: 1,
-        maxWidth: 1100, margin: '24px auto 0', padding: '0 22px 80px',
-        display: 'grid', gridTemplateColumns: 'minmax(0, 220px) minmax(0, 1fr)', gap: 22,
-      }}>
-        {/* Sticky nav */}
-        <nav style={{
-          position: 'sticky', top: searchOpen ? 130 : 78, alignSelf: 'start',
-          background: RULES_TOKENS.panel, backdropFilter: 'blur(8px)',
-          border: `1px solid ${RULES_TOKENS.borderSoft}`, borderRadius: 12,
-          padding: 10, maxHeight: 'calc(100vh - 120px)', overflowY: 'auto',
-        }}>
-          <div style={{
-            fontFamily: RULES_HEAD, fontSize: 11, letterSpacing: 3, fontWeight: 700,
-            color: RULES_TOKENS.gold, padding: '6px 8px 10px', borderBottom: `1px solid ${RULES_TOKENS.borderSoft}`,
-            marginBottom: 6,
-          }}>CHAPTERS</div>
-          {filteredNav.length === 0 && (
-            <div style={{ padding: 10, fontSize: 12, color: RULES_TOKENS.mute }}>No matches.</div>
-          )}
-          {filteredNav.map(n => {
-            const active = openSection === n.id;
-            return (
-              <button key={n.id} onClick={() => goSection(n.id)} style={{
-                display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                padding: '9px 10px', marginBottom: 2,
-                background: active ? 'linear-gradient(90deg, rgba(212,175,55,0.18), transparent)' : 'transparent',
-                color: active ? RULES_TOKENS.gold : RULES_TOKENS.text,
-                border: 'none', borderLeft: `3px solid ${active ? RULES_TOKENS.gold : 'transparent'}`,
-                borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: active ? 700 : 500,
-                fontFamily: RULES_FONT, textAlign: 'left', transition: 'all 200ms ease',
-              }}>
-                <Icon name={n.icon} size={16} />
-                <span>{n.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* Sections */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {RULES_NAV.map(n => {
-            const open = openSection === n.id;
-            const visible = !search.trim() || filteredNav.some(f => f.id === n.id);
-            if (!visible) return null;
-            return (
-              <RuleSection
-                key={n.id}
-                _ref={(el) => { sectionRefs.current[n.id] = el; }}
-                id={n.id} icon={n.icon} title={n.label}
-                open={open}
-                onToggle={() => setOpenSection(open ? n.id : n.id)}
-                onHeaderClick={() => setOpenSection(prev => prev === n.id ? n.id : n.id)}
-                summary={SECTION_SUMMARY[n.id]}
-                onClickHeader={() => setOpenSection(open ? ('goal' as RulesSectionId) : n.id)}
-              >
-                {renderSectionBody(n.id, highlight)}
-              </RuleSection>
-            );
-          })}
-
-          <div style={{
-            marginTop: 12, textAlign: 'center', fontSize: 13, color: RULES_TOKENS.mute, fontStyle: 'italic',
-          }}>
-            That's the whole game. Have fun.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const SECTION_SUMMARY: Record<RulesSectionId, string> = {
-  goal:       'Reduce your opponent\'s life from 20 -> 0. Last player standing wins.',
-  setup:      '5 Sproto factions. 60-card deck. Start at 20 life with 7 cards.',
-  cards:      'Nodes, Memes, Machines, Moves — your full toolkit.',
-  gas:        'Tap Nodes to fuel your spells. Gas drains every turn.',
-  turn:       'Untap -> Draw -> Main -> Combat -> End.',
-  advanced:   'Summoning sickness, blockers, simultaneous damage, hand size.',
-  example:    'Walk through Turn 1 step-by-step.',
-  cheatsheet: 'Quick clicks for the in-match UI.',
-};
-
-function RuleSection({
-  id, icon, title, summary, open, onClickHeader, children, _ref,
-}: {
-  id: RulesSectionId; icon: IconKey; title: string; summary: string;
-  open: boolean; onClickHeader: () => void; children: React.ReactNode;
-  _ref?: (el: HTMLDivElement | null) => void;
-  // unused props kept for API stability
-  onToggle?: () => void; onHeaderClick?: () => void;
-}) {
-  return (
-    <div
-      ref={_ref}
-      id={`rule-${id}`}
-      className="ova-panel-orn"
-      style={{
-        background: open ? RULES_TOKENS.panelHi : RULES_TOKENS.panel,
-        border: `1px solid ${open ? RULES_TOKENS.border : RULES_TOKENS.borderSoft}`,
-        borderRadius: 14, overflow: 'hidden',
-        boxShadow: open
-          ? `${EDGE.topHighlight}, ${DEPTH.panelHi}, 0 0 0 1px ${RULES_TOKENS.goldGlow}44`
-          : `${EDGE.topHighlight}, ${DEPTH.panel}`,
-        transition: 'background 250ms ease, border-color 250ms ease, box-shadow 250ms ease',
-      }}>
-      <button onClick={onClickHeader} style={{
-        width: '100%', display: 'flex', alignItems: 'center', gap: 14,
-        padding: '16px 18px', background: 'transparent', border: 'none',
-        cursor: 'pointer', textAlign: 'left', fontFamily: RULES_FONT,
-      }}>
-        <span style={{
-          width: 42, height: 42, borderRadius: 11, flexShrink: 0,
-          background: `linear-gradient(135deg, rgba(212,175,55,0.20), rgba(138,43,226,0.20))`,
-          border: `1px solid ${RULES_TOKENS.border}`,
-          boxShadow: EDGE.topHighlight,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: RULES_TOKENS.gold,
-        }}><Icon name={icon} size={21} /></span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontFamily: RULES_HEAD, fontWeight: 700, fontSize: 18,
-            letterSpacing: 2, color: RULES_TOKENS.gold,
-          }}>{title.toUpperCase()}</div>
-          <div style={{ fontSize: 12, color: RULES_TOKENS.mute, marginTop: 2 }}>{arrowize(summary, `s-${id}`)}</div>
-        </div>
-        <span style={{
-          color: RULES_TOKENS.gold, display: 'inline-flex', transition: 'transform 250ms ease',
-          transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
-        }}><ChevronDown size={16} /></span>
-      </button>
-      {open && (
-        <div style={{
-          padding: '4px 22px 22px', animation: 'rulesFade 280ms ease both',
-          color: RULES_TOKENS.text, fontSize: 14.5, lineHeight: 1.65,
-        }}>{children}</div>
-      )}
-    </div>
-  );
-}
-
-function renderSectionBody(id: RulesSectionId, highlight: (s: string) => React.ReactNode) {
-  switch (id) {
-    case 'goal':
-      return (
-        <div>
-          <p>{highlight('Reduce your opponent\'s life from 20 to 0. Last player standing wins.')}</p>
-          <div style={{
-            marginTop: 14, display: 'flex', justifyContent: 'center', gap: 18, flexWrap: 'wrap',
-          }}>
-            <LifeOrb label="Start" value={20} color={RULES_TOKENS.green} />
-            <div style={{
-              alignSelf: 'center', color: RULES_TOKENS.gold, display: 'flex',
-              animation: 'rulesArrow 1.6s ease-in-out infinite',
-            }}><ArrowRight size={24} /></div>
-            <LifeOrb label="Win" value={0} color={RULES_TOKENS.red} />
-          </div>
-        </div>
-      );
-    case 'setup':
-      return (
-        <div>
-          <p>{highlight('Each player picks one of 5 Sproto factions, shuffles their 60-card deck, draws 7 cards, and starts at 20 life.')}</p>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '14px 0' }}>
-            {COLORS.map(k => ({ n: COLOR_META[k].name, c: COLOR_META[k].hex })).map(x => (
-              <div key={x.n} style={{
-                padding: '8px 14px', borderRadius: 999,
-                background: `${x.c}22`, color: x.c, border: `1px solid ${x.c}66`,
-                fontWeight: 700, fontSize: 13,
-              }}>{x.n}</div>
-            ))}
-          </div>
-          <ul style={{ marginLeft: 18 }}>
-            <li>{highlight('60-card deck in your faction color.')}</li>
-            <li>{highlight('Draw 7 cards. Start at 20 life.')}</li>
-            <li>{highlight('Max hand size 7 — discard down at end of turn.')}</li>
-            <li>{highlight('The first player skips their turn-1 draw.')}</li>
-          </ul>
-        </div>
-      );
-    case 'cards':
-      return <CardTypesGrid highlight={highlight} />;
-    case 'gas':
-      return (
-        <div>
-          <p>{highlight('Nodes generate Gas. Cards cost Gas. Gas drains at end of your turn — spend it or lose it.')}</p>
-          <GasFlowViz />
-          <ul style={{ marginLeft: 18, marginTop: 10 }}>
-            <li>{highlight('Tap a Node -> +1 Gas of its color.')}</li>
-            <li>{highlight('A cost can be one color or mixed.')}</li>
-            <li>{highlight('Unspent Gas evaporates when your turn ends.')}</li>
-          </ul>
-        </div>
-      );
-    case 'turn':
-      return <TurnTimeline highlight={highlight} />;
-    case 'advanced':
-      return (
-        <div>
-          <ul style={{ marginLeft: 18 }}>
-            <li><b style={{ color: RULES_TOKENS.gold }}>Summoning sickness</b> — {highlight('Memes can\'t attack the turn they enter (unless they have haste).')}</li>
-            <li><b style={{ color: RULES_TOKENS.gold }}>Blocking</b> — {highlight('Defender chooses blockers from untapped Memes. Unblocked attackers hit life directly.')}</li>
-            <li><b style={{ color: RULES_TOKENS.gold }}>Simultaneous damage</b> — {highlight('Attacker and blocker deal Power to each other. Damage ≥ toughness destroys it.')}</li>
-            <li><b style={{ color: RULES_TOKENS.gold }}>Graveyard</b> — {highlight('Destroyed Memes, used Moves go here. Some cards interact with the graveyard.')}</li>
-            <li><b style={{ color: RULES_TOKENS.gold }}>Max hand 7</b> — {highlight('Discard down at end of turn.')}</li>
-          </ul>
-        </div>
-      );
-    case 'example':
-      return <ExampleTurn highlight={highlight} />;
-    case 'cheatsheet':
-      return (
-        <div>
-          <ul style={{ marginLeft: 18 }}>
-            <li>{highlight('Click an untapped Node -> tap for Gas.')}</li>
-            <li>{highlight('Click a card in hand -> play it (Moves then ask for a target).')}</li>
-            <li>{highlight('Click your own untapped Meme -> mark attacker. Press "Attack with N".')}</li>
-            <li>{highlight('During declare blockers -> click your Meme, then click the attacker to block.')}</li>
-            <li>{highlight('Press End Turn to pass.')}</li>
-          </ul>
-        </div>
-      );
-  }
-}
-
-function LifeOrb({ label, value, color }: { label: string; value: number; color: string }) {
-  return (
-    <div style={{ textAlign: 'center' }}>
-      <div style={{
-        width: 92, height: 92, borderRadius: '50%',
-        background: `radial-gradient(circle at 35% 30%, ${color}, ${color}33 65%, transparent 80%)`,
-        border: `2px solid ${color}aa`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: RULES_HEAD, fontSize: 36, fontWeight: 900, color: '#fff',
-        textShadow: '0 2px 8px rgba(0,0,0,0.8)',
-        boxShadow: `0 0 28px ${color}66, inset 0 0 18px rgba(0,0,0,0.4)`,
-      }}>{value}</div>
-      <div style={{ fontSize: 12, color: RULES_TOKENS.mute, marginTop: 6, letterSpacing: 2 }}>{label.toUpperCase()}</div>
-    </div>
-  );
-}
-
-function CardTypesGrid({ highlight }: { highlight: (s: string) => React.ReactNode }) {
-  const types = [
-    { name: 'NODE',    icon: 'chain' as IconKey, color: RULES_TOKENS.gold,   short: 'Produces Gas',        details: 'Your "land". Free to play, but only 1 per turn. Tap on a later turn to add 1 Gas of its color to your pool.' },
-    { name: 'MEME',    icon: 'frog' as IconKey, color: RULES_TOKENS.purple, short: 'Creature Card',       details: 'Your fighters. Each has Power / Toughness. Attack to deal damage to the opponent. Summoning sick the turn they enter.' },
-    { name: 'MACHINE', icon: 'settings' as IconKey, color: RULES_TOKENS.blue,   short: 'Permanent Effect',    details: 'Artifact / enchantment. Stays in play with an ongoing effect until destroyed.' },
-    { name: 'AURA',    icon: 'orb' as IconKey, color: RULES_TOKENS.purple, short: 'Enchant a Meme',      details: 'A spell that attaches to a single Meme. Buffs its stats or grants a keyword (haste, lifelink, etc). If the enchanted Meme dies or is bounced, the Aura is destroyed too.' },
-    { name: 'MOVE',    icon: 'bolt' as IconKey, color: RULES_TOKENS.red,    short: 'Instant Action',      details: 'A one-shot spell. Resolves immediately, then goes to the graveyard.' },
-  ];
-  const [expanded, setExpanded] = useState<string | null>(null);
-  return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginTop: 10,
-    }}>
-      {types.map(t => {
-        const isOpen = expanded === t.name;
-        return (
-          <button key={t.name} onClick={() => setExpanded(isOpen ? null : t.name)} style={{
-            background: `linear-gradient(160deg, ${t.color}22 0%, rgba(0,0,0,0.55) 70%)`,
-            border: `1px solid ${t.color}66`, borderRadius: 12,
-            padding: '18px 16px', cursor: 'pointer', color: RULES_TOKENS.text,
-            textAlign: 'left', fontFamily: RULES_FONT,
-            transition: 'transform 220ms ease, box-shadow 220ms ease',
-            boxShadow: isOpen ? `0 0 28px ${t.color}66` : '0 4px 14px rgba(0,0,0,0.4)',
-            transform: isOpen ? 'translateY(-3px) scale(1.02)' : 'none',
-          }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-3px) scale(1.02)'; }}
-          onMouseLeave={(e) => { if (!isOpen) (e.currentTarget as HTMLButtonElement).style.transform = 'none'; }}
-          >
-            <div style={{
-              lineHeight: 1, marginBottom: 8, color: t.color, display: 'flex',
-              filter: `drop-shadow(0 0 10px ${t.color})`,
-            }}><Icon name={t.icon} size={38} /></div>
-            <div style={{
-              fontFamily: RULES_HEAD, fontWeight: 800, letterSpacing: 4,
-              color: t.color, fontSize: 16, marginBottom: 4,
-            }}>{t.name}</div>
-            <div style={{ fontSize: 12, color: RULES_TOKENS.mute, marginBottom: 6 }}>{t.short}</div>
-            {isOpen && (
-              <div style={{
-                marginTop: 8, paddingTop: 10, fontSize: 13,
-                borderTop: `1px solid ${t.color}44`, lineHeight: 1.55,
-                animation: 'rulesFade 220ms ease both',
-              }}>{highlight(t.details)}</div>
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function GasFlowViz() {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '18px 12px',
-      background: 'rgba(138,43,226,0.08)', border: `1px solid ${RULES_TOKENS.purple}33`,
-      borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      gap: 18, flexWrap: 'wrap',
-    }}>
-      <FlowNode icon="chain" label="NODE" color={RULES_TOKENS.gold} />
-      <FlowArrow />
-      <div style={{
-        position: 'relative', padding: '10px 16px',
-        border: `1px solid ${RULES_TOKENS.purple}88`, borderRadius: 8,
-        background: 'rgba(138,43,226,0.18)',
-        fontFamily: RULES_HEAD, letterSpacing: 2, fontWeight: 800,
-        color: RULES_TOKENS.purple, fontSize: 14,
-        boxShadow: `0 0 18px ${RULES_TOKENS.purpleSoft}`,
-        overflow: 'hidden',
-      }}>
-        +1 GAS
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: `linear-gradient(180deg, transparent, ${RULES_TOKENS.purple}55, transparent)`,
-          animation: 'rulesEnergy 1.8s ease-in-out infinite', pointerEvents: 'none',
-        }} />
-      </div>
-      <FlowArrow />
-      <FlowNode icon="frog" label="CAST MEME" color={RULES_TOKENS.purple} />
-    </div>
-  );
-}
-
-function FlowNode({ icon, label, color }: { icon: IconKey; label: string; color: string }) {
-  return (
-    <div style={{ textAlign: 'center', minWidth: 80 }}>
-      <div style={{
-        width: 60, height: 60, borderRadius: 12, margin: '0 auto 6px',
-        background: `radial-gradient(circle, ${color}33, transparent 75%)`,
-        border: `1px solid ${color}77`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', color,
-        boxShadow: `0 0 20px ${color}55`,
-      }}><Icon name={icon} size={28} /></div>
-      <div style={{
-        fontFamily: RULES_HEAD, fontSize: 11, letterSpacing: 2, fontWeight: 700, color,
-      }}>{label}</div>
-    </div>
-  );
-}
-
-function FlowArrow() {
-  return (
-    <span style={{
-      color: RULES_TOKENS.gold, display: 'inline-flex',
-      animation: 'rulesArrow 1.6s ease-in-out infinite',
-    }}><ArrowRight size={24} /></span>
-  );
-}
-
-function TurnTimeline({ highlight }: { highlight: (s: string) => React.ReactNode }) {
-  const phases = [
-    { id: 'untap',  name: 'UNTAP',  icon: 'refresh' as IconKey, color: RULES_TOKENS.blue,   desc: 'Untap your Nodes, Memes, and Machines. Summoning sickness wears off.' },
-    { id: 'draw',   name: 'DRAW',   icon: 'cards' as IconKey,   color: RULES_TOKENS.green,  desc: 'Draw 1 card (skipped on the very first turn of the game).' },
-    { id: 'main',   name: 'MAIN',   icon: 'settings' as IconKey, color: RULES_TOKENS.gold,  desc: 'Play 1 Node, tap for Gas, cast Memes, Machines, and Moves in any order.' },
-    { id: 'combat', name: 'COMBAT', icon: 'swords' as IconKey,  color: RULES_TOKENS.red,    desc: 'Click Memes to attack. Opponent blocks. Damage resolves simultaneously.' },
-    { id: 'end',    name: 'END',    icon: 'moon' as IconKey,    color: RULES_TOKENS.purple, desc: 'Unspent Gas evaporates. Discard down to 7 cards.' },
-  ];
-  const [active, setActive] = useState<string>('untap');
-  const cur = phases.find(p => p.id === active)!;
-  return (
-    <div>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: 6, margin: '10px 0 16px', flexWrap: 'wrap',
-      }}>
-        {phases.map((p, i) => (
-          <React.Fragment key={p.id}>
-            <button onClick={() => setActive(p.id)} style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-              padding: '6px 4px', background: 'transparent', border: 'none', cursor: 'pointer',
-              fontFamily: RULES_FONT,
-            }} title={p.desc}>
-              <span style={{
-                width: 48, height: 48, borderRadius: '50%',
-                background: active === p.id
-                  ? `radial-gradient(circle, ${p.color}, ${p.color}55 65%, transparent 80%)`
-                  : `radial-gradient(circle, ${p.color}55, ${p.color}11 65%, transparent 80%)`,
-                border: `2px solid ${active === p.id ? p.color : `${p.color}66`}`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: active === p.id ? '#fff' : p.color,
-                boxShadow: active === p.id ? `0 0 20px ${p.color}aa` : 'none',
-                animation: active === p.id ? 'rulesPulse 2s ease-out infinite' : 'none',
-                transition: 'all 250ms ease',
-              }}><Icon name={p.icon} size={21} /></span>
-              <span style={{
-                fontFamily: RULES_HEAD, fontSize: 10, letterSpacing: 2, fontWeight: 800,
-                color: active === p.id ? p.color : RULES_TOKENS.mute,
-              }}>{p.name}</span>
-            </button>
-            {i < phases.length - 1 && (
-              <span style={{
-                color: RULES_TOKENS.gold, opacity: 0.55, display: 'inline-flex',
-              }}><ArrowRight size={18} /></span>
-            )}
-          </React.Fragment>
-        ))}
-      </div>
-      <div style={{
-        background: `linear-gradient(135deg, ${cur.color}22, transparent)`,
-        border: `1px solid ${cur.color}55`, borderRadius: 10,
-        padding: '14px 16px', animation: 'rulesFade 240ms ease both',
-      }}>
-        <div style={{
-          fontFamily: RULES_HEAD, letterSpacing: 3, fontWeight: 800, color: cur.color, marginBottom: 4,
-        }}>{cur.name} PHASE</div>
-        <div style={{ fontSize: 13.5, color: RULES_TOKENS.text }}>{highlight(cur.desc)}</div>
-      </div>
-    </div>
-  );
-}
-
-function ExampleTurn({ highlight }: { highlight: (s: string) => React.ReactNode }) {
-  const steps = [
-    { t: 'Play Red Node',            d: 'You start your turn. You spend your free Node drop and play a Rebel Node onto the battlefield.' },
-    { t: 'Tap Node for 1 Purple Gas',d: 'Click your untapped Node. It rotates and adds 1 Purple Gas to your pool.' },
-    { t: 'Cast a Meme',              d: 'You spend 1 Rebel Gas to cast a cheap Meme like Spark Gremlin. It enters summoning sick — it can\'t attack this turn.' },
-    { t: 'End Turn',                 d: 'No combat this turn. Unspent Gas evaporates, and you pass to the opponent.' },
-  ];
-  const [i, setI] = useState(0);
-  const s = steps[i];
-  return (
-    <div>
-      <div style={{
-        background: 'rgba(0,0,0,0.4)', border: `1px solid ${RULES_TOKENS.borderSoft}`,
-        borderRadius: 10, padding: '16px 18px',
-      }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8,
-        }}>
-          <div style={{
-            fontFamily: RULES_HEAD, letterSpacing: 3, fontSize: 12, fontWeight: 800, color: RULES_TOKENS.gold,
-          }}>TURN 1 — STEP {i + 1} / {steps.length}</div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {steps.map((_, idx) => (
-              <span key={idx} style={{
-                width: 8, height: 8, borderRadius: '50%',
-                background: idx === i ? RULES_TOKENS.gold : 'rgba(255,255,255,0.18)',
-                boxShadow: idx === i ? `0 0 8px ${RULES_TOKENS.goldGlow}` : 'none',
-                transition: 'all 200ms ease',
-              }} />
-            ))}
-          </div>
-        </div>
-        <div style={{
-          fontFamily: RULES_HEAD, fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 6,
-        }}>{s.t}</div>
-        <div style={{ fontSize: 13.5, color: RULES_TOKENS.text, lineHeight: 1.6, animation: 'rulesFade 220ms ease both' }}>
-          {highlight(s.d)}
-        </div>
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 12 }}>
-        <button onClick={() => setI(v => Math.max(0, v - 1))} disabled={i === 0} style={{
-          ...ghostBtn, opacity: i === 0 ? 0.4 : 1, cursor: i === 0 ? 'not-allowed' : 'pointer',
-        }}><ArrowLeft size={14} /> Previous</button>
-        <button onClick={() => setI(v => Math.min(steps.length - 1, v + 1))} disabled={i === steps.length - 1} style={{
-          padding: '8px 18px', background: `linear-gradient(180deg, ${RULES_TOKENS.gold}, #8a6a16)`,
-          color: '#1a1408', border: 'none', borderRadius: 6,
-          fontWeight: 800, fontSize: 13, letterSpacing: 1,
-          cursor: i === steps.length - 1 ? 'not-allowed' : 'pointer',
-          opacity: i === steps.length - 1 ? 0.4 : 1,
-          boxShadow: `0 0 14px ${RULES_TOKENS.goldGlow}`,
-        }}>Next <ArrowRight size={14} /></button>
-      </div>
-    </div>
-  );
-}
-
-// ── Rulebook (redesigned, data-driven) ─────────────────────────────────────
-const RB = {
-  bg: '#09081A', bgEl: '#0E0D21', panel: '#17142D', panelActive: '#211744', panelHover: '#262047',
-  border: 'rgba(230,196,92,0.22)', borderStrong: 'rgba(230,196,92,0.55)',
-  gold: '#E6C45C', goldBright: '#FFD875', violet: '#8B5CF6',
-  text: '#F4F1E8', text2: '#AAA4BC', success: '#55E58B', danger: '#FF616F', blue: '#57A8FF',
-};
-
-type RBId = 'goal' | 'setup' | 'card-types' | 'gas-system' | 'turn-order' | 'combat' | 'advanced-rules' | 'example-turn' | 'ui-cheat-sheet';
-type HL = (s: string) => React.ReactNode;
-
-function rbHighlight(q: string): HL {
-  return (text) => {
-    const query = q.trim();
-    if (!query) return arrowize(text);
-    const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
-    return String(text).split(re).map((part, i) =>
-      part.toLowerCase() === query.toLowerCase()
-        ? <mark key={i} style={{ background: 'rgba(230,196,92,0.4)', color: '#fff', borderRadius: 2, padding: '0 2px' }}>{part}</mark>
-        : <React.Fragment key={i}>{arrowize(part, `r${i}`)}</React.Fragment>);
-  };
-}
-
-interface RBChapter { id: RBId; num: string; title: string; icon: IconKey; accent: string; summary: string; keywords: string[]; search: string; content: (h: HL) => React.ReactNode; }
-
-const RB_CHAPTERS: RBChapter[] = [
-  { id: 'goal', num: '01', title: 'Goal', icon: 'trophy', accent: RB.gold,
-    summary: 'Reduce your opponent’s life from 20 -> 0. Last player standing wins.',
-    keywords: ['life', 'win', 'victory', '20'], search: 'goal life 20 reduce opponent zero win last player standing victory check',
-    content: (h) => (
-      <div>
-        <p style={{ fontSize: 18, fontWeight: 600, color: RB.text, margin: '0 0 8px' }}>
-          {h('Reduce your opponent’s life from 20 to 0.')}<br />{h('Last player standing wins.')}
-        </p>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26, flexWrap: 'wrap', margin: '18px 0 6px' }}>
-          <LifeOrb label="Start" value={20} color={RB.success} />
-          <div aria-hidden style={{ color: RB.goldBright, display: 'flex' }}><ArrowRight size={30} /></div>
-          <LifeOrb label="Win" value={0} color={RB.danger} />
-        </div>
-        <RuleCallout title="Victory Check" text="If every opponent is at 0 life, the match ends immediately." />
-      </div>
-    ) },
-  { id: 'setup', num: '02', title: 'Setup', icon: 'swords', accent: RB.violet,
-    summary: 'Choose a 60-card deck, draw 7 cards, and begin at 20 life.',
-    keywords: ['deck', '60', 'draw', 'hand', 'mulligan', 'faction'], search: 'setup faction sproto spirit rebel jester wealth knowledge 60 card deck draw 7 hand 20 life first player no draw',
-    content: (h) => (
-      <div>
-        <p>{h('Each player picks one of 5 Sproto factions, shuffles their 60-card deck, draws 7 cards, and starts at 20 life.')}</p>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '14px 0' }}>
-          {COLORS.map((c) => (
-            <span key={c} style={{ padding: '7px 14px', borderRadius: 999, background: `${COLOR_META[c].hex}22`, color: COLOR_META[c].hex, border: `1px solid ${COLOR_META[c].hex}66`, fontWeight: 700, fontSize: 13 }}>{COLOR_META[c].name}</span>
-          ))}
-        </div>
-        <ul style={{ marginLeft: 18, lineHeight: 1.8 }}>
-          <li>{h('60-card deck in your faction color.')}</li>
-          <li>{h('Draw 7 cards. Start at 20 life.')}</li>
-          <li>{h('Max hand size 7 — discard down at end of turn.')}</li>
-          <li>{h('The first player skips their turn-1 draw.')}</li>
-        </ul>
-      </div>
-    ) },
-  { id: 'card-types', num: '03', title: 'Card Types', icon: 'cards', accent: RB.blue,
-    summary: 'Nodes, Memes, Machines, and Moves make up your toolkit.',
-    keywords: ['node', 'meme', 'machine', 'aura', 'move'], search: 'card types node meme machine aura move creature power toughness permanent one-shot instant enchant',
-    content: (h) => <CardTypesGrid highlight={h} /> },
-  { id: 'gas-system', num: '04', title: 'Gas System', icon: 'fuel', accent: RB.violet,
-    summary: 'Tap Nodes to fuel your cards. Unspent Gas drains every turn.',
-    keywords: ['gas', 'mana', 'cost', 'tap', 'node'], search: 'gas mana cost tap node color pool drain end of turn empty mixed fuel',
-    content: (h) => (
-      <div>
-        <p>{h('Nodes generate Gas. Cards cost Gas. Gas drains at end of your turn — spend it or lose it.')}</p>
-        <GasFlowViz />
-        <ul style={{ marginLeft: 18, marginTop: 10, lineHeight: 1.8 }}>
-          <li>{h('Tap a Node -> +1 Gas of its color.')}</li>
-          <li>{h('A cost can be one color or mixed.')}</li>
-          <li>{h('Unspent Gas evaporates when your turn ends.')}</li>
-        </ul>
-      </div>
-    ) },
-  { id: 'turn-order', num: '05', title: 'Turn Order', icon: 'refresh', accent: RB.gold,
-    summary: 'Untap -> Draw -> Main -> Combat -> End.',
-    keywords: ['turn', 'phase', 'untap', 'draw', 'main', 'combat', 'end'], search: 'turn phase untap draw main combat attack block damage end discard summoning sick haste',
-    content: (h) => (
-      <div>
-        <p style={{ marginTop: 0 }}>{h('Every turn moves through five phases in order.')}</p>
-        <TurnTimeline highlight={h} />
-      </div>
-    ) },
-  { id: 'combat', num: '06', title: 'Combat', icon: 'swords', accent: RB.danger,
-    summary: 'Declare attackers, let the defender block, then resolve damage.',
-    keywords: ['combat', 'attack', 'block', 'damage', 'blocker'], search: 'combat attack declare attackers blockers unblocked hits life simultaneous damage power toughness destroy',
-    content: (h) => (
-      <div>
-        <ul style={{ marginLeft: 18, lineHeight: 1.85 }}>
-          <li><b style={{ color: RB.gold }}>Declare attackers</b> — {h('Tap your untapped, non-summoning-sick Memes to attack.')}</li>
-          <li><b style={{ color: RB.gold }}>Blocking</b> — {h('The defender assigns blockers from untapped Memes. Unblocked attackers hit life directly.')}</li>
-          <li><b style={{ color: RB.gold }}>Simultaneous damage</b> — {h('Attacker and blocker deal their Power to each other at the same time. Damage ≥ toughness destroys a Meme.')}</li>
-          <li><b style={{ color: RB.gold }}>To the graveyard</b> — {h('Destroyed Memes go to the graveyard.')}</li>
-        </ul>
-      </div>
-    ) },
-  { id: 'advanced-rules', num: '07', title: 'Advanced Rules', icon: 'book', accent: RB.violet,
-    summary: 'Summoning sickness, blockers, simultaneous damage, hand size.',
-    keywords: ['summoning', 'sickness', 'haste', 'graveyard', 'hand'], search: 'advanced summoning sickness haste blockers simultaneous damage graveyard discard max hand 7 discard down',
-    content: (h) => (
-      <div>
-        <ul style={{ marginLeft: 18, lineHeight: 1.85 }}>
-          <li><b style={{ color: RB.gold }}>Summoning sickness</b> — {h('Memes can’t attack the turn they enter (unless they have haste).')}</li>
-          <li><b style={{ color: RB.gold }}>Blocking</b> — {h('Defender chooses blockers from untapped Memes. Unblocked attackers hit life directly.')}</li>
-          <li><b style={{ color: RB.gold }}>Simultaneous damage</b> — {h('Attacker and blocker deal Power to each other. Damage ≥ toughness destroys it.')}</li>
-          <li><b style={{ color: RB.gold }}>Graveyard</b> — {h('Destroyed Memes, used Moves go here. Some cards interact with the graveyard.')}</li>
-          <li><b style={{ color: RB.gold }}>Max hand 7</b> — {h('Discard down at end of turn.')}</li>
-        </ul>
-      </div>
-    ) },
-  { id: 'example-turn', num: '08', title: 'Example Turn', icon: 'gamepad', accent: RB.blue,
-    summary: 'Walk through Turn 1 step-by-step.',
-    keywords: ['example', 'walkthrough', 'turn 1'], search: 'example turn 1 play red rebel node tap gain gas cast spark gremlin end walkthrough',
-    content: (h) => <ExampleTurn highlight={h} /> },
-  { id: 'ui-cheat-sheet', num: '09', title: 'UI Cheat Sheet', icon: 'keyboard', accent: RB.gold,
-    summary: 'Quick clicks for the in-match UI.',
-    keywords: ['ui', 'click', 'controls', 'buttons'], search: 'ui click node tap card hand play meme attack blocker end turn button cheat sheet controls',
-    content: (h) => (
-      <div>
-        <ul style={{ marginLeft: 18, lineHeight: 1.85 }}>
-          <li>{h('Click an untapped Node -> tap for Gas.')}</li>
-          <li>{h('Click a card in hand -> play it (Moves then ask for a target).')}</li>
-          <li>{h('Click your own untapped Meme -> mark attacker. Press "Attack with N".')}</li>
-          <li>{h('During declare blockers -> click your Meme, then click the attacker to block.')}</li>
-          <li>{h('Press End Turn to pass.')}</li>
-        </ul>
-      </div>
-    ) },
-];
-
-const RB_KEY_TERMS: { term: string; to: RBId; color: string }[] = [
-  { term: 'Node', to: 'card-types', color: RB.gold },
-  { term: 'Gas', to: 'gas-system', color: RB.violet },
-  { term: 'Meme', to: 'card-types', color: RB.blue },
-  { term: 'Machine', to: 'card-types', color: RB.danger },
-  { term: 'Move', to: 'card-types', color: RB.success },
-];
-
-const RB_QUICKSTART: { n: number; title: string; sub: string; color: string; to: RBId }[] = [
-  { n: 1, title: 'Play Nodes', sub: 'Build your board', color: RB.gold, to: 'card-types' },
-  { n: 2, title: 'Generate Gas', sub: 'Fuel your cards', color: RB.violet, to: 'gas-system' },
-  { n: 3, title: 'Cast Memes', sub: 'Deploy your units', color: RB.blue, to: 'card-types' },
-  { n: 4, title: 'Attack', sub: 'Pressure your rival', color: RB.danger, to: 'combat' },
-  { n: 5, title: 'Reduce 20 -> 0', sub: 'Last player standing', color: RB.success, to: 'goal' },
-];
-
-function readRbHash(): RBId {
-  const h = (typeof window !== 'undefined' ? window.location.hash : '').replace('#', '');
-  return RB_CHAPTERS.some((c) => c.id === h) ? (h as RBId) : 'goal';
-}
-
-function RulebookPage({ onBack }: { onBack: () => void }) {
-  const narrow = useIsMobile(1279);
-  const phone = useIsMobile(767);
-  const [activeId, setActiveId] = useState<RBId>(readRbHash);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [hlQuery, setHlQuery] = useState('');
-  const [muted, setMuted] = useState<boolean>(() => { try { return localStorage.getItem('ocva.muted') === '1'; } catch { return false; } });
-  const mainRef = useRef<HTMLDivElement | null>(null);
-  const activeIdx = RB_CHAPTERS.findIndex((c) => c.id === activeId);
-  const active = RB_CHAPTERS[activeIdx];
-  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
-
-  const go = useCallback((id: RBId, opts?: { hl?: string; scroll?: boolean }) => {
-    setActiveId(id);
-    setHlQuery(opts?.hl ?? '');
-    try { window.history.replaceState(null, '', `#${id}`); } catch {}
-    if (opts?.scroll !== false) {
-      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      setTimeout(() => mainRef.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }), 40);
-    }
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen(true); }
-      if (e.key === 'Escape') setSearchOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    const onHash = () => setActiveId(readRbHash());
-    window.addEventListener('hashchange', onHash);
-    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('hashchange', onHash); };
-  }, []);
-
-  useEffect(() => {
-    try { localStorage.setItem('ocva.muted', muted ? '1' : '0'); } catch {}
-    document.querySelectorAll('audio,video').forEach((a) => { (a as HTMLMediaElement).muted = muted; });
-    // Let <BgMusic> re-assert its own per-track mute after this blanket set.
-    try { window.dispatchEvent(new CustomEvent(PREFS_EVENT)); } catch {}
-  }, [muted]);
-
-  const h = rbHighlight(hlQuery);
-  const below = RB_CHAPTERS.filter((_, i) => i > activeIdx);
-
-  return (
-    <div style={{ minHeight: '100dvh', background: RB.bg, color: RB.text, fontFamily: RULES_FONT, position: 'relative' }}>
-      <style>{`
-        @media (prefers-reduced-motion: reduce){ .rb-anim{ transition:none !important; animation:none !important; } }
-        .rb-scroll::-webkit-scrollbar{ width:8px; } .rb-scroll::-webkit-scrollbar-thumb{ background:${RB.panelHover}; border-radius:4px; }
-        .rb-snap{ scroll-snap-type:x mandatory; } .rb-snap > *{ scroll-snap-align:start; }
-      `}</style>
-      <RBParticles />
-
-      <RulebookHeader onBack={onBack} onOpenSearch={() => setSearchOpen(true)} isMac={isMac} narrow={narrow} />
-
-      <div style={{ position: 'relative', zIndex: 1, maxWidth: 1520, margin: '0 auto', padding: phone ? '14px 14px 60px' : '20px 24px 60px' }}>
-        {/* Hero */}
-        <div style={{ display: 'grid', gridTemplateColumns: narrow ? '1fr' : '1.15fr 0.85fr', gap: 22, alignItems: 'center' }}>
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.22em', color: RB.gold }}>EGREGORE</div>
-            <h1 style={{ fontFamily: RULES_HEAD, fontWeight: 800, fontSize: phone ? 40 : 'clamp(44px, 5vw, 68px)', lineHeight: 1.02, margin: '6px 0 10px',
-              background: `linear-gradient(180deg, #ffe9a8, ${RB.gold} 55%, #a6802f)`, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}>
-              Master the Arena
-            </h1>
-            <p style={{ fontSize: 17, color: RB.text2, margin: '0 0 14px' }}>Everything you need to play, build, and win.</p>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '7px 14px', borderRadius: 999, background: RB.panel, border: `1px solid ${RB.border}`, fontSize: 13, fontWeight: 600 }}>
-              <Book size={15} /> {RB_CHAPTERS.length} chapters · 8 min read
-            </span>
-          </div>
-          <TutorialPreview muted={muted} />
-        </div>
-
-        {/* Quick start */}
-        <QuickStartPath onGo={(id) => go(id)} phone={phone} />
-
-        {/* Workspace */}
-        <div style={{ display: 'grid', gap: 18, marginTop: 20,
-          gridTemplateColumns: narrow ? '1fr' : '230px minmax(0, 1fr) 288px', alignItems: 'start' }}>
-          {!narrow ? (
-            <ChapterNavigation chapters={RB_CHAPTERS} activeId={activeId} activeIdx={activeIdx} onGo={(id) => go(id)} />
-          ) : (
-            <ChapterDropdown chapters={RB_CHAPTERS} activeId={activeId} onGo={(id) => go(id)} />
-          )}
-
-          <div ref={mainRef}>
-            <RuleChapter chapter={active} idx={activeIdx} total={RB_CHAPTERS.length} h={h}
-              onPrev={() => go(RB_CHAPTERS[Math.max(0, activeIdx - 1)].id)}
-              onNext={() => go(RB_CHAPTERS[Math.min(RB_CHAPTERS.length - 1, activeIdx + 1)].id)} />
-            {below.map((c) => <RuleAccordion key={c.id} chapter={c} onOpen={() => go(c.id)} />)}
-            <div style={{ textAlign: 'center', fontSize: 13, color: RB.text2, fontStyle: 'italic', marginTop: 16 }}>That’s the whole game. Have fun.</div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <AtAGlance />
-            <KeywordGlossary onGo={(id) => go(id)} />
-            <StillStuck onGo={() => go('example-turn')} />
-          </div>
-        </div>
-      </div>
-
-      {/* Floating mute */}
-      <button onClick={() => setMuted((m) => !m)} aria-label={muted ? 'Unmute' : 'Mute'} className="rb-anim"
-        style={{ position: 'fixed', right: 18, bottom: 18, zIndex: 20, width: 48, height: 48, borderRadius: '50%', display: 'grid', placeItems: 'center',
-          background: RB.panel, border: `1px solid ${RB.borderStrong}`, color: RB.goldBright, cursor: 'pointer', fontSize: 18, boxShadow: '0 6px 20px rgba(0,0,0,0.5)' }}>
-        {muted ? <SoundOff size={19} /> : <SoundOn size={19} />}
-      </button>
-
-      {searchOpen && <RuleSearch onClose={() => setSearchOpen(false)} onSelect={(id, q) => { go(id, { hl: q }); setSearchOpen(false); }} />}
-    </div>
-  );
-}
-
-function RBParticles() {
-  return (
-    <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', inset: 0, background:
-        `radial-gradient(60% 40% at 50% 0%, rgba(139,92,246,0.10), transparent 70%), radial-gradient(120% 90% at 50% 0%, ${RB.bgEl} 0%, ${RB.bg} 60%)` }} />
-      <ArtBackdrop src={WIZARD_BATTLE_BG} />
-      {Array.from({ length: 12 }).map((_, i) => (
-        <span key={i} className="rb-anim" style={{ position: 'absolute', left: `${(i * 61) % 100}%`, top: `${(i * 37) % 100}%`,
-          width: 2 + (i % 3), height: 2 + (i % 3), borderRadius: '50%', background: i % 3 === 0 ? RB.violet : RB.gold, opacity: 0.35,
-          boxShadow: `0 0 6px ${i % 3 === 0 ? RB.violet : RB.gold}` }} />
-      ))}
-    </div>
-  );
-}
-
-function RulebookHeader({ onBack, onOpenSearch, isMac, narrow }: { onBack: () => void; onOpenSearch: () => void; isMac: boolean; narrow: boolean }) {
-  return (
-    <div style={{ position: 'sticky', top: 0, zIndex: 12, height: 62, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-      padding: '0 20px', background: 'rgba(9,8,26,0.82)', backdropFilter: 'blur(10px)', borderBottom: `1px solid ${RB.border}` }}>
-      <button onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 14px', borderRadius: 9,
-        background: RB.panel, border: `1px solid ${RB.border}`, color: RB.text, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}><ArrowLeft size={14} /> Back</button>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span aria-hidden style={{ color: RB.gold, opacity: 0.6, display: 'inline-flex' }}><DiamondOutline size={10} /></span>
-        <span style={{ fontFamily: RULES_HEAD, fontWeight: 800, letterSpacing: '0.28em', fontSize: 15, color: RB.gold }}>RULEBOOK</span>
-        <span aria-hidden style={{ color: RB.gold, opacity: 0.6, display: 'inline-flex' }}><DiamondOutline size={10} /></span>
-      </div>
-      <button onClick={onOpenSearch} aria-label="Search rules" style={{ display: 'flex', alignItems: 'center', gap: 8, width: narrow ? 'auto' : 300,
-        padding: '9px 12px', borderRadius: 9, background: RB.panel, border: `1px solid ${RB.border}`, color: RB.text2, cursor: 'pointer', fontSize: 13 }}>
-        <Search size={15} />
-        {!narrow && <span style={{ flex: 1, textAlign: 'left' }}>Search rules…</span>}
-        <kbd style={{ padding: '2px 7px', fontSize: 11, background: 'rgba(0,0,0,0.4)', borderRadius: 5, color: RB.text2, border: `1px solid ${RB.border}` }}>{isMac ? '⌘ K' : 'Ctrl K'}</kbd>
-      </button>
-    </div>
-  );
-}
-
-function TutorialPreview({ muted }: { muted: boolean }) {
-  const vidRef = useRef<HTMLVideoElement | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [duration, setDuration] = useState('');
-  const play = () => { const v = vidRef.current; if (!v) return; v.play().then(() => setPlaying(true)).catch(() => {}); };
-  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-  return (
-    <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', borderRadius: 14, overflow: 'hidden',
-      border: `1px solid ${RB.border}`, boxShadow: '0 14px 40px rgba(0,0,0,0.5), 0 0 30px rgba(139,92,246,0.12)', background: '#000' }}>
-      <video ref={vidRef} src="/rules-intro.mp4" poster="/intro.png" preload="metadata" playsInline controls={playing} muted={muted}
-        aria-label="EGREGORE tutorial video" onLoadedMetadata={(e) => setDuration(fmt((e.currentTarget as HTMLVideoElement).duration || 0))}
-        onPause={() => setPlaying(false)} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-      {!playing && (
-        <button onClick={play} aria-label="Play tutorial" className="rb-anim" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center',
-          background: 'linear-gradient(180deg, rgba(9,8,26,0.15), rgba(9,8,26,0.55))', border: 'none', cursor: 'pointer' }}>
-          <span style={{ width: 74, height: 74, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(9,8,26,0.5)',
-            border: `2px solid ${RB.goldBright}`, boxShadow: `0 0 26px ${RB.gold}88`, color: RB.goldBright, paddingLeft: 6 }}><Play size={26} /></span>
-          <div style={{ position: 'absolute', left: 14, bottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.14em', color: RB.gold }}>60-SECOND OVERVIEW</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>Watch tutorial</div>
-          </div>
-          {duration && <div style={{ position: 'absolute', right: 12, bottom: 12, padding: '3px 9px', borderRadius: 6, background: 'rgba(0,0,0,0.6)', border: `1px solid ${RB.border}`, fontSize: 12, color: RB.text }}>{duration}</div>}
-        </button>
-      )}
-    </div>
-  );
-}
-
-function QuickStartPath({ onGo, phone }: { onGo: (id: RBId) => void; phone: boolean }) {
-  return (
-    <div style={{ marginTop: 20, padding: phone ? '16px 12px' : '18px 22px', borderRadius: 16, background: RB.panel, border: `1px solid ${RB.border}` }}>
-      <div style={{ textAlign: 'center', fontFamily: RULES_HEAD, fontWeight: 700, letterSpacing: '0.26em', fontSize: 14, color: RB.gold, marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}><DiamondOutline size={10} /> LEARN IN 30 SECONDS <DiamondOutline size={10} /></div>
-      <div className={phone ? 'rb-snap rb-scroll' : ''} style={{ display: 'flex', alignItems: 'stretch', gap: phone ? 10 : 8, overflowX: phone ? 'auto' : 'visible' }}>
-        {RB_QUICKSTART.map((s, i) => (
-          <React.Fragment key={s.n}>
-            <button onClick={() => onGo(s.to)} className="rb-anim" style={{ flex: phone ? '0 0 78%' : '1 1 0', minWidth: phone ? 220 : 0,
-              display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 12, cursor: 'pointer', textAlign: 'left',
-              background: RB.bgEl, border: `1px solid ${s.color}44`, color: RB.text, transition: 'transform .18s ease, box-shadow .18s ease' }}
-              onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = `0 8px 20px -8px ${s.color}`; }}
-              onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; }}>
-              <span style={{ width: 42, height: 42, flex: 'none', borderRadius: '50%', display: 'grid', placeItems: 'center', fontWeight: 900, fontSize: 17,
-                color: '#0a0a14', background: `radial-gradient(circle at 35% 30%, ${s.color}, ${s.color}99)`, boxShadow: `0 0 16px ${s.color}66` }}>{s.n}</span>
-              <span>
-                <div style={{ fontSize: 14, fontWeight: 800, color: s.color }}>{arrowize(s.title, `rq${s.n}`)}</div>
-                <div style={{ fontSize: 12, color: RB.text2 }}>{s.sub}</div>
-              </span>
-            </button>
-            {i < RB_QUICKSTART.length - 1 && !phone && <span aria-hidden style={{ alignSelf: 'center', color: RB.gold, opacity: 0.5, flex: 'none', display: 'inline-flex' }}><ArrowRight size={16} /></span>}
-          </React.Fragment>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ChapterNavigation({ chapters, activeId, activeIdx, onGo }: { chapters: RBChapter[]; activeId: RBId; activeIdx: number; onGo: (id: RBId) => void }) {
-  return (
-    <nav aria-label="Chapters" style={{ position: 'sticky', top: 78, alignSelf: 'start', padding: 12, borderRadius: 14, background: RB.panel, border: `1px solid ${RB.border}` }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 4px 10px', borderBottom: `1px solid ${RB.border}`, marginBottom: 8 }}>
-        <span style={{ fontFamily: RULES_HEAD, fontSize: 12, letterSpacing: '0.2em', fontWeight: 700, color: RB.gold }}>CHAPTERS</span>
-        <span style={{ fontSize: 11, color: RB.text2 }}>{activeIdx + 1} of {chapters.length}</span>
-      </div>
-      <div style={{ position: 'relative' }}>
-        <div aria-hidden style={{ position: 'absolute', left: 15, top: 8, bottom: 8, width: 2, background: RB.border }} />
-        {chapters.map((c, i) => {
-          const active = c.id === activeId;
-          return (
-            <button key={c.id} onClick={() => onGo(c.id)} aria-current={active ? 'true' : undefined} className="rb-anim"
-              style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '9px 10px', marginBottom: 2,
-                borderRadius: 8, cursor: 'pointer', textAlign: 'left', fontFamily: RULES_FONT, fontSize: 13.5, fontWeight: active ? 700 : 500,
-                color: active ? RB.goldBright : RB.text, background: active ? RB.panelActive : 'transparent',
-                border: `1px solid ${active ? RB.borderStrong : 'transparent'}`, boxShadow: active ? `0 0 14px rgba(230,196,92,0.18)` : 'none', transition: 'all .18s ease' }}>
-              <span aria-hidden style={{ width: 10, height: 10, borderRadius: '50%', flex: 'none', zIndex: 1,
-                background: active ? RB.gold : (i < activeIdx ? RB.gold : RB.bgEl), border: `2px solid ${active || i < activeIdx ? RB.gold : RB.border}`,
-                boxShadow: active ? `0 0 10px ${RB.gold}` : 'none' }} />
-              <Icon name={c.icon} size={16} />
-              <span>{c.title}</span>
-            </button>
-          );
-        })}
-      </div>
-    </nav>
-  );
-}
-
-function ChapterDropdown({ chapters, activeId, onGo }: { chapters: RBChapter[]; activeId: RBId; onGo: (id: RBId) => void }) {
-  return (
-    <div style={{ padding: 12, borderRadius: 14, background: RB.panel, border: `1px solid ${RB.border}` }}>
-      <label htmlFor="rb-chapter-select" style={{ display: 'block', fontFamily: RULES_HEAD, fontSize: 12, letterSpacing: '0.2em', fontWeight: 700, color: RB.gold, marginBottom: 8 }}>CHAPTERS</label>
-      <select id="rb-chapter-select" value={activeId} onChange={(e) => onGo(e.target.value as RBId)}
-        style={{ width: '100%', padding: '12px 12px', borderRadius: 9, background: RB.bgEl, border: `1px solid ${RB.border}`, color: RB.text, fontSize: 15, minHeight: 44 }}>
-        {chapters.map((c) => <option key={c.id} value={c.id}>{c.num} · {c.title}</option>)}
-      </select>
-    </div>
-  );
-}
-
-function RuleChapter({ chapter, idx, total, h, onPrev, onNext }: { chapter: RBChapter; idx: number; total: number; h: HL; onPrev: () => void; onNext: () => void }) {
-  return (
-    <section aria-labelledby={`rb-${chapter.id}-title`} className="ova-panel-orn ova-panel-orn--hi"
-      style={{ padding: 'clamp(18px, 3vw, 26px)', background: RB.panelActive, borderColor: RB.borderStrong }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14, flexWrap: 'wrap' }}>
-        <span aria-hidden style={{ width: 46, height: 46, flex: 'none', borderRadius: 11, display: 'grid', placeItems: 'center', color: RB.goldBright,
-          background: 'linear-gradient(135deg, rgba(230,196,92,0.2), rgba(139,92,246,0.2))', border: `1px solid ${RB.border}` }}><Icon name={chapter.icon} size={23} /></span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.16em', color: RB.gold }}>CHAPTER {chapter.num}</div>
-          <h2 id={`rb-${chapter.id}-title`} style={{ margin: 0, fontFamily: RULES_HEAD, fontWeight: 700, fontSize: 'clamp(22px, 5vw, 28px)', color: RB.text }}>{chapter.title}</h2>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={onPrev} disabled={idx === 0} className="rb-anim" style={navBtn(idx === 0)}><ArrowLeft size={13} /> Previous</button>
-          <button onClick={onNext} disabled={idx === total - 1} className="rb-anim" style={navBtn(idx === total - 1, true)}>Next <ArrowRight size={13} /></button>
-        </div>
-      </div>
-      <div style={{ fontSize: 15, lineHeight: 1.7, color: RB.text }}>{chapter.content(h)}</div>
-    </section>
-  );
-}
-function navBtn(disabled: boolean, primary?: boolean): React.CSSProperties {
-  if (primary && !disabled) return { ...goldPlate(false), padding: '10px 16px', fontSize: 12, letterSpacing: '0.1em' };
-  return { ...obsidianPlate(disabled), padding: '10px 15px', fontSize: 12.5, whiteSpace: 'nowrap',
-    cursor: disabled ? 'not-allowed' : 'pointer' };
-}
-
-function RuleAccordion({ chapter, onOpen }: { chapter: RBChapter; onOpen: () => void }) {
-  return (
-    <button onClick={onOpen} aria-expanded={false} aria-controls={`rb-${chapter.id}-title`} className="rb-anim"
-      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 16, padding: '18px 20px', marginTop: 12, borderRadius: 12, cursor: 'pointer',
-        background: RB.panel, border: `1px solid ${RB.border}`, color: RB.text, textAlign: 'left', minHeight: 44,
-        boxShadow: `${EDGE.topHighlight}, 0 8px 22px -16px rgba(3,2,10,0.9)`,
-        transition: 'background 170ms cubic-bezier(0.2,0.8,0.2,1), border-color 170ms ease, transform 170ms cubic-bezier(0.2,0.8,0.2,1), box-shadow 190ms ease' }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = RB.panelHover; e.currentTarget.style.borderColor = RB.borderStrong; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = RB.panel; e.currentTarget.style.borderColor = RB.border; e.currentTarget.style.transform = 'none'; }}>
-      <span style={{ fontFamily: RULES_HEAD, fontWeight: 800, fontSize: 22, color: RB.gold, flex: 'none' }}>{chapter.num}</span>
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'block', fontFamily: RULES_HEAD, fontWeight: 700, fontSize: 18, color: RB.text }}>{chapter.title}</span>
-        <span style={{ display: 'block', fontSize: 13, color: RB.text2, marginTop: 2 }}>{arrowize(chapter.summary, `cs-${chapter.id}`)}</span>
-      </span>
-      <span aria-hidden style={{ color: RB.gold, flex: 'none', display: 'inline-flex' }}><ChevronDown size={17} /></span>
-    </button>
-  );
-}
-
-function RuleCallout({ title, text }: { title: string; text: string }) {
-  return (
-    <div style={{ marginTop: 16, display: 'flex', gap: 12, padding: '14px 16px', borderRadius: 12, background: 'rgba(230,196,92,0.06)', border: `1px solid ${RB.borderStrong}` }}>
-      <span aria-hidden style={{ color: RB.gold, display: 'inline-flex', flex: 'none' }}><ShieldCheck size={20} /></span>
-      <div>
-        <div style={{ fontWeight: 800, color: RB.goldBright, fontSize: 14 }}>{title}</div>
-        <div style={{ fontSize: 13.5, color: RB.text2, marginTop: 3 }}>{text}</div>
-      </div>
-    </div>
-  );
-}
-
-function AtAGlance() {
-  const rows = [
-    { icon: 'heart' as IconKey, label: 'Starting Life', value: '20', color: RB.success },
-    { icon: 'cards' as IconKey, label: 'Opening Hand', value: '7', color: RB.violet },
-    { icon: 'books' as IconKey, label: 'Deck Size', value: '60', color: RB.blue },
-  ];
-  return (
-    <div style={{ padding: 16, borderRadius: 14, background: RB.panel, border: `1px solid ${RB.border}` }}>
-      <div style={{ fontFamily: RULES_HEAD, fontSize: 12, letterSpacing: '0.18em', fontWeight: 700, color: RB.gold, marginBottom: 12 }}>AT A GLANCE</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {rows.map((r) => (
-          <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 8, borderBottom: `1px solid ${RB.border}` }}>
-            <span aria-hidden style={{ color: r.color, display: 'inline-flex' }}><Icon name={r.icon} size={17} /></span>
-            <span style={{ flex: 1, fontSize: 13.5, color: RB.text2 }}>{r.label}</span>
-            <span style={{ fontSize: 20, fontWeight: 800, color: r.color }}>{r.value}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function KeywordGlossary({ onGo }: { onGo: (id: RBId) => void }) {
-  return (
-    <div style={{ padding: 16, borderRadius: 14, background: RB.panel, border: `1px solid ${RB.border}` }}>
-      <div style={{ fontFamily: RULES_HEAD, fontSize: 12, letterSpacing: '0.18em', fontWeight: 700, color: RB.gold, marginBottom: 12 }}>KEY TERMS</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        {RB_KEY_TERMS.map((t) => (
-          <button key={t.term} onClick={() => onGo(t.to)} className="rb-anim" style={{ padding: '7px 12px', borderRadius: 8, cursor: 'pointer',
-            background: `${t.color}18`, border: `1px solid ${t.color}66`, color: t.color, fontWeight: 700, fontSize: 13 }}>{t.term}</button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function StillStuck({ onGo }: { onGo: () => void }) {
-  return (
-    <div style={{ padding: 16, borderRadius: 14, background: 'linear-gradient(160deg, rgba(139,92,246,0.14), rgba(23,20,45,0.6))', border: `1px solid ${RB.border}` }}>
-      <div style={{ fontFamily: RULES_HEAD, fontSize: 18, fontWeight: 700, color: RB.goldBright }}>Still stuck?</div>
-      <div style={{ fontSize: 13.5, color: RB.text2, margin: '6px 0 14px' }}>See a full turn walkthrough.</div>
-      <button onClick={onGo} className="rb-anim" style={{ width: '100%', padding: '12px', borderRadius: 10, cursor: 'pointer', minHeight: 44,
-        background: 'transparent', border: `1px solid ${RB.borderStrong}`, color: RB.goldBright, fontWeight: 800, letterSpacing: '0.04em', fontSize: 13,
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>View Example Turn <ArrowRight size={14} /></button>
-    </div>
-  );
-}
-
-function RuleSearch({ onClose, onSelect }: { onClose: () => void; onSelect: (id: RBId, q: string) => void }) {
-  const [q, setQ] = useState('');
-  const [sel, setSel] = useState(0);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  useEffect(() => { inputRef.current?.focus(); }, []);
-
-  const results = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    if (!query) return RB_CHAPTERS.map((c) => ({ c, snippet: c.summary }));
-    return RB_CHAPTERS.map((c) => {
-      const hay = `${c.title} ${c.summary} ${c.search} ${c.keywords.join(' ')}`.toLowerCase();
-      if (!hay.includes(query)) return null;
-      const src = `${c.summary} ${c.search}`;
-      const at = src.toLowerCase().indexOf(query);
-      const snippet = at >= 0 ? '…' + src.slice(Math.max(0, at - 24), at + query.length + 30).trim() + '…' : c.summary;
-      return { c, snippet };
-    }).filter(Boolean) as { c: RBChapter; snippet: string }[];
-  }, [q]);
-
-  useEffect(() => { setSel(0); }, [q]);
-
-  const onKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); setSel((s) => Math.min(results.length - 1, s + 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setSel((s) => Math.max(0, s - 1)); }
-    else if (e.key === 'Enter') { e.preventDefault(); if (results[sel]) onSelect(results[sel].c.id, q); }
-    else if (e.key === 'Escape') { e.preventDefault(); onClose(); }
-  };
-  const hl = rbHighlight(q);
-
-  return (
-    <div onClick={onClose} role="dialog" aria-modal="true" aria-label="Search rules"
-      style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(4,4,12,0.72)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '10vh 16px 16px' }}>
-      <div onClick={(e) => e.stopPropagation()} onKeyDown={onKey} style={{ width: 'min(640px, 100%)', maxHeight: '76vh', display: 'flex', flexDirection: 'column',
-        borderRadius: 14, background: RB.bgEl, border: `1px solid ${RB.borderStrong}`, boxShadow: '0 30px 80px rgba(0,0,0,0.6)', overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: `1px solid ${RB.border}` }}>
-          <span aria-hidden style={{ color: RB.gold, display: 'inline-flex' }}><Search size={17} /></span>
-          <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search rules… (combat, gas, summoning sickness)" aria-label="Search rules"
-            style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: RB.text, fontSize: 16, fontFamily: RULES_FONT }} />
-          <kbd style={{ padding: '2px 7px', fontSize: 11, background: 'rgba(0,0,0,0.4)', borderRadius: 5, color: RB.text2 }}>Esc</kbd>
-        </div>
-        <div className="rb-scroll" role="listbox" style={{ overflowY: 'auto', padding: 8 }}>
-          {results.length === 0 ? (
-            <div style={{ padding: 26, textAlign: 'center', color: RB.text2 }}>
-              <div style={{ marginBottom: 6, color: RB.text2 }} aria-hidden><Search size={26} /></div>
-              No rules found for “{q}”. Try “combat”, “gas”, or “setup”.
-            </div>
-          ) : results.map((r, i) => (
-            <button key={r.c.id} role="option" aria-selected={i === sel} onMouseEnter={() => setSel(i)} onClick={() => onSelect(r.c.id, q)}
-              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
-                background: i === sel ? RB.panelActive : 'transparent', border: `1px solid ${i === sel ? RB.borderStrong : 'transparent'}`, color: RB.text, marginBottom: 2 }}>
-              <span aria-hidden style={{ flex: 'none', color: RB.gold, display: 'inline-flex' }}><Icon name={r.c.icon} size={18} /></span>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontWeight: 700, fontSize: 14 }}>{hl(r.c.title)}</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: RB.gold }}>CH {r.c.num}</span>
-                </span>
-                <span style={{ display: 'block', fontSize: 12.5, color: RB.text2, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hl(r.snippet)}</span>
-              </span>
-              <span aria-hidden style={{ color: RB.text2, flex: 'none', display: 'inline-flex' }}><EnterKey size={13} /></span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Landing screen (post-login hub) ─────────────────────────────────────────
 // ── Main menu hub design tokens (per concept palette) ───────────────────────
@@ -2873,17 +1441,28 @@ function ProfilePage({ myName, onBack, onSettings }: { myName: string; onBack: (
     try { setDecks(await listDecksApi()); } catch { setDecks([]); }
   }, []);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        await reload();
-        await reloadDecks();
-        // A ladder outage must not stop the profile hub from rendering.
-        setRanked(await RankedAPI.getMe().catch(() => null));
-      } finally { setLoading(false); }
-    })();
-  }, [myName, reload, reloadDecks]);
+  // Guarded with `alive()`: across these three sequential awaits a rename or a
+  // tab switch must not let an old identity's response land on the new one or
+  // fire setState after unmount (frontend-24). The reusable `reload`/
+  // `reloadDecks` callbacks stay for the post-edit refresh path.
+  useAsyncEffect(async (alive) => {
+    setLoading(true);
+    try {
+      const p = await getMyProfileApi();
+      if (!alive()) return;
+      setProf(p);
+      let list: DeckEntry[] = [];
+      try { list = await listDecksApi(); } catch { list = []; }
+      if (!alive()) return;
+      setDecks(list);
+      // A ladder outage must not stop the profile hub from rendering.
+      const me = await RankedAPI.getMe().catch(() => null);
+      if (!alive()) return;
+      setRanked(me);
+    } finally {
+      if (alive()) setLoading(false);
+    }
+  }, [myName]);
 
   // Persist active tab in the URL hash so it survives refresh and is linkable.
   useEffect(() => { try { if (readHubTab() !== tab) window.history.replaceState(null, '', `#${tab}`); } catch {} }, [tab]);
@@ -3442,7 +2021,13 @@ const HubCardTile = React.memo(function HubCardTile({ def, inDeck, cap, deckFull
   const disabled = !onAdd || atCap || deckFull;
   return (
     <CardHover defId={def.id}>
+      {/* Announced as a button (not an unlabelled group) with the add action
+          named, so the '+'/Enter shortcut is discoverable to assistive tech
+          and the tile is not just "a group of text" — frontend-20. */}
       <div className="hub-anim" tabIndex={showAdd ? 0 : -1}
+        role={showAdd && onAdd ? 'button' : undefined}
+        aria-label={showAdd && onAdd ? `Add ${def.name} to deck` : def.name}
+        aria-disabled={showAdd && onAdd ? disabled : undefined}
         onKeyDown={(e) => { if (showAdd && onAdd && !disabled && (e.key === 'Enter' || e.key === '+')) { e.preventDefault(); onAdd(); } }}
         onDoubleClick={() => { if (showAdd && onAdd && !disabled) onAdd(); }}
         style={{ position: 'relative', display: 'flex', flexDirection: 'column', borderRadius: 12, overflow: 'hidden',
@@ -3541,17 +2126,21 @@ function DeckWorkspace({ myName, mobile, onDecksChanged }: { myName: string; mob
     setStatus(null);
   }, []);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const list = await listDecksApi();
-        setDecks(list);
-        loadInto(list.find((d) => d.isActive) ?? list[0] ?? null);
-      } catch (e) {
-        setStatus({ msg: errorText(e), ok: false });
-      } finally { setLoading(false); }
-    })();
+  // Guarded with `alive()` so a slow response from a previous identity (the
+  // player renamed, or the tab switched) can no longer overwrite in-progress
+  // deck edits or set state after unmount (frontend-24).
+  useAsyncEffect(async (alive) => {
+    setLoading(true);
+    try {
+      const list = await listDecksApi();
+      if (!alive()) return;
+      setDecks(list);
+      loadInto(list.find((d) => d.isActive) ?? list[0] ?? null);
+    } catch (e) {
+      if (alive()) setStatus({ msg: errorText(e), ok: false });
+    } finally {
+      if (alive()) setLoading(false);
+    }
   }, [myName, loadInto]);
 
   const deckList = useMemo(() => { const out: string[] = []; for (const [id, n] of Object.entries(counts)) for (let i = 0; i < n; i++) out.push(id); return out; }, [counts]);
@@ -4539,6 +3128,13 @@ function ProfileEditModal({ prof, onClose, onSaved }: { prof: Profile; onClose: 
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
 
+  // Escape closes the modal; it announces itself as a dialog (frontend-19).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
     if (f.size > 600 * 1024) { setErr('Image too large — under 600 KB.'); return; }
@@ -4570,7 +3166,7 @@ function ProfileEditModal({ prof, onClose, onSaved }: { prof: Profile; onClose: 
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 20, fontFamily: PROFILE_FONT,
     }}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="edit-profile-title" style={{
         width: 'min(560px, 100%)', maxHeight: 'calc(100dvh - 40px - env(safe-area-inset-bottom))', overflow: 'auto',
         borderRadius: 16, padding: 24,
         background: `linear-gradient(180deg, ${PROFILE_TOKENS.card}, ${PROFILE_TOKENS.cardSoft})`,
@@ -4578,7 +3174,7 @@ function ProfileEditModal({ prof, onClose, onSaved }: { prof: Profile; onClose: 
         boxShadow: '0 30px 80px #000c',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: 0.5 }}>Edit Profile</div>
+          <div id="edit-profile-title" style={{ fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: 0.5 }}>Edit Profile</div>
           <button onClick={onClose} style={profileChip(false)} aria-label="Close"><Close size={14} /></button>
         </div>
         <div style={{ display: 'flex', gap: 18, alignItems: 'center', marginBottom: 18 }}>
@@ -4622,22 +3218,21 @@ function ProfileEditModal({ prof, onClose, onSaved }: { prof: Profile; onClose: 
 function PublicProfile({ name, onBack }: { name: string; onBack: () => void }) {
   const mobile = useIsMobile();
   const [prof, setProf] = useState<Profile | null>(null);
-  const [deck, setDeck] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
 
+  // Only the public profile is readable. Another player's decklist is not
+  // exposed by any route (`GET /api/decks` is scoped to the caller's own
+  // token — a decklist is competitive information), which is why the dead
+  // "custom deck" section that always rendered "0/60" was removed (frontend-26).
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true); setErr('');
       try {
-        // Only the public profile. Another player's decklist is not readable by
-        // anyone — `GET /api/decks` is scoped to the caller's own token, and
-        // that is deliberate: a decklist is competitive information.
         const p = await getProfileApi(name);
         if (cancelled) return;
         setProf(p);
-        setDeck([]);
       } catch (e) {
         if (!cancelled) setErr(errorText(e));
       } finally {
@@ -4649,25 +3244,6 @@ function PublicProfile({ name, onBack }: { name: string; onBack: () => void }) {
 
   const games = prof ? prof.wins + prof.losses + prof.draws : 0;
   const winPct = games ? Math.round((prof!.wins / games) * 100) : 0;
-
-  // Group deck list by card def, count copies, then sort by color then cost.
-  const deckGrouped = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const id of deck) counts[id] = (counts[id] ?? 0) + 1;
-    const rows = Object.entries(counts)
-      .map(([id, n]) => ({ id, n, def: CARDS[id] }))
-      .filter(r => !!r.def);
-    rows.sort((a, b) => {
-      if (a.def.color !== b.def.color) return COLORS.indexOf(a.def.color) - COLORS.indexOf(b.def.color);
-      const typeOrder = ['node', 'meme', 'machine', 'aura', 'move'];
-      const ta = typeOrder.indexOf(a.def.type), tb = typeOrder.indexOf(b.def.type);
-      if (ta !== tb) return ta - tb;
-      return a.def.name.localeCompare(b.def.name);
-    });
-    return rows;
-  }, [deck]);
-
-  const deckValid = validateDeck(deck);
 
   return (
     <div style={{ fontFamily: 'system-ui', background: '#0a0a0c', minHeight: '100vh', color: '#eee' }}>
@@ -4735,56 +3311,6 @@ function PublicProfile({ name, onBack }: { name: string; onBack: () => void }) {
               </div>
 
               {err && <div style={{ marginTop: 10, color: '#ef7373', fontSize: 12 }}>{err}</div>}
-            </div>
-          </div>
-
-          {/* Custom deck */}
-          <div style={{ maxWidth: 980, margin: '0 auto', padding: mobile ? '0 14px 40px' : '0 24px 50px' }}>
-            <div style={{ padding: 14, background: '#101015', border: '1px solid #25252e', borderRadius: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, color: '#9cf', letterSpacing: 1.5, fontSize: 14 }}>
-                  <Tools size={15} /> {prof.name.toUpperCase()}'S CUSTOM DECK ({deckGrouped.reduce((s, r) => s + r.n, 0)}/{DECK_SIZE})
-                </div>
-                {deck.length > 0 && (
-                  <div style={{ fontSize: 11, color: deckValid.ok ? '#7fdc7f' : '#fc8' }}>
-                    {deckValid.ok ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Check size={12} /> Legal</span> : 'Incomplete deck'}
-                  </div>
-                )}
-              </div>
-
-              {deck.length === 0 ? (
-                <div style={{ marginTop: 12, fontSize: 13, color: '#777' }}>
-                  This player hasn't published a custom deck yet.
-                </div>
-              ) : (
-                <div style={{
-                  marginTop: 12, display: 'grid',
-                  gridTemplateColumns: `repeat(auto-fill, minmax(${mobile ? 150 : 220}px, 1fr))`,
-                  gap: 6,
-                }}>
-                  {deckGrouped.map(r => {
-                    const meta = COLOR_META[r.def.color];
-                    return (
-                      <div key={r.id} style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '6px 8px',
-                        background: '#161620', border: '1px solid #2a2a32', borderRadius: 4,
-                      }}>
-                        <span style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          minWidth: 22, height: 20, padding: '0 5px',
-                          background: meta.hex, color: meta.ink,
-                          borderRadius: 4, fontWeight: 800, fontSize: 12,
-                        }}>{r.n}×</span>
-                        <span style={{ flex: 1, fontSize: 12, color: '#eee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {r.def.name}
-                        </span>
-                        <span style={{ fontSize: 10, color: '#888', textTransform: 'uppercase' }}>{r.def.type}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
           </div>
         </>
@@ -4960,7 +3486,6 @@ function Lobby({
    *  a red box the player can do nothing about. */
   const [deckProblem, setDeckProblem] = useState<{ message: string; issues: string[] } | null>(null);
   const [busy, setBusy] = useState<null | 'create' | 'quick' | 'challenge' | string>(null);
-  const [plazaOpen, setPlazaOpen] = useState(false);
   const [unlisted, setUnlisted] = useState(false);
   const [challengeTarget, setChallengeTarget] = useState('');
   const [centerTab, setCenterTab] = useState<'quick' | 'create' | 'challenge'>('quick');
@@ -5084,7 +3609,17 @@ function Lobby({
     }
   }, [report]);
 
-  useEffect(() => { void refresh(); const t = setInterval(() => { void refresh(); }, 5000); return () => clearInterval(t); }, [refresh]);
+  // Poll the lobby every 5s, but skip the tick while the tab is hidden and
+  // refresh immediately when it becomes visible again — a backgrounded lobby
+  // used to keep firing three requests every 5s against a rate-limited gateway
+  // (frontend-15), unlike useRankedQueue / useGlobalChat which already back off.
+  useEffect(() => {
+    void refresh();
+    const t = setInterval(() => { if (!document.hidden) void refresh(); }, 5000);
+    const onVisible = () => { if (!document.hidden) void refresh(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVisible); };
+  }, [refresh]);
 
   /** Seat the player once they hold a match id. */
   const enterMatch = useCallback(async (matchID: string) => {
@@ -5126,7 +3661,7 @@ function Lobby({
    * your active deck". Each starter is already a legal 60, so `activate()`
    * accepts it unchanged.
    */
-  async function useStarterDeck(color: Color) {
+  async function adoptStarterDeck(color: Color) {
     clearErrors();
     setBusy('starter');
     try {
@@ -5233,7 +3768,7 @@ function Lobby({
         />
 
         <button
-          onClick={() => window.open('https://play.workadventu.re/@/asdasd-1775062076/asdasd/memetic-masters-hq', '_blank', 'noopener,noreferrer')}
+          onClick={() => window.open(WORKADVENTURE_HQ_URL, '_blank', 'noopener,noreferrer')}
           title="Enter Memetic Masters HQ on WorkAdventure"
           style={{
             position: 'fixed', zIndex: 50,
@@ -5261,15 +3796,6 @@ function Lobby({
             boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
           }}
         ><span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Robot size={16} /> VS Bot</span></button>
-
-        {plazaOpen && (
-          <Plaza
-            matches={matches}
-            myName={myName}
-            onClose={() => setPlazaOpen(false)}
-            onJoinMatch={(m) => { setPlazaOpen(false); void joinMatch(m.matchID); }}
-          />
-        )}
 
         {linkProblem && (
           <div style={{ maxWidth: 1480, margin: '12px auto 0', padding: '0 22px', width: '100%' }}>
@@ -5368,7 +3894,7 @@ function Lobby({
             {decksLoaded && !activeDeck && (
               <StarterDeckPicker
                 busy={busy === 'starter'}
-                onPick={(color) => { void useStarterDeck(color); }}
+                onPick={(color) => { void adoptStarterDeck(color); }}
               />
             )}
 
@@ -6355,6 +4881,35 @@ function FooterStat({ label, value, color }: { label: string; value: number | st
 }
 
 // ── In-match seat (waits if opponent not yet present) ───────────────────────
+/**
+ * Dispatched on `window` to ask the live board to play its `concede` move
+ * (forfeit). `ChainsBoard` listens for it and calls `moves.concede()`. This is
+ * the only way the client can forfeit: a boardgame.io client can only dispatch
+ * moves its own game definition declares, and conceding writes the result
+ * server-side.
+ */
+const CONCEDE_EVENT = 'egregore:concede';
+
+/**
+ * Resolve when the current match ends (the board fires `MATCH_EXIT_EVENT` after
+ * its end-of-match countdown) or after `ms`, whichever comes first. Used to
+ * give a conceded move time to reach the server before the seat is released.
+ */
+function waitForGameover(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      window.removeEventListener(MATCH_EXIT_EVENT, finish);
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    window.addEventListener(MATCH_EXIT_EVENT, finish);
+  });
+}
+
 function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLeave: () => void }) {
   const mobile = useIsMobile(860);
   // The socket transport is the ONLY boardgame.io surface left on the server;
@@ -6414,11 +4969,15 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
   // The lobby row is the only place the opponent's name is exposed while the
   // match is open; once it is live the board gets both names from the game
   // state. Nothing in the seat response names the other player.
-  const players: Array<{ id: number; name?: string }> = useMemo(() => {
+  const players: Array<{ id: number; name?: string; placeholder?: boolean }> = useMemo(() => {
     const mine = seat.seat;
-    const out: Array<{ id: number; name?: string }> = [{ id: 0 }, { id: 1 }];
+    const out: Array<{ id: number; name?: string; placeholder?: boolean }> = [{ id: 0 }, { id: 1 }];
     out[mine] = { id: mine, name: myName };
-    if (isFull) out[mine === 0 ? 1 : 0] = { id: mine === 0 ? 1 : 0, name: 'Opponent' };
+    // The seat response never names the other player, so this is a placeholder
+    // only — flagged so the avatar effect does NOT fetch a profile literally
+    // named "Opponent" (a guaranteed 404, or a real player who grabbed that
+    // display name) — frontend-03.
+    if (isFull) out[mine === 0 ? 1 : 0] = { id: mine === 0 ? 1 : 0, name: 'Opponent', placeholder: true };
     return out;
   }, [seat.seat, myName, isFull]);
 
@@ -6437,14 +4996,17 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
   // Fetch real avatars for whoever is seated (host now, opponent when they join).
   const [avatars, setAvatars] = useState<Record<string, string | null>>({});
   const fetchedRef = useRef<Set<string>>(new Set());
-  const nameKey = players.map(p => p.name || '').join('|');
+  const nameKey = players.map(p => (p.placeholder ? '' : p.name) || '').join('|');
   useEffect(() => {
+    let alive = true;
     for (const p of players) {
+      if (p.placeholder) continue;
       if (p.name && !fetchedRef.current.has(p.name)) {
         fetchedRef.current.add(p.name);
-        getProfileApi(p.name).then(pr => setAvatars(a => ({ ...a, [p.name!]: pr?.avatarUrl ?? null }))).catch(() => {});
+        getProfileApi(p.name).then(pr => { if (alive) setAvatars(a => ({ ...a, [p.name!]: pr?.avatarUrl ?? null })); }).catch(() => {});
       }
     }
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nameKey]);
 
@@ -6454,15 +5016,33 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [leaveErr, setLeaveErr] = useState('');
-  async function doLeave() {
+  // Release the seat exactly once, whether that comes from doLeave, from the
+  // board's end-of-match MATCH_EXIT_EVENT, or from a concede that reached
+  // gameover while we were waiting.
+  const releasedRef = useRef(false);
+  const release = useCallback(() => {
+    if (releasedRef.current) return;
+    releasedRef.current = true;
+    onLeave();
+  }, [onLeave]);
+
+  async function doLeave(live: boolean) {
     if (leaving) return;
     setLeaving(true); setLeaveErr('');
+    if (live) {
+      // A live match is forfeited, not cancelled: `POST /games/:id/cancel` only
+      // works on YOUR OWN still-open match and 404s on anything in progress.
+      // Conceding is an in-game move, so ask the board to play it
+      // (ChainsBoard listens for this event and calls moves.concede()), wait
+      // briefly for the match to actually end — the game service writes the
+      // result itself — and only then release the seat (frontend-02).
+      try { window.dispatchEvent(new CustomEvent(CONCEDE_EVENT)); } catch { /* ignore */ }
+      await waitForGameover(3000);
+      release();
+      return;
+    }
     try {
-      // `POST /games/:id/cancel` only works on YOUR OWN still-open match; it is
-      // a 404 for anything else, including a match already in progress. There
-      // is no "leave a live match" route — conceding is an in-game move, and
-      // the game service writes the result itself. So: cancel if we can, and
-      // either way stop occupying the seat locally.
+      // An open (not-yet-live) match: cancel it so the invite link stops working.
       await lobbyApi.cancel(seat.matchID);
     } catch (e) {
       if (!(e instanceof ApiError && e.isNotFound)) {
@@ -6471,13 +5051,12 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
         return;
       }
     }
-    onLeave();
+    release();
   }
 
   // Invite link (unchanged logic) + copy/share.
   const inviteUrl = window.location.origin + window.location.pathname + '#match=' + seat.matchID;
-  const [copied, setCopied] = useState<'' | 'link' | 'id'>('');
-  const flashCopied = (which: 'link' | 'id') => { setCopied(which); setTimeout(() => setCopied(''), 1600); };
+  const [copied, flashCopied] = useFlash<'' | 'link' | 'id'>('');
   function fallbackCopy(text: string) {
     try { const el = document.createElement('textarea'); el.value = text; el.style.position = 'fixed'; el.style.opacity = '0';
       document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el); } catch {}
@@ -6485,8 +5064,8 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
   async function copyInvite() { try { await navigator.clipboard.writeText(inviteUrl); } catch { fallbackCopy(inviteUrl); } flashCopied('link'); }
   async function copyMatchId() { try { await navigator.clipboard.writeText(seat.matchID); } catch { fallbackCopy(seat.matchID); } flashCopied('id'); }
   async function share() {
-    if ((navigator as any).share) {
-      try { await (navigator as any).share({ title: 'EGREGORE', text: 'Join my match on EGREGORE', url: inviteUrl }); return; } catch { /* cancelled -> fall through */ }
+    if (navigator.share) {
+      try { await navigator.share({ title: 'EGREGORE', text: 'Join my match on EGREGORE', url: inviteUrl }); return; } catch { /* cancelled -> fall through */ }
     }
     copyInvite();
   }
@@ -6507,13 +5086,13 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
         </div>
         <div style={{ color: HUB.muted, fontSize: 13.5, marginTop: 8, lineHeight: 1.5 }}>
           {live
-            ? 'The match is in progress. Leaving now forfeits it — you give up the duel, your seat is released and you cannot rejoin.'
+            ? 'The match is in progress. Forfeiting concedes the duel — it is scored as a loss, your seat is released and you cannot rejoin.'
             : 'The open match will be closed and the invite link will stop working.'}
         </div>
         {leaveErr && <div style={{ color: HUB.red, fontSize: 12.5, marginTop: 10 }}>{leaveErr}</div>}
         <div style={{ display: 'flex', gap: 10, marginTop: 18, justifyContent: 'flex-end' }}>
           <button onClick={() => setConfirmLeave(false)} disabled={leaving} style={{ padding: '10px 18px', minHeight: 44, borderRadius: 10, background: HUB.raised, border: `1px solid ${HUB.border}`, color: HUB.text, cursor: leaving ? 'default' : 'pointer', fontWeight: 700, letterSpacing: '0.04em' }}>STAY</button>
-          <button onClick={doLeave} disabled={leaving} style={{ padding: '10px 18px', minHeight: 44, borderRadius: 10, background: leaving ? '#5a2530' : HUB.red, border: 'none', color: '#fff', cursor: leaving ? 'default' : 'pointer', fontWeight: 800, letterSpacing: '0.04em' }}>
+          <button onClick={() => doLeave(live)} disabled={leaving} style={{ padding: '10px 18px', minHeight: 44, borderRadius: 10, background: leaving ? '#5a2530' : HUB.red, border: 'none', color: '#fff', cursor: leaving ? 'default' : 'pointer', fontWeight: 800, letterSpacing: '0.04em' }}>
             {leaving ? 'LEAVING…' : (live ? 'FORFEIT & LEAVE' : 'LEAVE MATCH')}
           </button>
         </div>
@@ -6525,17 +5104,21 @@ function MatchSeat({ seat, myName, onLeave }: { seat: Seat; myName: string; onLe
   // MATCH_EXIT_EVENT. The result is already written server-side, so there is
   // nothing to cancel; just release the seat and go home.
   useEffect(() => {
-    const handler = () => onLeave();
+    const handler = () => release();
     window.addEventListener(MATCH_EXIT_EVENT, handler);
     return () => window.removeEventListener(MATCH_EXIT_EVENT, handler);
-  }, [onLeave]);
+  }, [release]);
 
   // Once the interstitial elapses and both seats are filled, mount the game.
   if (entered && isFull && playerID !== null && credentials !== null) {
     return (
       <div style={{ background: '#000', minHeight: '100vh' }}>
         <BattleMusic />
-        <ChainsClient matchID={seat.matchID} playerID={playerID} credentials={credentials} />
+        {/* A board render error tears down the MATCH, not the whole session
+            (frontend-13): the boundary's "back to hub" releases the seat. */}
+        <ErrorBoundary variant="board" onReset={release}>
+          <ChainsClient matchID={seat.matchID} playerID={playerID} credentials={credentials} />
+        </ErrorBoundary>
         {/* In-game exit. Before this the only way out of a live match was the
             browser's back button. It reuses the waiting room's confirmLeave /
             doLeave path exactly — same lobby API call, same in-flight guard.
@@ -6756,7 +5339,12 @@ type LinkProblem = {
  * the catalogue as a 280×400 CardPreview wrapped in a div with
  * data-card-id="<id>" so a Playwright script can grab each one individually.
  */
-function PrintAllCards() {
+export function isPrintMode(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.location.hash.includes('print') || window.location.search.includes('print');
+}
+
+export function PrintAllCards() {
   const all = Object.values(CARDS);
   return (
     <div style={{
@@ -6800,6 +5388,13 @@ function SoloSetupModal({
   const [decksLoading, setDecksLoading] = useState<boolean>(true);
   const dateKey = todayKey();
   const best = todayBest(difficulty);
+
+  // Escape closes the modal and it announces itself as a dialog (frontend-19).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   // Load this player's saved decks so they can play vs bot with one of them.
   useEffect(() => {
@@ -6847,7 +5442,7 @@ function SoloSetupModal({
       background: 'rgba(2,2,8,0.78)', backdropFilter: 'blur(6px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
     }}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="solo-setup-title" style={{
         background: 'linear-gradient(160deg, #150f2a, #0a0716)',
         border: '1px solid #6c4bd8',
         borderRadius: 14,
@@ -6858,7 +5453,7 @@ function SoloSetupModal({
         display: 'flex', flexDirection: 'column', gap: 16,
       }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 20, fontWeight: 800, letterSpacing: 1 }}><Robot size={21} /> Play vs Bot</div>
+          <div id="solo-setup-title" style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 20, fontWeight: 800, letterSpacing: 1 }}><Robot size={21} /> Play vs Bot</div>
           <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>Single-player, runs entirely in your browser.</div>
         </div>
 
@@ -6996,8 +5591,11 @@ function InstallPrompt() {
       window.matchMedia?.('(display-mode: standalone)').matches ||
       (window.navigator as any).standalone === true;
     if (isStandalone) return;
-    // Honor a recent dismissal.
-    const until = Number(localStorage.getItem(DISMISS_KEY) || 0);
+    // Honor a recent dismissal. Read through the `local` helper (try/catch
+    // wrapped) — a bare localStorage read throws in Safari private mode / some
+    // in-app browsers, which, with the new root error boundary, would otherwise
+    // blank the app (frontend-14).
+    const until = local.get<number>(DISMISS_KEY, 0);
     if (until && Date.now() < until) return;
 
     const onBeforeInstall = (e: any) => {
@@ -7021,7 +5619,7 @@ function InstallPrompt() {
   if (hidden) return null;
 
   const dismiss = () => {
-    try { localStorage.setItem(DISMISS_KEY, String(Date.now() + 7 * 24 * 3600 * 1000)); } catch {}
+    local.set(DISMISS_KEY, Date.now() + 7 * 24 * 3600 * 1000);
     setHidden(true);
   };
   const install = async () => {
@@ -7111,13 +5709,10 @@ function SessionBootstrap({ error, onRetry, onSignOut }: {
 }
 
 export default function App() {
-  // Print mode: render every card as a 280×400 CardPreview in a grid for offline
-  // capture by scripts/render-cards.mjs. Triggered by `#print` or `?print`.
-  const printMode = (typeof window !== 'undefined') && (
-    window.location.hash.includes('print') ||
-    window.location.search.includes('print')
-  );
-  if (printMode) return <PrintAllCards />;
+  // Print mode (`#print` / `?print`, rendered by scripts/render-cards.mjs) is
+  // decided in index.tsx now and mounts <PrintAllCards/> instead of <App/>, so
+  // this component's hook order is unconditional (was a rules-of-hooks
+  // violation — an early return above 14 useState / 10 useEffect, frontend-04).
 
   // ── Session ───────────────────────────────────────────────────────────────
   // `signedIn` is driven by `onSessionChange`, which fires on sign-in, on
@@ -7239,9 +5834,9 @@ export default function App() {
   // Track solo match start/end for daily-best recording. Board fires
   // `mmtcg:solo-end` when a solo match resolves.
   useEffect(() => {
-    function onEnd(e: any) {
+    const onEnd = (e: WindowEventMap['mmtcg:solo-end']) => {
       if (!soloCfg) return;
-      const detail = e?.detail ?? {};
+      const detail = e.detail ?? {};
       const win = detail.winnerSeat === '0';
       const turns = Number(detail.turns ?? 0);
       const ms = Date.now() - (soloStartRef.current || Date.now());
@@ -7464,7 +6059,10 @@ export default function App() {
 
   // Landing + Profile share the same audio element so music keeps playing
   // (and the user's mute state is preserved) when switching between them.
-  const showMusic = view === 'landing' || view === 'profile' || view === 'rules' || view === 'lobby' || view === 'ranked' || view === 'boosters' || view === 'masterquest' || view === 'settings';
+  // 'view-profile' is included so <MenuMusic/> stays mounted (and the track
+  // keeps playing from where it was) when a player opens someone's profile from
+  // the lobby leaderboard — it used to unmount and restart from 0:00 (frontend-21).
+  const showMusic = view === 'landing' || view === 'profile' || view === 'view-profile' || view === 'rules' || view === 'lobby' || view === 'ranked' || view === 'boosters' || view === 'masterquest' || view === 'settings';
 
   // Settings -> Account -> "Edit profile" hands off to the profile hub's
   // existing ProfileEditModal rather than duplicating the edit form.
@@ -7512,6 +6110,11 @@ export default function App() {
           onRulebook={() => { closeTutorial(); goto('rules'); }}
         />
       )}
+      {/* Lazy screens (Rulebook, Boosters, Masterquest) suspend while their
+          async chunk loads — frontend-01. */}
+      <React.Suspense fallback={
+        <div role="status" aria-label="Loading" style={{ position: 'fixed', inset: 0, display: 'grid', placeItems: 'center', background: '#07060f', color: '#9faabf', fontFamily: F.body, letterSpacing: 1 }}>Loading…</div>
+      }>
       {view === 'settings'
         ? <SettingsPage
             myName={name}
@@ -7555,6 +6158,7 @@ export default function App() {
                       onDismissLinkProblem={() => setLinkProblem(null)}
                     />
                   : <Landing myName={name} profile={profile} queue={rankedQueue} onPlay={() => goto('lobby')} onSolo={() => setSoloSetup(true)} onLadder={() => goto('ranked')} onMasterquest={() => goto('masterquest')} onBoosters={() => goto('boosters')} onProfile={() => goto('profile')} onRules={() => goto('rules')} onSettings={() => goto('settings')} />}
+      </React.Suspense>
     </>
   );
 }

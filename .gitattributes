@@ -1,1 +1,25 @@
+# Normalize line endings: store LF in the repo, check out LF everywhere, so a
+# Windows checkout with core.autocrlf=true stops producing whole-file CRLF
+# diffs and keeps `git blame` meaningful on macOS/Linux and in CI. (hygiene-19)
+* text=auto eol=lf
+
+# Binary assets — never touch EOLs or try to diff them as text.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.gif  binary
+*.ico  binary
+*.woff  binary
+*.woff2 binary
+*.ttf  binary
+*.otf  binary
+*.glb  binary
+*.gltf binary
+*.mp3  binary
+*.wav  binary
+*.ogg  binary
+*.pdf  binary
+
+# Large video stays in Git LFS.
 *.mp4 filter=lfs diff=lfs merge=lfs -text

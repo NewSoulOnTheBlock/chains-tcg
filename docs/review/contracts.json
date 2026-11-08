@@ -1,0 +1,134 @@
+[
+  {
+    "id": "contracts-01",
+    "status": "fixed",
+    "note": "CardPack reworked to two-step commit/reveal. commitPack() pays and reserves but chooses no cards; revealPack() mints from a FUTURE block's hash fixed at commit time, so a contract receiver can no longer read the pull and revert to re-roll for free (H-8). Seed is deterministic once committed, so a reverting receiver only fails its own reveal and gets identical cards on retry. UNCOMPILED (forge not installed).",
+    "files": ["contracts/src/CardPack.sol"]
+  },
+  {
+    "id": "contracts-02",
+    "status": "fixed",
+    "note": "Randomness no longer relies on block.prevrandao (a constant on Arbitrum Orbit). revealPack mixes blockhash(commitBlock+1) — unknown to the buyer at commit time — with an operator-maintained operatorSeed beacon. revealPack is the single hook a Chainlink VRF would plug into. UNCOMPILED.",
+    "files": ["contracts/src/CardPack.sol"]
+  },
+  {
+    "id": "contracts-03",
+    "status": "fixed",
+    "note": "setTimeouts now bounded (funding <= 24h, settle <= 7d). Each Match snapshots fundingTimeout/settleTimeout at createMatch and reclaim reads the match's snapshots, so a later admin setTimeouts cannot retroactively lock an open match (H-10). UNCOMPILED.",
+    "files": ["contracts/src/WagerEscrow.sol"]
+  },
+  {
+    "id": "contracts-04",
+    "status": "fixed",
+    "note": "Added uint16 rakeBps to the Match struct, snapshotted from the live rakeBps in createMatch; settle() uses m.rakeBps. A later setRake cannot change the rake an open match pays. UNCOMPILED.",
+    "files": ["contracts/src/WagerEscrow.sol"]
+  },
+  {
+    "id": "contracts-05",
+    "status": "fixed",
+    "note": "Added a 1h RECLAIM_GRACE after settleTimeout that is exclusive to the operator: permissionless reclaim of a Funded match is valid only at fundedAt + settleTimeout + RECLAIM_GRACE, so a losing player can no longer front-run settle with reclaim. UNCOMPILED.",
+    "files": ["contracts/src/WagerEscrow.sol"]
+  },
+  {
+    "id": "contracts-06",
+    "status": "fixed",
+    "note": "nonReentrant added to deposit, settle, settleDraw, cancelMatch and reclaim (claim already had it). ReentrancyGuard's shared flag means a hook-bearing token cannot cross-re-enter any path during deposit's transfer (H-11). CEI preserved; settleDraw is the explicit draw/void path. UNCOMPILED.",
+    "files": ["contracts/src/WagerEscrow.sol"]
+  },
+  {
+    "id": "contracts-07",
+    "status": "fixed",
+    "note": "MasterToken.mint now capped at immutable MAX_SUPPLY (10M) and rejects to=0 (H-4 inflation closed); Ownable2Step + renounce disabled. README documents the single-EOA (deployer=owner=operator=feeRecipient) risk and the recommended multisig/timelock + separate operator key + treasury feeRecipient. UNCOMPILED. Note: deployed bytecode unchanged.",
+    "files": ["contracts/src/MasterToken.sol", "contracts/README.md"]
+  },
+  {
+    "id": "contracts-08",
+    "status": "fixed",
+    "note": "All three contracts switched to Ownable2Step and override renounceOwnership to revert, so a stray renounce/typo cannot brick setOperator/withdraw/rake. UNCOMPILED.",
+    "files": ["contracts/src/WagerEscrow.sol", "contracts/src/CardPack.sol", "contracts/src/MasterToken.sol"]
+  },
+  {
+    "id": "contracts-09",
+    "status": "fixed",
+    "note": "CardPack refunds overpayment in commitPack, enforces an optional on-chain maxSupply (tokens minted + reserved), and withdraw rejects address(0) and never touches funds still owed to open commits (reservedFunds). UNCOMPILED.",
+    "files": ["contracts/src/CardPack.sol"]
+  },
+  {
+    "id": "contracts-10",
+    "status": "partial",
+    "note": "My side (owned): gen-nft-metadata.mts now treats public/nft/index.json as a FROZEN index->id manifest and fails if any committed on-chain index changes card id (reorder/delete), allowing only appends (ALLOW_INDEX_REMAP=1 to override). The matching client-side change (src/pack-evm.ts + backend reading the manifest instead of Object.values(CARDS) order, plus a drift test) is for the client agent — written to requests/contracts.md. NOT a .mts I can node --check (TypeScript).",
+    "files": ["scripts/gen-nft-metadata.mts", "scratchpad/review/requests/contracts.md"]
+  },
+  {
+    "id": "contracts-11",
+    "status": "fixed-unexecuted",
+    "note": "Extended WagerEscrow.t.sol (reentrancy attacker token, rake-snapshot, timeout-snapshot, reclaim-race/grace, non-participant/double-settle/solvency, Ownable2Step) and added CardPack.t.sol (commit/reveal, overpay refund, supply cap, receiver-revert-cannot-reroll, refundExpired, withdraw) and MasterToken.t.sol (cap, mint-to-zero, renounce, 2-step). UNEXECUTED: forge is not installed and contracts/lib is not vendored; written to compile by inspection vs OZ v5 + forge-std. Do NOT assume they pass.",
+    "files": ["contracts/test/WagerEscrow.t.sol", "contracts/test/CardPack.t.sol", "contracts/test/MasterToken.t.sol"]
+  },
+  {
+    "id": "contracts-12",
+    "status": "fixed",
+    "note": "README now states the contracts are deployed but UNUSED by the product (wagers use new-backend's escrow wallet; CardPack minting gated off), lists the deployed addresses, and says to redeploy from fixed source + re-audit before wiring any in. Did not delete solana/ or server-wager.ts (server-wager.ts is not in my ownership and the client agent / review may retire it).",
+    "files": ["contracts/README.md"]
+  },
+  {
+    "id": "contracts-13",
+    "status": "other owner",
+    "note": "Belongs to the client agent (src/wager-program.ts). The SPL-Token vs Token-2022 mismatch for the $MASTER mint cannot be resolved from my side without probing the live mint owner. If the mint is Token-2022 the Rust program must be ported to token_interface/InterfaceAccount — I will do that contracts change on request. Documented in requests/contracts.md.",
+    "files": ["scratchpad/review/requests/contracts.md"]
+  },
+  {
+    "id": "contracts-14",
+    "status": "fixed-unverified",
+    "note": "Added oracle-gated settle_draw (Active -> refund both, no burn) and permissionless expire_match (Active -> refund both after created_at + SETTLE_TIMEOUT=24h) so no Active match locks stakes forever. Both close accounts. cargo check could NOT run (no MSVC linker on host) so this is unverified by compile.",
+    "files": ["solana/programs/master_wager/src/lib.rs"]
+  },
+  {
+    "id": "contracts-15",
+    "status": "fixed-unverified",
+    "note": "initialize is now gated to the program's upgrade authority via the ProgramData account (program.programdata_address() == program_data.key() and program_data.upgrade_authority_address == admin), so it cannot be front-run after deploy. Breaking: the initialize instruction now needs program + program_data accounts appended (noted for client in requests). cargo check blocked by host linker; unverified.",
+    "files": ["solana/programs/master_wager/src/lib.rs"]
+  },
+  {
+    "id": "contracts-16",
+    "status": "fixed-unverified",
+    "note": "Match accounts now close (close = creator) on settle/draw/cancel/expire, and the vault token account is CPI token::close_account'd to the creator, returning all rent. settle_match/SettleOrExpire contexts gained a creator (SystemAccount = match.creator) as the rent destination. cargo check blocked by host linker; unverified.",
+    "files": ["solana/programs/master_wager/src/lib.rs"]
+  },
+  {
+    "id": "contracts-17",
+    "status": "fixed-unverified",
+    "note": "Added burn_bps: u16 to the Match struct (Match::SIZE +2), set from cfg.burn_bps in create_match, and settle_match uses m.burn_bps instead of the live cfg.burn_bps so a set_config right before settle cannot change the rate players joined at. cargo check blocked by host linker; unverified.",
+    "files": ["solana/programs/master_wager/src/lib.rs"]
+  },
+  {
+    "id": "contracts-18",
+    "status": "fixed",
+    "note": "Anchor.toml provider.cluster defaulted to localnet (target mainnet only via --provider.cluster mainnet). initialize.ts now defaults SOLANA_RPC to devnet and refuses a mainnet RPC without --i-know-this-is-mainnet (or I_KNOW_THIS_IS_MAINNET=1). gen-oracle.ts makes no network call (local keypair only), so no mainnet guard applies there.",
+    "files": ["solana/Anchor.toml", "solana/scripts/initialize.ts"]
+  },
+  {
+    "id": "contracts-19",
+    "status": "fixed",
+    "note": "evm-deploy.mjs and evm-deploy-pack.mjs now dry-run by default (--broadcast to send), refuse a mainnet RPC without --mainnet, read OPERATOR/FEE_RECIPIENT from env (warn when defaulting to deployer = H-4 shape), MERGE into deployment.json instead of overwriting, and refuse to run unless resolved solc matches foundry.toml's pinned 0.8.24 (forge script documented as the supported reproducible path). Both pass `node --check`.",
+    "files": ["scripts/evm-deploy.mjs", "scripts/evm-deploy-pack.mjs"]
+  },
+  {
+    "id": "contracts-20",
+    "status": "other owner",
+    "note": "Belongs to the client agent (src/booster-mint.ts): rename BOOSTER_PRICE_SOL vs CARD_PACK_PRICE_ETH and split the 18-dec EVM MASTER vs 6-dec SPL MASTER decimal constants. Documented in requests/contracts.md.",
+    "files": ["scratchpad/review/requests/contracts.md"]
+  },
+  {
+    "id": "contracts-21",
+    "status": "fixed",
+    "note": "Added a 'Key rotation' section to contracts/README.md: the committed Alchemy key (and bundled Helius key) are compromised, how to rotate and VERIFY (401/403 on old key, dashboard shows removed), to record date+operator, and git history still carries it. Explicitly marked rotation status UNVERIFIED as of 2026-11-01 — did NOT claim it happened.",
+    "files": ["contracts/README.md"]
+  },
+  {
+    "id": "contracts-22",
+    "status": "other owner",
+    "note": "Belongs to the hygiene agent (package.json): remove the bogus 'anchor' Sails.js dependency; also flagged solc@0.8.24 undeclared (now required by the deploy scripts) and bs58 undeclared. Documented in requests/contracts.md.",
+    "files": ["scratchpad/review/requests/contracts.md"]
+  }
+]

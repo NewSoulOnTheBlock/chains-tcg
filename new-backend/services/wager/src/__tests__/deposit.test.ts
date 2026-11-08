@@ -100,9 +100,15 @@ describe('verifyDepositTx', () => {
     expect(verdict).toMatchObject({ ok: false, code: 'wrong_sender' });
   });
 
-  it('rejects a transaction none of the profile’s wallets sent', () => {
-    const verdict = verifyDepositTx(tx({ from: STRANGER }), expectation);
-    expect(verdict).toMatchObject({ ok: false, code: 'not_sent_by_depositor' });
+  it('accepts a smart-account / bundler-relayed deposit (server-39): tx.from is the relayer, the Transfer log is the player', () => {
+    // ERC-4337: the transaction is submitted by a bundler, so `tx.from` is the
+    // bundler and NOT a linked wallet. The ERC-20 Transfer log still shows the
+    // player's own account moving the tokens, which is what proves ownership.
+    const verdict = verifyDepositTx(
+      tx({ from: STRANGER, erc20Transfers: [transfer({ from: PLAYER })] }),
+      expectation,
+    );
+    expect(verdict).toMatchObject({ ok: true, fromAddress: PLAYER });
   });
 
   /* ── one profile, several wallets ───────────────────────────────────── */
@@ -132,19 +138,21 @@ describe('verifyDepositTx', () => {
   });
 
   it('still rejects a wallet that is NOT in the set — widening is not loosening', () => {
+    // After server-39 the gate is the Transfer log's `from`, so a transfer out of
+    // a non-linked wallet is rejected as `wrong_sender` (not `not_sent_by_depositor`).
     const multi: DepositExpectation = { ...expectation, depositorAddresses: [PLAYER, SECOND] };
     expect(
       verifyDepositTx(tx({ from: STRANGER, erc20Transfers: [transfer({ from: STRANGER })] }), multi),
-    ).toMatchObject({ ok: false, code: 'not_sent_by_depositor' });
+    ).toMatchObject({ ok: false, code: 'wrong_sender' });
   });
 
   it('rejects everything when the set is empty', () => {
     // A profile with no EVM wallet, or a resolver that found nothing. Empty must
-    // mean "nobody", never "anybody".
+    // mean "nobody", never "anybody": no Transfer log `from` can be a member.
     const none: DepositExpectation = { ...expectation, depositorAddresses: [] };
     expect(verifyDepositTx(tx(), none)).toMatchObject({
       ok: false,
-      code: 'not_sent_by_depositor',
+      code: 'wrong_sender',
     });
   });
 

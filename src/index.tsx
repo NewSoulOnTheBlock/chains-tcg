@@ -6,9 +6,18 @@ import { createRoot } from 'react-dom/client';
 // they survive the gateway's `default-src 'self'` CSP.
 import './fonts.css';
 import './base.css';
-import App from './App';
+import App, { PrintAllCards, isPrintMode } from './App';
+import { ErrorBoundary } from './screens/ErrorBoundary';
 
-createRoot(document.getElementById('root')!).render(<App />);
+// Print mode (`#print` / `?print`) mounts the card-sheet renderer directly,
+// instead of <App/>, so App's hooks are never behind an early return
+// (frontend-04). The root ErrorBoundary catches any render error so a crash
+// shows a recover panel instead of a blank white page (frontend-13).
+createRoot(document.getElementById('root')!).render(
+  isPrintMode()
+    ? <PrintAllCards />
+    : <ErrorBoundary variant="app"><App /></ErrorBoundary>,
+);
 
 // Register the service worker so the app becomes installable as a PWA and the
 // shell survives flaky mobile networks. Skipped in dev (vite serves from a

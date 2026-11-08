@@ -72,6 +72,18 @@ export interface PayoutRunnerDeps {
   /** How long to poll for a receipt before leaving it to the next run. */
   confirmTimeoutMs: number;
   confirmPollMs: number;
+  /**
+   * Replace-by-fee threshold (server-34). Once a leg has been attempted this
+   * many times without confirming, each further pending reconcile re-signs it
+   * at the SAME nonce with escalated fees instead of rebroadcasting identical
+   * underpriced bytes forever. Defaults to 2.
+   */
+  rbfAfterAttempts?: number;
+}
+
+/** A broadcast threw because the nonce was consumed by a foreign transaction. */
+function isNonceConsumed(err: unknown): boolean {
+  return err instanceof Error && err.name === 'NonceConsumedError';
 }
 
 const TERMINAL_ESCROW_STATUSES = new Set(['settled', 'refunded', 'void']);
@@ -120,13 +132,20 @@ export async function executePayout(
     }
 
     if (row.idempotencyKey !== args.idempotencyKey) {
-      // A decision already exists for this escrow and it is not ours. Never
-      // overwrite it — an escrow gets exactly one outcome.
+      // A DIFFERENT decision already exists for this escrow (e.g. an operator
+      // void raced the settlement worker). An escrow gets exactly one outcome,
+      // and that outcome belongs to the decision that won the INSERT — not to
+      // us. We must NOT drive its legs or call finalise() with OUR plan, which
+      // would stamp the escrow with the wrong finalStatus (server-33). Bail out
+      // and let the owning decision's own run drive it to completion.
       log().warn('payout_decision_conflict', {
         escrow_id: escrowId,
         existing_key: row.idempotencyKey,
+        existing_kind: row.kind,
         proposed_key: args.idempotencyKey,
+        proposed_kind: plan.kind,
       });
+      return { kind: 'conflict' as const, txSig: row.txSig };
     }
 
     // Winning the INSERT means we own the row and the lease it was created
@@ -143,6 +162,9 @@ export async function executePayout(
   if (claim.kind === 'terminal' || claim.kind === 'already') {
     return { state: 'already_paid', txSig: claim.txSig };
   }
+  // A conflicting decision owns this escrow: report it as not-ours-to-finish
+  // rather than finalising with our plan.
+  if (claim.kind === 'conflict') return { state: 'pending', txSig: claim.txSig };
   if (claim.kind === 'leased_elsewhere') return { state: 'pending', txSig: claim.txSig };
 
   // ── Phase 2: nothing to send ─────────────────────────────────────────────
@@ -205,10 +227,86 @@ async function runLeg(
     }
 
     if (outcome === 'pending') {
-      // Same bytes, same hash, same nonce: rebroadcasting cannot double-pay.
+      const rbfAfter = deps.rbfAfterAttempts ?? 2;
+      // server-34: once a leg has sat unconfirmed for `rbfAfter` attempts, the
+      // original is probably underpriced or dropped. Rebroadcasting the SAME
+      // bytes can never get it mined, so build a REPLACE-BY-FEE at the same
+      // nonce with escalated fees. The shared nonce makes the replacement and
+      // the original mutually exclusive on-chain, so this cannot double-pay; and
+      // the new hash is recorded (recordLegAttempt) BEFORE it is broadcast.
+      if (leg.attempts >= rbfAfter) {
+        let replacement: PreparedTx;
+        try {
+          replacement = await deps.sender.prepareTransfer({
+            to: leg.toAddress,
+            amountBase: leg.amountBase,
+            nonce: leg.nonce,
+            feeEscalationAttempt: leg.attempts,
+          });
+        } catch (err) {
+          log().warn('payout_leg_rbf_prepare_failed', {
+            escrow_id: escrowId,
+            leg_index: leg.legIndex,
+            err_message: err instanceof Error ? err.message : String(err),
+          });
+          return { state: 'pending' };
+        }
+        // Durable before the network sees it, exactly as a first send.
+        await recordLegAttempt(getPool(), {
+          escrowId,
+          legIndex: leg.legIndex,
+          txHash: replacement.hash,
+          rawTx: replacement.raw,
+          nonce: replacement.nonce,
+        });
+        try {
+          await deps.sender.broadcast(replacement);
+        } catch (err) {
+          if (isNonceConsumed(err)) {
+            // The nonce was consumed by a transaction that is NOT our tracked
+            // hash. Funds may already have moved (an earlier attempt), so we
+            // must NOT resend at a fresh nonce — that could double-pay. Fail the
+            // payout for operator reconciliation instead of looping forever.
+            const reason = 'payout nonce consumed by another transaction — needs operator reconciliation';
+            log().error('payout_leg_nonce_lost', {
+              escrow_id: escrowId,
+              leg_index: leg.legIndex,
+              tx_hash: replacement.hash,
+              nonce: replacement.nonce,
+            });
+            await markPayoutFailed(getPool(), escrowId, reason);
+            return { state: 'failed', reason };
+          }
+          log().warn('payout_leg_rbf_broadcast_failed', {
+            escrow_id: escrowId,
+            leg_index: leg.legIndex,
+            err_message: err instanceof Error ? err.message : String(err),
+          });
+          return { state: 'pending' };
+        }
+        if ((await pollForReceipt(deps, replacement)) === 'confirmed') {
+          await markLegPaid(getPool(), escrowId, leg.legIndex);
+          return { state: 'paid', txHash: replacement.hash };
+        }
+        return { state: 'pending' };
+      }
+
+      // Still early: give the original attempt more time. Same bytes, same
+      // hash, same nonce: rebroadcasting cannot double-pay.
       try {
         await deps.sender.broadcast(prepared);
       } catch (err) {
+        if (isNonceConsumed(err)) {
+          const reason = 'payout nonce consumed by another transaction — needs operator reconciliation';
+          log().error('payout_leg_nonce_lost', {
+            escrow_id: escrowId,
+            leg_index: leg.legIndex,
+            tx_hash: leg.txHash,
+            nonce: leg.nonce,
+          });
+          await markPayoutFailed(getPool(), escrowId, reason);
+          return { state: 'failed', reason };
+        }
         log().warn('payout_leg_rebroadcast_failed', {
           escrow_id: escrowId,
           leg_index: leg.legIndex,

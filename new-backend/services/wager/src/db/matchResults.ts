@@ -64,6 +64,59 @@ export async function listSettlementCandidates(
   return rows.map(map);
 }
 
+export interface VoidRefundCandidate {
+  escrowId: string;
+  matchId: string;
+  escrowStatus: string;
+  matchStatus: string;
+}
+
+/**
+ * Escrows that still hold a deposit but whose MATCH will never produce a result
+ * (server-32): the match was cancelled to 'void', or it has sat 'open' (nobody
+ * joined) longer than `ttlSeconds`. `listSettlementCandidates` only joins
+ * through `game.match_results`, so these never surface there and their deposits
+ * would otherwise sit until an operator noticed.
+ *
+ * Excludes anything with a match result (the settlement path owns those), any
+ * paid or in-flight payout, and any escrow already in a terminal state.
+ */
+export async function listVoidRefundCandidates(
+  q: Pool | PoolClient,
+  ttlSeconds: number,
+  limit: number,
+): Promise<VoidRefundCandidate[]> {
+  const { rows } = await q.query<{
+    escrow_id: string;
+    match_id: string;
+    escrow_status: string;
+    match_status: string;
+  }>(
+    `SELECT e.id AS escrow_id, e.match_id, e.status AS escrow_status, m.status AS match_status
+       FROM wager.escrows e
+       JOIN game.matches m ON m.id = e.match_id
+       LEFT JOIN wager.payouts p ON p.escrow_id = e.id
+      WHERE e.status IN ('open', 'funded')
+        AND (
+          m.status = 'void'
+          OR (m.status = 'open' AND m.created_at < now() - make_interval(secs => $1))
+        )
+        AND NOT EXISTS (SELECT 1 FROM game.match_results r WHERE r.match_id = e.match_id)
+        AND EXISTS (SELECT 1 FROM wager.deposits d WHERE d.escrow_id = e.id)
+        AND (p.escrow_id IS NULL OR p.status <> 'paid')
+        AND (p.lease_until IS NULL OR p.lease_until < now())
+      ORDER BY e.created_at ASC
+      LIMIT $2`,
+    [ttlSeconds, limit],
+  );
+  return rows.map((r) => ({
+    escrowId: r.escrow_id,
+    matchId: r.match_id,
+    escrowStatus: r.escrow_status,
+    matchStatus: r.match_status,
+  }));
+}
+
 export async function getMatchResult(
   q: Pool | PoolClient,
   matchId: string,

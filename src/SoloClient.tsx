@@ -19,6 +19,7 @@ import { ChainsBoard, MATCH_EXIT_EVENT } from './Board';
 import { MMTCGBot, enumerateMoves, type Difficulty } from './bot';
 import { dailySeed, dailyBotColor, todayKey, saveDailyResult } from './dailyChallenge';
 import { COLORS, STARTER_DECKS, type Color } from './cards';
+import { ErrorBoundary } from './screens/ErrorBoundary';
 
 export type SoloMode = 'casual' | 'daily';
 
@@ -113,10 +114,10 @@ export function SoloClient({
   useEffect(() => {
     const cb = onMatchEnd;
     if (!cb) return;
-    function handler(e: any) {
-      const d = e?.detail ?? {};
-      cb!({ win: d.winnerSeat === '0', turns: Number(d.turns ?? 0) });
-    }
+    const handler = (e: WindowEventMap['mmtcg:solo-end']) => {
+      const d = e.detail ?? {};
+      cb({ win: d.winnerSeat === '0', turns: Number(d.turns ?? 0) });
+    };
     window.addEventListener('mmtcg:solo-end', handler);
     return () => window.removeEventListener('mmtcg:solo-end', handler);
   }, [onMatchEnd]);
@@ -135,11 +136,15 @@ export function SoloClient({
           borderRadius: 6, padding: '8px 14px', cursor: 'pointer', fontWeight: 700,
         }}
       >Exit Solo</button>
-      <ClientCtor
-        playerID="0"
-        matchID={`solo-${mode}-${todayKey()}-${difficulty}`}
-        credentials=""
-      />
+      {/* A board render error ends the solo match and returns to the hub rather
+          than blanking the app (frontend-13). */}
+      <ErrorBoundary variant="board" onReset={onExit}>
+        <ClientCtor
+          playerID="0"
+          matchID={`solo-${mode}-${todayKey()}-${difficulty}`}
+          credentials=""
+        />
+      </ErrorBoundary>
     </div>
   );
 }

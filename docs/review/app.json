@@ -1,0 +1,131 @@
+[
+  {
+    "id": "client-api-01",
+    "status": "fixed",
+    "note": "Remember-me now initialises from sessionApi.getPersistence() === 'local' and setPersistence is called ONLY from the checkbox onChange (new setRememberPref). The mount effect that flipped persistence back to 'session' on every load is gone, so a saved 'local' preference survives reloads.",
+    "files": ["src/App.tsx"]
+  },
+  {
+    "id": "frontend-02",
+    "status": "fixed",
+    "note": "doLeave(live): on a LIVE match it dispatches window CustomEvent 'egregore:concede' (CONCEDE_EVENT), waits up to 3s for gameover (waitForGameover races MATCH_EXIT_EVENT vs timeout), then releases the seat via a once-only release() guard. Open (not-yet-live) matches still use lobbyApi.cancel. Dialog copy corrected to 'Forfeiting concedes the duel — it is scored as a loss…'. Engine owner's concede move + Board listener are assumed (Game.test.ts concede tests pass).",
+    "files": ["src/App.tsx"]
+  },
+  {
+    "id": "frontend-03",
+    "status": "fixed",
+    "note": "The 'Opponent' placeholder seat is flagged { placeholder: true }; the avatar effect skips placeholders (no getProfileApi('Opponent')) and now has an alive guard so a late response can't setState after unmount.",
+    "files": ["src/App.tsx"]
+  },
+  {
+    "id": "frontend-04",
+    "status": "fixed",
+    "note": "Print mode decided in index.tsx (exported isPrintMode/PrintAllCards) and mounts <PrintAllCards/> instead of <App/>; the early return above App's hooks is removed, so hook order is unconditional.",
+    "files": ["src/App.tsx", "src/index.tsx"]
+  },
+  {
+    "id": "frontend-05",
+    "status": "fixed",
+    "note": "Deleted the dead wallet sign-in path: signIn(), the 'stage' state, busy/label/evm, and now-unused loginErrorText, SIGN_IN_CHAIN, and the connectRobinhoodChain/detectEvmWallet/ROBINHOOD_CHAIN/AuthChain imports. Privy is the only sign-in path; the Remember-me checkbox now disables on privyBusy.",
+    "files": ["src/App.tsx"]
+  },
+  {
+    "id": "frontend-06",
+    "status": "fixed",
+    "note": "Removed the unreachable <Plaza> canvas branch, the plazaOpen state, and the './Plaza' import. The 'Enter Plaza' button keeps its real behaviour (opens WorkAdventure) with the URL hoisted to the WORKADVENTURE_HQ_URL constant. src/Plaza.tsx itself is not owned by me so it is left in place (now unimported).",
+    "files": ["src/App.tsx"]
+  },
+  {
+    "id": "frontend-07",
+    "status": "partial",
+    "note": "Removed the genuinely-dead RulesPage subsystem (RulesPage, RULES_NAV, RULES_SEARCH_INDEX, SECTION_SUMMARY, RuleSection, renderSectionBody, type RulesSectionId) and the imported-but-never-rendered SideRays/Iridescence/PixelTrail. The finding's 'exclusive helpers' list was partly WRONG: LifeOrb/CardTypesGrid/GasFlowViz/FlowNode/FlowArrow/TurnTimeline/ExampleTurn/arrowize/RULES_TOKENS/RULES_FONT/RULES_HEAD are used by the LIVE RulebookPage, so they were kept (and moved into src/screens/Rulebook.tsx). Board.tsx Side/Zone and src/Lightfall.tsx / src/BorderGlow.tsx are other owners' files.",
+    "files": ["src/App.tsx", "src/screens/Rulebook.tsx"]
+  },
+  {
+    "id": "frontend-13",
+    "status": "fixed",
+    "note": "New src/screens/ErrorBoundary.tsx (logs componentStack, recover panel). Root boundary wraps <App/> in index.tsx (variant 'app'); a board boundary (variant 'board', onReset releases the seat / exits solo) wraps <ChainsClient> in MatchSeat and <ClientCtor> in SoloClient, so a board crash tears down the match, not the session.",
+    "files": ["src/screens/ErrorBoundary.tsx", "src/index.tsx", "src/App.tsx", "src/SoloClient.tsx"]
+  },
+  {
+    "id": "frontend-14",
+    "status": "fixed",
+    "note": "InstallPrompt now reads/writes the dismissal through the try/catch-wrapped local.get/local.set helpers instead of bare localStorage, so a SecurityError in Safari private mode / in-app browsers no longer throws inside the effect (which, with the new root boundary, would otherwise blank the app).",
+    "files": ["src/App.tsx"]
+  },
+  {
+    "id": "frontend-15",
+    "status": "fixed",
+    "note": "Lobby poll skips the tick while document.hidden and refreshes immediately on visibilitychange, matching useRankedQueue/useGlobalChat back-off.",
+    "files": ["src/App.tsx"]
+  },
+  {
+    "id": "frontend-16",
+    "status": "fixed",
+    "note": "Added useFlash(idle, ms) hook (timer in a ref, cleared on re-trigger and unmount) in src/hooks and used it for MatchSeat's copy feedback (replacing the bare setTimeout). The other eight sites named in the finding are in Board.tsx/Boosters.tsx/Settings.tsx (other owners); the shared hook is ready for them to adopt.",
+    "files": ["src/hooks/index.ts", "src/App.tsx"]
+  },
+  {
+    "id": "frontend-18",
+    "status": "partial",
+    "note": "Task-4 portion in my files: declared Navigator.share and the 'mmtcg:solo-end' CustomEvent (SoloEndDetail) in vite-env.d.ts; typed the solo-end handlers in App.tsx and SoloClient.tsx; dropped the (navigator as any).share cast. window.ethereum was NOT added to vite-env.d.ts because wallet.ts already declares it (ethereum?: any) and a second differently-typed declaration is a TS merge error — left canonical in wallet.ts. The (G as any).deckCounts / gameover:any / ctx:any casts are in Board.tsx (other owner).",
+    "files": ["src/vite-env.d.ts", "src/App.tsx", "src/SoloClient.tsx"]
+  },
+  {
+    "id": "frontend-19",
+    "status": "partial",
+    "note": "Added role='dialog' + aria-modal + aria-labelledby + an Escape-to-close handler to the two modals I own (SoloSetupModal, ProfileEditModal). A single shared <Modal> primitive with a focus trap + the other ~7 modals (Board WinnerShareModal, Boosters.ModalShell, Masterquest.modalShell, Settings dialogs, DeckWorkspace drawer, SavedDeckLibrary) are in files I don't own / a larger refactor and were not done.",
+    "files": ["src/App.tsx"]
+  },
+  {
+    "id": "frontend-20",
+    "status": "partial",
+    "note": "HubCardTile now sets role='button', aria-label ('Add <card> to deck') and aria-disabled when it is an add target, so AT announces it as a button and the +/Enter shortcut is discoverable. The MasterquestPage <g> site is in src/masterquest/ (other owner).",
+    "files": ["src/App.tsx"]
+  },
+  {
+    "id": "frontend-21",
+    "status": "fixed",
+    "note": "Added 'view-profile' to showMusic so <MenuMusic/> stays mounted (track keeps playing) when opening a player profile from the lobby instead of unmounting and restarting from 0:00.",
+    "files": ["src/App.tsx"]
+  },
+  {
+    "id": "frontend-22",
+    "status": "skipped",
+    "note": "Low-priority mobile layout. Removing the Plaza canvas (frontend-06) kept the 'Enter Plaza' / 'VS Bot' fixed buttons; the proper fix (a shared <BottomDock> stacking slot so install banner / wallet-link / solo button don't overlap) is a design decision and a larger change than warranted here, so left as-is.",
+    "files": []
+  },
+  {
+    "id": "frontend-24",
+    "status": "fixed",
+    "note": "Added useAsyncEffect(effect(alive), deps) hook in src/hooks. DeckWorkspace's mount loader and ProfilePage's three-await loader now run through it and guard every setState with alive(), so a rename / tab switch can no longer overwrite in-progress edits or setState after unmount. ProfilePage's reusable reload/reloadDecks stay for the post-edit path.",
+    "files": ["src/hooks/index.ts", "src/App.tsx"]
+  },
+  {
+    "id": "frontend-26",
+    "status": "fixed",
+    "note": "Removed PublicProfile's always-empty custom-deck section (deck state, deckGrouped memo, deckValid, and the ~50 lines of grid/\"hasn't published a custom deck\" markup). Loader keeps only the public profile.",
+    "files": ["src/App.tsx"]
+  },
+  {
+    "id": "frontend-27",
+    "status": "fixed",
+    "note": "Renamed useStarterDeck -> adoptStarterDeck (and its call site) so eslint-plugin-react-hooks no longer flags a 'hook' called in a callback.",
+    "files": ["src/App.tsx"]
+  },
+  {
+    "id": "frontend-01",
+    "status": "partial",
+    "note": "Decomposition started and verified, not fully atomised. Established src/screens/ and src/hooks/. Extracted the whole interactive Rulebook cluster (~850 lines) to src/screens/Rulebook.tsx and lazy-loaded it; converted Boosters and Masterquest to React.lazy; moved useIsMobile to src/hooks (shared). Entry chunk dropped from 584,024 B (165.4 kB gz) to 498,407 B (143.2 kB gz). Settings could not be lazy-loaded because App imports PREFS_EVENT eagerly from it — request filed in review/requests/app.md to move PREFS_EVENT to a lightweight module. The remaining in-file screens (Login, Landing/Hub, Lobby, MatchSeat, DeckWorkspace, Profile, Ranked, Solo) were left in App.tsx: splitting them further requires exporting a large shared-token/helper surface and was out of safe scope for a single pass in a concurrently-edited tree.",
+    "files": ["src/App.tsx", "src/screens/Rulebook.tsx", "src/hooks/index.ts", "src/index.tsx"]
+  },
+  { "id": "frontend-08", "status": "skipped", "note": "src/Board.tsx — owned by the Board agent.", "files": [] },
+  { "id": "frontend-09", "status": "skipped", "note": "src/Board.tsx — owned by the Board agent.", "files": [] },
+  { "id": "frontend-10", "status": "skipped", "note": "src/Boosters.tsx — owned by the Boosters agent.", "files": [] },
+  { "id": "frontend-11", "status": "skipped", "note": "src/Boosters.tsx — owned by the Boosters agent.", "files": [] },
+  { "id": "frontend-12", "status": "skipped", "note": "src/Board.tsx (+ CardPreview/Tutorial) — owned by the Board agent.", "files": [] },
+  { "id": "frontend-17", "status": "skipped", "note": "src/Board.tsx TurnBanner timer — owned by the Board agent.", "files": [] },
+  { "id": "frontend-23", "status": "skipped", "note": "src/Board.tsx refreshProfiles — owned by the Board agent.", "files": [] },
+  { "id": "frontend-25", "status": "skipped", "note": "src/Board.tsx daily-quest flag — owned by the Board agent.", "files": [] },
+  { "id": "frontend-28", "status": "skipped", "note": "src/Board.tsx MatchRail keying — owned by the Board agent.", "files": [] }
+]

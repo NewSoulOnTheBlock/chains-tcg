@@ -16,11 +16,12 @@
  * "the wallet this player will pay from".
  *
  * A player who signs in with their smart account and pays from their MetaMask —
- * or the reverse — would have had a perfectly good payment rejected as
- * `not_sent_by_depositor`, with a message telling them the transaction was not
- * sent by their wallet when it demonstrably was. That is a support ticket nobody
- * could close. The two addresses were always equal before linking, so nothing
- * caught it.
+ * or the reverse — would have had a perfectly good payment rejected (the tokens
+ * "did not come from one of your linked wallets", `deposit_wrong_sender`) when
+ * they demonstrably did. That is a support ticket nobody could close. The two
+ * addresses were always equal before linking, so nothing caught it. (server-39
+ * additionally dropped the `tx.from` gate so a bundler-relayed smart-account
+ * deposit is judged purely on the Transfer log's `from`.)
  *
  * ── THE SET COMES FROM THE DATABASE, FOR THE AUTHENTICATED PROFILE ─────────
  *

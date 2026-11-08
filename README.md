@@ -1,94 +1,287 @@
-# On-Chain Virtual Arena
+# Egregore TCG
 
-A Robinhood app — a Magic-the-Gathering-inspired turn-based card game built on **boardgame.io**, themed around 5 blockchains and running on Robinhood Chain.
+A turn-based trading-card game in the Magic tradition, built on
+**boardgame.io** and themed around five **Sproto Gremlin** factions.
 
-## The Five Chains
+- **Play:** [egregoretcg.xyz](https://egregoretcg.xyz) (Vite + React SPA on Vercel)
+- **API:** `api.ocva.online` (the `new-backend/` monorepo, deployed separately)
+- **Repo:** `NewSoulOnTheBlock/chains-tcg`
 
-| Chain | Color | Slot |
-|---|---|---|
-| BnB | gold | aggro-ramp, go-wide |
-| Solana | purple | tempo, burn, bounce |
-| Ethereum | silver | control, removal, finishers |
-| Robinhood | green | lifegain midrange, big bodies |
-| Base | blue | card-advantage aggro, cheap swarm |
+> **History.** This project began as *On-Chain Virtual Arena* (OCVA), a
+> five-blockchain game on masterstcg.com deployed through Render. That stack
+> is retired. Anything that still mentions Render, Supabase or masterstcg is
+> legacy and can be ignored. The repo name `chains-tcg` and the internal
+> card-id prefixes (`bnb_`, `sol_`, `eth_`, `robinhood_`, `base_`) are
+> leftovers from that era.
 
-## Rules summary
+---
 
-- **Life:** 20. Drop opponent to 0 → you win.
-- **Cards:** 4 types.
-  - **Nodes** — like lands. Play **one per turn**. Tap for 1 gas of their color.
-  - **Memes** — creatures with Power/Toughness. Can attack the turn after they're played (no summoning sickness on turn 2+).
-  - **Machines** — permanents with passive global effects (artifacts/enchantments).
-  - **Moves** — one-shot spells (instants/sorceries) that resolve and go to graveyard.
-- **Gas:** each Node taps for 1 gas of its color. Gas drains at end of turn.
-- **Turn structure (per player):**
-  1. Untap all your stuff, draw 1 card (skipped on Turn 1 for the starter).
-  2. Main phase: play cards, tap Nodes for gas, declare attackers.
-  3. Combat: confirm attackers → defender assigns blockers → resolve damage.
-  4. End: discard down to 7, drain gas, hand off the turn.
-- **Combat:** unblocked attackers damage the defending player. Blocked attackers fight blockers (damage compares to toughness). Damage clears at end of combat.
-- **Win condition:** opponent at ≤ 0 life, or empty deck on draw.
+## Contents
 
-## Card pool
+1. [The game](#the-game)
+2. [Card set](#card-set)
+3. [Card art pipeline](#card-art-pipeline)
+4. [Repository layout](#repository-layout)
+5. [Running locally](#running-locally)
+6. [Scripts](#scripts)
+7. [Testing and CI](#testing-and-ci)
+8. [Deployment](#deployment)
+9. [Environment variables](#environment-variables)
+10. [Security](#security)
+11. [Code review and docs](#code-review-and-docs)
 
-5 chains × (4 memes + 2 machines + 2 moves) + nodes — see `src/cards.ts`. Each starter deck = 12 Nodes + 4 of every non-node card in that color = 30 cards.
+---
 
-## Running
+## The game
 
-### Local development (server + client with hot reload)
+Two players, 20 life each. Win by dropping the opponent to 0 life or by
+making them draw from an empty deck.
 
-```bash
-npm install
-npm run serve        # terminal 1 — backend on :8000 (lobby + REST API + Postgres if DATABASE_URL set)
-npm run dev          # terminal 2 — Vite dev server on :5173, proxies /api /games /socket.io to :8000
+**Card types**
+
+| Type | What it is |
+|---|---|
+| **Node** | Land. One per turn. Tap for 1 gas of its faction's color. |
+| **Meme** | Creature with Power / Toughness. Attacks and blocks. |
+| **Machine** | Permanent with a passive effect. |
+| **Aura** | Enchantment that attaches to a single Meme. |
+| **Move** | One-shot spell. |
+
+**Turn structure**
+
+1. Untap, then draw (the first player skips the draw on turn one).
+2. Main phase: play Nodes and cards, tap Nodes for gas, declare attackers.
+3. Combat: confirm attackers, defender assigns blocks, damage resolves.
+4. End: discard down to hand size, unspent gas drains.
+
+**Decks** are 60 cards (`DECK_SIZE` in `src/cards.ts`). Each faction ships a
+starter deck in `STARTER_DECKS`; `validateDeck` enforces legality. Hidden
+information (libraries, the opponent's hand) lives in `G.secret` and is
+stripped per seat by `playerView`.
+
+**Modes** available from the hub: casual lobby matches, ranked queue, solo
+play against the built-in bot (`src/bot.ts`), a daily challenge, the
+**Masterquest** single-player map, and in-match voice chat over PeerJS.
+
+### The five factions
+
+Factions are defined in `COLOR_META` in `src/cards.ts`.
+
+| Internal key | Faction | Color | Identity |
+|---|---|---|---|
+| `bnb` | **Spirit** | white | go wide, lift the whole host, cleanse the field |
+| `sol` | **Rebel** | red | burn, snipe, hit first and fast |
+| `eth` | **Jester** | black | removal, control, the last laugh |
+| `robinhood` | **Wealth** | green | lifegain midrange, sturdy bodies, compounding |
+| `base` | **Knowledge** | blue | card advantage, tricks, cheap swarm |
+
+---
+
+## Card set
+
+The catalogue is the single source of truth in `src/cards.ts`. It currently
+holds **85 cards**:
+
+| Type | Count |
+|---|---|
+| Node | 5 (one per faction) |
+| Meme | 40 |
+| Machine | 20 |
+| Aura | 5 |
+| Move | 15 |
+
+A plain-text dump of every card (name, type, cost, rules text) is generated
+into `docs/CARDS.txt`. Regenerate it whenever the catalogue changes.
+
+---
+
+## Card art pipeline
+
+Finished card renders come from the external **card-forge** tool as
+**1064 x 1478 WebP** files with frame and text already baked in. They are
+vendored by faction under `public/cards/`:
+
+```
+public/cards/
+  spirit/     jester/     knowledge/
+  rebel/      wealth/
 ```
 
-Open `http://localhost:5173` in **two different browser windows** (different tabs/profiles work too — each uses `sessionStorage` for its own identity). Each window logs in as a separate profile, picks a chain, creates or joins a match in the lobby, then plays.
+`FULL_CARDS` in `src/cards.ts` maps a card id to its WebP. A card with no
+entry falls back to a generated faction sigil, so the game never breaks on a
+missing render. The legacy loose PNG/JPG art that used to sit directly in
+`public/cards/` has been removed from the tree in this release.
 
-Without `DATABASE_URL`, profile data lives in the server's in-memory store (resets on restart). To use Postgres locally:
+---
 
-```bash
-$env:DATABASE_URL = "postgres://user:pass@localhost:5432/chains"
-npm run serve
+## Repository layout
+
+```
+.
++-- src/                    Front end (Vite + React 18 + boardgame.io client)
+|   +-- cards.ts            Card catalogue, COLOR_META, FULL_CARDS, starter decks
+|   +-- Game.ts             boardgame.io game: state, moves, combat, playerView
+|   +-- bot.ts              Solo-mode AI opponent
+|   +-- App.tsx, Board.tsx  Hub, lobby, match seat, board rendering
+|   +-- api/                Typed HTTP client for the gateway (auth, lobby, ranked, wager...)
+|   +-- components/         Shared UI (CardFace, Modal, responsive helpers)
+|   +-- hooks/              Shared hooks split out of App.tsx
+|   +-- screens/            Rulebook, ErrorBoundary and other split-out screens
+|   +-- masterquest/        Single-player map, lore and progress
+|   +-- privy/              Privy auth flow and env validation
++-- api/                    Vercel functions (Neon Postgres): hub chat + presence
++-- migrations/             SQL for the Neon chat/presence database (run by hand)
++-- public/cards/           Card art WebPs, one folder per faction
++-- docs/                   CARDS.txt, SECURITY.md, code-review reports
++-- scripts/                Dev utilities and chain scripts (see scripts/README.md)
++-- new-backend/            Live API monorepo: auth, profile, game, wager, rpc-proxy, gateway
++-- contracts/              EVM contracts (Foundry): CardPack, MasterToken, WagerEscrow
++-- solana/                 Anchor programs from the OCVA era
++-- .github/workflows/      CI (front end + backend)
++-- biome.json              Lint config
++-- vitest.config.ts        Front-end test config
++-- vercel.json             SPA rewrites, /gw proxy, security headers
 ```
 
-## Deploying to Render.com
+**`new-backend/`** is deployed on its own (Docker on a VPS behind Caddy; see
+`new-backend/DEPLOY.md`, `ARCHITECTURE.md` and `INTEGRATION.md`). It is not
+built or deployed by this repo's Vercel project.
 
-This repo includes a `render.yaml` blueprint that provisions one Node web service + one free Postgres database, and wires `DATABASE_URL` automatically.
+**`contracts/`** and **`solana/`** are deployed on-chain but **not used by the
+product today**. Pack minting is gated off (`PACK_MINTING_AVAILABLE = false`).
+They are kept for reference and have their own test suites.
 
-1. Push this repo to GitHub.
-2. In the Render dashboard: **New → Blueprint**, point at the repo, click **Apply**.
-3. Render builds (`npm ci && npm run build`) and starts (`npm start`) the web service. The boardgame.io socket.io server, lobby REST API, custom `/api/*` profile endpoints, and the static React build are all served from the same port.
-4. The production site lives at `https://www.masterstcg.com`. `ALLOW_ORIGIN` is set in `render.yaml` to permit both the apex (`https://masterstcg.com`) and `www` host; it accepts a comma-separated list if you need to add more origins.
+---
 
-Share the URL with anyone — they sign in with a name, see all open matches, and either join one or create their own. Win/loss records persist globally in Postgres and show up on the in-app leaderboard.
+## Running locally
 
-### Environment variables
+Requirements: Node 20+, npm.
+
+```bash
+npm install          # root; .npmrc pins legacy-peer-deps (required, see the file)
+npm run dev          # Vite dev server on http://localhost:5173
+```
+
+The dev server proxies `/auth`, `/api`, `/games`, `/wager`, `/rpc` and
+`/socket.io` to the live gateway (`VITE_DEV_API_PROXY`, default
+`https://api.ocva.online`), so you can play against production without
+running a backend.
+
+Two routes are Vercel functions rather than gateway routes and are **not**
+proxied: `/api/chat` and `/api/presence`. They return 404 under `npm run dev`
+unless you run `vercel dev` with the chat database env set.
+
+To develop against a local backend instead, run `new-backend/` per its own
+README and point `VITE_DEV_API_PROXY` at it.
+
+---
+
+## Scripts
+
+```bash
+npm run dev           # Vite dev server
+npm run build         # tsc -b && vite build  ->  dist/
+npm run preview       # serve the production build locally
+npm run typecheck     # tsc for the browser (tsconfig.json) and api/ (tsconfig.api.json)
+npm test              # vitest, src/**/*.test.ts and api/ tests
+npm run lint          # Biome lint (lint only, no formatting)
+npm run render:cards  # render every card to PNG via Playwright (dev utility)
+```
+
+`scripts/README.md` documents every script in `scripts/`, including which
+ones are current and which are chain-era leftovers.
+
+---
+
+## Testing and CI
+
+The front end has a vitest suite covering the game engine (`Game.test.ts`),
+card catalogue, collection, ranked client, match modes, linked wallets, error
+text, Privy auth flow and the API HTTP layer. `new-backend/` has its own
+vitest suites per service, and `contracts/` has Foundry tests for all three
+contracts.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push and PR:
+
+| Job | Steps |
+|---|---|
+| **Front end** | `npm ci`, `npm run typecheck`, `npm test`, `npm run build` |
+| **new-backend** | `npm ci`, `npm run typecheck`, `npx vitest run` |
+
+Lint is not a CI gate yet. `npm run lint` currently reports a large backlog
+of Biome findings; treat it as advisory until that is burned down.
+
+---
+
+## Deployment
+
+The SPA deploys to **Vercel** from this repo (`vercel.json`):
+
+- `/gw/*` is rewritten to `https://api.ocva.online/*` so REST and RPC calls
+  are same-origin. The boardgame.io socket connects directly to
+  `VITE_SOCKET_URL`.
+- All non-file paths fall through to `index.html` for client routing.
+- Security headers are set on every response: HSTS, `X-Frame-Options: DENY`,
+  `nosniff`, a strict Referrer-Policy, a Permissions-Policy that only allows
+  the microphone (voice chat), and a **report-only** Content-Security-Policy.
+  See `docs/review/csp.md` for the plan to enforce it.
+- `api/chat.ts` and `api/presence.ts` run as Vercel functions against a Neon
+  Postgres database. Run `migrations/presence.sql` once by hand against that
+  database before the first deploy; the function does no DDL on the request
+  path.
+
+The backend is deployed independently from `new-backend/` (see its
+`DEPLOY.md`).
+
+---
+
+## Environment variables
+
+**Build-time, committed in `.env.production`** (all public by design):
 
 | Var | Purpose |
 |---|---|
-| `PORT` | Port to listen on (Render sets this automatically). |
-| `DATABASE_URL` | Postgres connection string. Without it, server uses an in-memory fallback. |
-| `PGSSL` | Set to `1` to force SSL on Postgres (required on Render). |
-| `ALLOW_ORIGIN` | Production origin(s) to permit for socket.io + REST connections. Accepts a single URL or a comma-separated list (e.g. `https://www.masterstcg.com,https://masterstcg.com`). |
-| `VITE_SERVER_BASE` | (Build-time, optional) Override server URL the client connects to. Leave empty to use same origin. |
-| `VITE_API_BASE` | (Build-time, optional) Override REST API base. Leave empty for same origin. |
+| `VITE_API_BASE` | REST + RPC base. `/gw` in production (same-origin rewrite). |
+| `VITE_SOCKET_URL` | boardgame.io socket.io origin (`https://api.ocva.online`). |
+| `VITE_PRIVY_APP_ID` | Privy app id. |
+| `VITE_DEV_API_PROXY` | Dev-only: where the Vite proxy forwards gateway routes. |
 
-## Architecture
+**Runtime, set in the Vercel dashboard** (never committed):
 
-- `src/cards.ts` — card definitions, color palette, 60-card starter decks.
-- `src/Game.ts` — boardgame.io `Game`: state shape, all moves, combat resolution, `playerView` for hidden state.
-- `src/Board.tsx` — React UI: hand, battlefield, gas, combat, target picker, chat, profile header.
-- `src/App.tsx` — Login → Lobby (create/join match) → MatchSeat with `SocketIO` multiplayer.
-- `src/server.ts` — boardgame.io `Server` (Koa) + custom `/api/*` REST API + static-serves the React `dist/`.
-- `src/db.ts` — Postgres profile store with in-memory fallback.
-- `src/profiles.ts` — client-side HTTP wrapper around the profile API.
-- `render.yaml` — Render blueprint (web service + Postgres).
+| Var | Purpose |
+|---|---|
+| `CHAT_DATABASE_URL` | Neon connection string for hub chat and presence. |
+| `CHAT_ADMINS` / `CHAT_ADMIN_IDS` | Comma-separated wallet addresses / profile ids that may post announcements. |
+| `CHAT_ADMIN_KEY` | Shared secret for scripted admin posts via `x-chat-admin-key`. |
+| `PRESENCE_AUTOMIGRATE` | Set to `1` only on throwaway/preview DBs to let the first request create the table. |
 
-## Hidden information
+Copy `.env.example` to `.env.local` for local overrides. `new-backend/` has
+its own `.env.example`.
 
-The deck contents are stored in `G.secret.decks` and stripped to size-only via `playerView`. Opponent's hand is replaced with `'hidden'` placeholders before being sent to your client. The framework's authoritative master (in-browser via `Local()`, or remote via `SocketIO`) is the only thing that ever sees the full state.
+---
 
-## Determinism
+## Security
 
-All shuffles and any future random effects use the `random` API. Set a fixed `seed` on the game object to make matches reproducible for tests.
+`docs/SECURITY.md` is the entry point. In short: the `SECURITY_AUDIT.pdf` at
+the repo root is a **2026-07-27 snapshot** that predates Privy auth, the
+Vercel functions, the EVM pack contracts and the current shape of
+`new-backend/`. Open, verified security items from the 2026-11-01 code review
+are tracked in `docs/review/`.
+
+Please report vulnerabilities privately rather than in public issues.
+
+---
+
+## Code review and docs
+
+| Doc | What it covers |
+|---|---|
+| `docs/review/2026-11-01-code-review.md` | Full review: engine, front end, client/wallet, servers, contracts, hygiene |
+| `docs/review/2026-11-01-findings.json` | Every finding, machine-readable |
+| `docs/review/*.json`, `resolutions/`, `jev-triage/` | Per-area findings and how each was resolved or triaged |
+| `docs/review/csp.md` | Content-Security-Policy rollout plan |
+| `docs/SECURITY.md` | Audit status and where open security items live |
+| `docs/CARDS.txt` | Generated card list |
+| `new-backend/ARCHITECTURE.md`, `DEPLOY.md`, `INTEGRATION.md` | Backend design, deployment and client integration |
+| `scripts/README.md` | Status of every script |
+| `src/api/README.md` | Front-end API client conventions |

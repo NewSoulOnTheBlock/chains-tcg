@@ -17,6 +17,7 @@ import { SoloClient } from '../SoloClient';
 import type { Color } from '../cards';
 import { validateDeck } from '../cards';
 import { listDecksApi, type DeckEntry } from '../profiles';
+import { Modal } from '../components/Modal';
 import {
   PROLOGUE, ACTS, SITES, EPILOGUE, INTERLUDES,
   mapPosOf, MAP_VIEWBOX, type SacredSite, type SiteId, type Interlude,
@@ -310,7 +311,14 @@ function MapSvg({
         return (
           <g key={s.id}
             onClick={() => onSiteClick(s)}
-            style={{ cursor: (cleared || unlocked) ? 'pointer' : 'not-allowed' }}>
+            role="button"
+            tabIndex={(cleared || unlocked) ? 0 : -1}
+            aria-label={`Site ${s.index}: ${s.name}${unlocked ? ' (current)' : cleared ? ' (cleared)' : ' (locked)'}`}
+            aria-disabled={dim || undefined}
+            onKeyDown={(e) => {
+              if ((cleared || unlocked) && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onSiteClick(s); }
+            }}
+            style={{ cursor: (cleared || unlocked) ? 'pointer' : 'not-allowed', outline: 'none' }}>
             {/* Pulsing halo around the current site */}
             {unlocked && (
               <circle cx={p.x} cy={p.y} r={baseR + 18} fill={fill} opacity={0.22}>
@@ -402,22 +410,21 @@ function ActLegend() {
 // ─── Modals ────────────────────────────────────────────────────────────────
 
 function modalShell(children: React.ReactNode, onClose?: () => void) {
+  // Routed through the shared accessible Modal primitive: role=dialog,
+  // aria-modal, initial focus, Escape, focus trap and restore (frontend-19).
   return (
-    <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, zIndex: 300,
-      background: 'rgba(2,1,10,0.86)', backdropFilter: 'blur(6px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      padding: 16, overflowY: 'auto',
-    }}>
-      <div onClick={e => e.stopPropagation()} style={{
+    <Modal onClose={onClose} label="Masterquest" zIndex={300}
+      backdropStyle={{ background: 'rgba(2,1,10,0.86)', backdropFilter: 'blur(6px)', padding: 16, overflowY: 'auto' }}
+      panelStyle={{
         background: 'linear-gradient(160deg, #1a1230, #0a0716)',
         border: '1px solid #6c4bd8', borderRadius: 14,
         padding: 22, maxWidth: 640, width: '100%',
         color: '#f5f3ff', fontFamily: 'Inter, sans-serif',
         boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
         maxHeight: '92vh', overflowY: 'auto',
-      }}>{children}</div>
-    </div>
+      }}>
+      {children}
+    </Modal>
   );
 }
 

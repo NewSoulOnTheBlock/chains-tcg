@@ -52,6 +52,7 @@ import {
   setSession,
   type AuthChain,
 } from './session.js';
+import { getActiveEvmProvider, type Eip1193Provider } from '../wallet.js';
 
 export type { AuthChain, Session } from './session.js';
 export {
@@ -358,45 +359,27 @@ function utf8ToHex(text: string): string {
   return hex;
 }
 
-const B58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-
-/**
- * Minimal base58 (Bitcoin alphabet) encoder for Solana signatures.
- *
- * Inlined on purpose: `bs58` is only a transitive dependency here, and adding
- * a direct one is out of scope for this layer. 20 lines beats a package.
- */
-function toBase58(bytes: Uint8Array): string {
-  if (bytes.length === 0) return '';
-  const digits: number[] = [0];
-  for (const byte of bytes) {
-    let carry = byte;
-    for (let i = 0; i < digits.length; i += 1) {
-      carry += digits[i] << 8;
-      digits[i] = carry % 58;
-      carry = (carry / 58) | 0;
-    }
-    while (carry > 0) {
-      digits.push(carry % 58);
-      carry = (carry / 58) | 0;
-    }
-  }
-  // Leading zero bytes become leading '1's.
-  let out = '';
-  for (let i = 0; i < bytes.length && bytes[i] === 0; i += 1) out += '1';
-  for (let i = digits.length - 1; i >= 0; i -= 1) out += B58_ALPHABET[digits[i]];
-  return out;
-}
-
 /**
  * Sign `message` with an injected EVM provider via `personal_sign` (EIP-191).
  *
  * `personal_sign` takes `[data, address]` — note that this is the reverse of
  * `eth_sign`'s parameter order, and getting it backwards is the single most
  * common cause of "invalid signature" here.
+ *
+ * `provider` MUST be the one that connected the account — pass the `provider`
+ * that `connectRobinhoodChain()` returned. When omitted it defaults to
+ * `getActiveEvmProvider()` (the last wallet a `connect*` used), NOT a bare
+ * `globalThis.ethereum`: with several wallets installed those can be different
+ * extensions, and signing with the wrong one yields a key the server never
+ * issued a nonce for — a 401 the UI then blames on an expired challenge
+ * (client-api-22).
  */
-export async function signMessageEvm(message: string, address: string): Promise<string> {
-  const eth = (globalThis as { ethereum?: { request(a: { method: string; params: unknown[] }): Promise<unknown> } }).ethereum;
+export async function signMessageEvm(
+  message: string,
+  address: string,
+  provider?: Eip1193Provider,
+): Promise<string> {
+  const eth = provider ?? getActiveEvmProvider();
   if (!eth) throw new Error('No EVM wallet detected. Install MetaMask, Rabby, or Coinbase Wallet.');
   const signature = await eth.request({
     method: 'personal_sign',
@@ -406,59 +389,20 @@ export async function signMessageEvm(message: string, address: string): Promise<
   return signature;
 }
 
-/**
- * Sign `message` with a Solana wallet provider (from `getSolanaWallet()` in
- * `src/wallet.ts`, or a Wallet Standard adapter).
- *
- * The backend accepts Solana ed25519 for LOGIN ONLY — it is a local signature
- * check over bytes the server minted, not a chain call. There is no
- * `/rpc/solana` and no Solana money path (INTEGRATION.md §4).
- */
-export async function signMessageSolana(message: string, provider: unknown): Promise<string> {
-  const bytes = new TextEncoder().encode(message);
-  const p = provider as {
-    signMessage?: (m: Uint8Array, enc?: string) => Promise<unknown>;
-    _wsWallet?: { features?: Record<string, unknown> };
-    _account?: unknown;
-  };
-
-  // Legacy injected providers (Phantom, Solflare, Backpack): signMessage.
-  if (typeof p.signMessage === 'function') {
-    const out = await p.signMessage(bytes, 'utf8');
-    const sig =
-      out instanceof Uint8Array
-        ? out
-        : (out as { signature?: Uint8Array } | null)?.signature;
-    if (!(sig instanceof Uint8Array)) throw new Error('Wallet returned no signature.');
-    return toBase58(sig);
-  }
-
-  // Wallet Standard adapters (`src/wallet.ts` wraps these): solana:signMessage.
-  const feature = p._wsWallet?.features?.['solana:signMessage'] as
-    | { signMessage(input: { account: unknown; message: Uint8Array }): Promise<Array<{ signature: Uint8Array }>> }
-    | undefined;
-  if (feature?.signMessage) {
-    const results = await feature.signMessage({ account: p._account, message: bytes });
-    const sig = Array.isArray(results) ? results[0]?.signature : undefined;
-    if (!(sig instanceof Uint8Array)) throw new Error('Wallet returned no signature.');
-    return toBase58(sig);
-  }
-
-  throw new Error('This Solana wallet cannot sign messages. Try Phantom, Solflare, or Backpack.');
-}
-
 // ── The orchestrated flow ───────────────────────────────────────────────────
 
 /**
  * Full sign-in for an already-connected wallet: nonce → sign → verify → store.
  *
- * The UI owns wallet CONNECTION (`connectEvm()` / `connectSolana()` from
- * `src/wallet.ts`); this owns everything after it. Pass the address those
- * functions returned.
+ * The UI owns wallet CONNECTION (`connectRobinhoodChain()` from `src/wallet.ts`,
+ * which also pins the signing provider); this owns everything after it. Pass
+ * the address that function returned.
  *
- * For Solana you must also pass the live provider (`getSolanaWallet(kind)`),
- * because the signature has to come from the same wallet instance that is
- * connected.
+ * This app signs in on Robinhood Chain (an EVM chain) only — there is no Solana
+ * sign-in path in the UI, and the Solana signing helper has been removed with
+ * the dead Solana connectors (client-api-11). An `optionalProvider` may be
+ * passed to force a specific injected wallet; otherwise the one the most recent
+ * `connect*` used signs (client-api-22).
  *
  * Throws `ApiError` for server-side failures and a plain `Error` when the user
  * rejects the signature in their wallet.
@@ -466,19 +410,19 @@ export async function signMessageSolana(message: string, provider: unknown): Pro
 export async function signIn(params: {
   address: string;
   chain: AuthChain;
-  /** Required when `chain === 'solana'`. */
-  solanaProvider?: unknown;
+  /** Force a specific injected EVM provider (from a `listEvmProviders()` picker). */
+  provider?: Eip1193Provider;
 }): Promise<VerifyResponse> {
   const { address, chain } = params;
+  if (chain === 'solana') {
+    throw new Error('Solana sign-in is not supported — this game signs in on Robinhood Chain.');
+  }
 
   return signInWithSigner({
     address,
     chain,
     // Sign the server's message VERBATIM. Any transformation here breaks it.
-    signMessage: (message) =>
-      chain === 'solana'
-        ? signMessageSolana(message, requireProvider(params.solanaProvider))
-        : signMessageEvm(message, address),
+    signMessage: (message) => signMessageEvm(message, address, params.provider),
   });
 }
 
@@ -514,11 +458,4 @@ export async function signInWithSigner(params: {
     nonce: challenge.nonce,
     message: challenge.message,
   });
-}
-
-function requireProvider(provider: unknown): unknown {
-  if (!provider) {
-    throw new Error('A connected Solana wallet is required. Call getSolanaWallet() first.');
-  }
-  return provider;
 }

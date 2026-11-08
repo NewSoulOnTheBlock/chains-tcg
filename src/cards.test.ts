@@ -25,11 +25,13 @@ describe('EGREGORE faction registry', () => {
     expect(names).not.toMatch(/\b(BONK|PEPE|BRETT|FLOKI|dogwifhat|HOOD|BnB|Solana|Ethereum|Robinhood|Base)\b/);
   });
 
-  it('gives every chain the full pool shape (8 memes + 4 machines + 3 moves + 1 aura)', () => {
+  it('gives every chain the full pool shape (8 memes + 4 machines + 3 moves + 1 aura; Knowledge has a 9th bonus meme)', () => {
+    // Knowledge (base) carries one extra meme: Oversized Moose with Socks.
+    const expectedMemes: Record<string, number> = { bnb: 8, sol: 8, eth: 8, robinhood: 8, base: 9 };
     for (const color of COLORS) {
       const pool = Object.values(CARDS).filter(c => c.color === color && c.type !== 'node');
       const count = (t: string) => pool.filter(c => c.type === t).length;
-      expect(count('meme'), `${color} memes`).toBe(8);
+      expect(count('meme'), `${color} memes`).toBe(expectedMemes[color]);
       expect(count('machine'), `${color} machines`).toBe(4);
       expect(count('move'), `${color} moves`).toBe(3);
       expect(count('aura'), `${color} auras`).toBe(1);
@@ -42,6 +44,21 @@ describe('EGREGORE faction registry', () => {
       expect(deck, `${color} deck length`).toHaveLength(60);
       expect(deck.every(id => CARDS[id]), `${color} known ids`).toBe(true);
       expect(validateDeck(deck).ok, `${color} validateDeck`).toBe(true);
+    }
+  });
+
+  it('includes every non-node card of its color in each starter (no truncated aura)', () => {
+    // Regression guard for engine-06: the old `.slice(0, 60)` dropped the tail,
+    // which was always the single Aura copy (and an Arcane Storm for Knowledge).
+    for (const color of COLORS) {
+      const deck = new Set(STARTER_DECKS[color]);
+      const nonNode = Object.values(CARDS).filter(c => c.color === color && c.type !== 'node');
+      for (const card of nonNode) {
+        expect(deck.has(card.id), `${color} starter is missing ${card.type} ${card.id}`).toBe(true);
+      }
+      // The aura in particular must be present.
+      const aura = nonNode.find(c => c.type === 'aura');
+      if (aura) expect(deck.has(aura.id), `${color} starter missing its aura`).toBe(true);
     }
   });
 

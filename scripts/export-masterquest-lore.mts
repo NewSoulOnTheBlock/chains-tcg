@@ -1,4 +1,5 @@
 // scripts/export-masterquest-lore.mts
+// Status: ONE-SHOT (current). Reads src/masterquest/lore.ts, which the app uses.
 // One-shot: bundle PROLOGUE + 15 SITES + INTERLUDES + EPILOGUE into a
 // single Markdown file at public/lore/masterquest.md for static reading.
 

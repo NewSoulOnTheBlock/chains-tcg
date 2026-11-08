@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CARDS, COLOR_META, COLORS, DECK_SIZE, MAX_COPIES_NONBASIC, type Color } from './cards';
 import { MULLIGAN_INITIAL_HAND, MULLIGAN_FLOOR } from './Game';
 import { ChainLogo } from './chain-logos';
+import { cardText } from './components/CardFace';
 
 // Same palette as the rulebook so the two read as one system.
 const T = {
@@ -87,8 +88,8 @@ function MiniCard({ id, scale = 0.62, dim = false }: { id: string; scale?: numbe
       </div>
       <div style={{ position: 'relative', padding: def.type === 'meme' ? `5px 6px ${fs + 10}px` : '5px 6px', minHeight: '24%',
         fontSize: fs, lineHeight: 1.3, color: '#e9e5f5' }}>
-        {/* Card text writes "~" for the card's own name. */}
-        {def.text.replace(/~/g, def.name)}
+        {/* Shared card-text helper; `~` expands to the card's own name. */}
+        {cardText(def, { expandName: true })}
         {def.type === 'meme' && (
           <span style={{ position: 'absolute', right: 4, bottom: 4, padding: '1px 6px', borderRadius: 5, fontWeight: 900, fontSize: fs + 2,
             background: meta.hex, color: meta.ink }}>{def.power}/{def.toughness}</span>

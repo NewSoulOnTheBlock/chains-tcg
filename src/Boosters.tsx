@@ -21,6 +21,10 @@ import {
 import { connectRobinhoodChain, shortAddr } from './wallet';
 import { syncAfterMint, useCollection } from './collection';
 import { formatEther, type Address } from 'viem';
+import { useIsMobile, BP } from './components/responsive';
+import { useMasterMute } from './components/mute';
+import { useFlashFlag } from './components/useFlash';
+import { Modal } from './components/Modal';
 import {
   ArrowLeft, Check, Copy, SoundOn, SoundOff, Diamond, DiamondOutline,
   Warning, Star, Hourglass,
@@ -42,7 +46,6 @@ type Tx =
 type ErrBox = { kind: Tx; heading: string; message: string; detail?: string };
 
 const PENDING_KEY = 'ocva.pendingPack';
-const MUTE_KEY = 'ocva.muted';
 
 // Ordered real catalogue (non-node cards) — the same index space the contract
 // mints from, used to show an accurate card list + odds.
@@ -94,7 +97,7 @@ function mapMintError(e: any): ErrBox {
 // The mint goes to the connected wallet and the server derives the collection
 // from the session's proven address, so this page needs no identity prop.
 export function BoostersPage({ onBack }: { onBack: () => void }) {
-  const mobile = useIsMobile();
+  const mobile = useIsMobile(BP.vault);
 
   // Wallet / network / funds — authoritative live values.
   const [account, setAccount] = useState<Address | null>(null);
@@ -109,9 +112,11 @@ export function BoostersPage({ onBack }: { onBack: () => void }) {
   const [cards, setCards] = useState<RevealedCard[]>([]);
   const [errBox, setErrBox] = useState<ErrBox | null>(null);
 
-  const [muted, setMuted] = useState<boolean>(() => { try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; } });
+  // Master mute via the one shared hook (persist + blanket-mute media + dispatch
+  // PREFS_EVENT). This copy used to omit the dispatch, breaking per-track mute (frontend-10).
+  const { muted, toggle: toggleMute } = useMasterMute();
   const [modal, setModal] = useState<null | 'cards' | 'odds'>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, flashCopied] = useFlashFlag(1500);
 
   const connected = !!account;
   const onRobinhood = chainId === ROBINHOOD_CHAIN_ID;
@@ -149,12 +154,6 @@ export function BoostersPage({ onBack }: { onBack: () => void }) {
     eth.on('chainChanged', onChain);
     return () => { eth.removeListener?.('accountsChanged', onAcct); eth.removeListener?.('chainChanged', onChain); };
   }, [refreshWallet]);
-
-  // Reflect mute across any audio the app is playing elsewhere.
-  useEffect(() => {
-    try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch {}
-    document.querySelectorAll('audio').forEach((a) => { (a as HTMLAudioElement).muted = muted; });
-  }, [muted]);
 
   const priceEth = cost ? (+formatEther(cost.price)).toFixed(4) : (+PACK_PRICE_ETH).toFixed(4);
   const pending = tx === 'awaiting' || tx === 'confirming';
@@ -223,7 +222,7 @@ export function BoostersPage({ onBack }: { onBack: () => void }) {
 
   async function copyAddr() {
     if (!account) return;
-    try { await navigator.clipboard.writeText(account); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+    try { await navigator.clipboard.writeText(account); flashCopied(); } catch { /* clipboard blocked */ }
   }
 
   const stageIndex = (tx === 'confirming' || tx === 'awaiting') ? 1 : inReveal ? 2 : 0;
@@ -241,7 +240,7 @@ export function BoostersPage({ onBack }: { onBack: () => void }) {
         onBack={onBack}
         connected={connected} onRobinhood={onRobinhood} switching={switching}
         account={account} copied={copied} onCopy={copyAddr}
-        muted={muted} onToggleMute={() => setMuted((m) => !m)}
+        muted={muted} onToggleMute={toggleMute}
       />
 
       {/* Main two-column layout. */}
@@ -273,17 +272,8 @@ export function BoostersPage({ onBack }: { onBack: () => void }) {
   );
 }
 
-// ── Responsive hook ─────────────────────────────────────────────────────────
-function useIsMobile() {
-  const [m, setM] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches);
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 900px)');
-    const on = () => setM(mq.matches);
-    mq.addEventListener('change', on);
-    return () => mq.removeEventListener('change', on);
-  }, []);
-  return m;
-}
+// useIsMobile now comes from ./components/responsive (shared cache, named
+// breakpoints); the vault uses BP.vault (900px). (frontend-11)
 
 // ── Vault backdrop (real CSS, not a screenshot) ─────────────────────────────
 function VaultBackdrop() {
@@ -775,8 +765,8 @@ function PrimaryAction({ tx, connected, onRobinhood, switching, pending, priceEt
 }
 
 function PendingHash({ hash }: { hash: `0x${string}` }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => { try { await navigator.clipboard.writeText(hash); setCopied(true); setTimeout(() => setCopied(false), 1400); } catch {} };
+  const [copied, flashCopied] = useFlashFlag(1400);
+  const copy = async () => { try { await navigator.clipboard.writeText(hash); flashCopied(); } catch { /* clipboard blocked */ } };
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
       padding: '9px 12px', borderRadius: R.md, background: C.bg1, border: `1px solid ${C.accent}44` }}>
@@ -1005,18 +995,19 @@ function RevealCard({ card, flipped, focused, burst, arc, onClick, onFocus }: {
 
 // ── Card list + odds modals (real catalogue data) ───────────────────────────
 function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  // Shared accessible dialog primitive: role=dialog, aria-modal, initial focus,
+  // Escape, focus trap + restore (frontend-19).
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 210, display: 'grid', placeItems: 'center',
-      background: 'rgba(4,4,10,0.8)', backdropFilter: 'blur(4px)', padding: 20 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(720px, 100%)', maxHeight: '82dvh', overflow: 'auto',
+    <Modal onClose={onClose} labelledBy="boosters-modal-title" zIndex={210}
+      backdropStyle={{ background: 'rgba(4,4,10,0.8)', backdropFilter: 'blur(4px)', padding: 20 }}
+      panelStyle={{ width: 'min(720px, 100%)', maxHeight: '82dvh', overflow: 'auto',
         background: C.bg1, border: `1px solid ${C.gold}44`, borderRadius: R.lg, padding: 22, boxShadow: SH.lg }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div style={{ fontFamily: F.display, fontWeight: 700, letterSpacing: '0.1em', color: C.goldHi, fontSize: 17 }}>{title}</div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.textMid, fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>×</button>
-        </div>
-        {children}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div id="boosters-modal-title" style={{ fontFamily: F.display, fontWeight: 700, letterSpacing: '0.1em', color: C.goldHi, fontSize: 17 }}>{title}</div>
+        <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', color: C.textMid, fontSize: 22, cursor: 'pointer', lineHeight: 1 }}>×</button>
       </div>
-    </div>
+      {children}
+    </Modal>
   );
 }
 

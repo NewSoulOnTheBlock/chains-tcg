@@ -2,9 +2,10 @@
 // React board for Chains TCG.
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { BoardProps } from 'boardgame.io/react';
+import type { Ctx } from 'boardgame.io';
 import {
-  CARDS, COLOR_META, COLORS, templateFor,
-  type Color, type CardDef,
+  CARDS, COLOR_META, COLORS,
+  type Color,
 } from './cards';
 import { ChainLogo } from './chain-logos';
 import type { GState, Instance } from './Game';
@@ -14,9 +15,10 @@ import { CardHover, CardPreview } from './CardPreview';
 import { createPortal } from 'react-dom';
 import { VoiceChat } from './Voice';
 import { Haptics } from './haptics';
-
-/** Voice chat is off until inbound callers are authenticated — see the mount site. */
-const VOICE_CHAT_ENABLED = false;
+import { useIsMobile, useIsShort } from './components/responsive';
+import { CardFace } from './components/CardFace';
+import { Modal } from './components/Modal';
+import { useFlash } from './components/useFlash';
 import {
   ArrowDown, ArrowRight, Bolt, Cards, Chain, Chat as ChatIcon, Check, ChevronLeft, ChevronRight,
   Close, Diamond, Dot, Hand as HandIcon, Minus, Moon, Orb, Plus, Refresh, Robot,
@@ -32,6 +34,35 @@ const GOLD_HI = '#FFD86A';
 
 /** Inline CSS custom properties (React types don't model `--x` keys). */
 type Vars = React.CSSProperties & Record<string, string | number>;
+
+/**
+ * Live game state as the board actually reads it: GState plus the two fields
+ * the engine owner adds in playerView — `deckCounts` and the per-seat `voice`
+ * peer map — which are not on the exported GState type yet. Access is
+ * feature-detected (optional + `?? {}`) so tsc passes before and after they
+ * land, and no `as any` is needed to read them (frontend-18).
+ */
+type PublicGState = GState & {
+  deckCounts?: Record<string, number>;
+  voice?: Record<string, string>;
+};
+/** boardgame.io types `ctx.gameover` as `any`; this is the shape the board uses. */
+type GameOver = { winner?: string; draw?: boolean };
+
+/**
+ * Stable React keys for a hand of card def-ids. Keying hand cards by array
+ * index let drag/hover state and the fan transition stick to the wrong card
+ * once a card was played and the rest shifted (frontend-09). A per-occurrence
+ * key (`defId#n`) is stable across those shifts without needing a uid in G.
+ */
+function handKeys(hand: string[]): string[] {
+  const counts = new Map<string, number>();
+  return hand.map((id) => {
+    const n = counts.get(id) ?? 0;
+    counts.set(id, n + 1);
+    return `${id}#${n}`;
+  });
+}
 
 /**
  * ── Board stacking order ────────────────────────────────────────────────────
@@ -124,38 +155,8 @@ function CombatBadges({
   );
 }
 
-function useIsMobile(breakpoint = 720) {
-  const [m, setM] = useState(() => typeof window !== 'undefined' && window.innerWidth <= breakpoint);
-  useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`);
-    const onChange = () => setM(mq.matches);
-    onChange();
-    if (mq.addEventListener) mq.addEventListener('change', onChange);
-    else mq.addListener(onChange);
-    return () => {
-      if (mq.removeEventListener) mq.removeEventListener('change', onChange);
-      else mq.removeListener(onChange);
-    };
-  }, [breakpoint]);
-  return m;
-}
-
-/** Landscape-phone check — viewport too short for the full desktop chrome. */
-function useIsShort(maxHeight = 450) {
-  const [s, setS] = useState(() => typeof window !== 'undefined' && window.innerHeight <= maxHeight);
-  useEffect(() => {
-    const mq = window.matchMedia(`(max-height: ${maxHeight}px)`);
-    const onChange = () => setS(mq.matches);
-    onChange();
-    if (mq.addEventListener) mq.addEventListener('change', onChange);
-    else mq.addListener(onChange);
-    return () => {
-      if (mq.removeEventListener) mq.removeEventListener('change', onChange);
-      else mq.removeListener(onChange);
-    };
-  }, [maxHeight]);
-  return s;
-}
+// useIsMobile / useIsShort now come from ./components/responsive — one shared,
+// cached MediaQueryList per breakpoint instead of two listeners per card (frontend-11).
 
 /**
  * Mobile-only zoom wrapper for the playmat. Renders zoom-out / reset / zoom-in.
@@ -354,297 +355,7 @@ function DraggableCard({
   );
 }
 
-function CardFace({
-  defId, instance, footer, onClick, selected, faceDown, pinOnTap, size,
-}: {
-  defId: string;
-  instance?: Instance;
-  footer?: React.ReactNode;
-  onClick?: () => void;
-  selected?: boolean;
-  faceDown?: boolean;
-  pinOnTap?: boolean;
-  /** Explicit box, in px. Used by the mobile hand strip, which has more room
-   *  than the compact default and is the player's primary read of their hand. */
-  size?: { w: number; h: number };
-}) {
-  const mobile = useIsMobile();
-  const short = useIsShort();
-  const compact = mobile || short; // phones portrait OR landscape
-  const W = size ? size.w : compact ? 92 : 138;
-  const H = size ? size.h : compact ? 134 : 200;
-  if (faceDown) {
-    return (
-      <div style={{
-        width: W, height: H, margin: 2, borderRadius: 8,
-        background:
-          'repeating-linear-gradient(45deg, rgba(255,255,255,0.045) 0 7px, rgba(255,255,255,0) 7px 14px), ' +
-          'linear-gradient(180deg, #2b2440 0%, #171327 55%, #0e0b18 100%)',
-        border: '1px solid #000',
-        boxShadow:
-          'inset 0 0 0 1px rgba(229,184,75,0.22), inset 0 1px 0 rgba(255,255,255,0.14), ' +
-          '0 2px 5px rgba(0,0,0,0.55), 0 10px 22px rgba(0,0,0,0.45)',
-        flex: '0 0 auto',
-      }} />
-    );
-  }
-  const def = CARDS[defId];
-  if (!def) return null;
-  const meta = COLOR_META[def.color];
-  const dimmed = instance?.summoningSick || instance?.tapped;
-  const tapped = !!instance?.tapped;
-  const damaged = (instance?.damage ?? 0) > 0;
-  const tpl = templateFor(def);
-  // Full-card renders carry their own frame and text; see CardDef.fullCard.
-  const full = !!(def.fullCard && def.image);
-  // Layered rest shadow: contact shadow + cast shadow, so the card lifts off
-  // the mat instead of sitting flat on it. `--shadow` is consumed by .brd-cardface.
-  const restShadow = selected
-    ? `inset 0 0 0 1px rgba(255,246,214,0.55), 0 0 0 1px rgba(120,86,12,0.9), 0 0 20px rgba(255,216,106,0.7), 0 10px 24px rgba(0,0,0,0.55)`
-    : tapped
-      ? 'inset 0 0 14px rgba(0,0,0,0.6), 0 1px 3px rgba(0,0,0,0.6), 0 5px 12px rgba(0,0,0,0.4)'
-      : '0 1px 2px rgba(0,0,0,0.65), 0 4px 10px rgba(0,0,0,0.45), 0 12px 26px rgba(0,0,0,0.32)';
-  const vars: Vars = {
-    '--rot': tapped ? '9deg' : '0deg',
-    '--shadow': restShadow,
-    '--glow': `${meta.hex}99`,
-    '--filter': tapped ? 'saturate(0.55) brightness(0.82)' : 'none',
-  };
-  return (
-    <CardHover defId={defId} pinOnTap={pinOnTap} onActivate={pinOnTap ? onClick : undefined}>
-    <div onClick={onClick}
-      className="brd-cardface"
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }) : undefined}
-      style={{
-        ...vars,
-        width: W, height: H, margin: 2, padding: full || tpl ? 0 : 5, borderRadius: 8,
-        background: full || tpl ? undefined : meta.hex,
-        backgroundImage: full ? `url(${def.image})` : tpl ? `url(${tpl.url})` : undefined,
-        backgroundSize: full || tpl ? '100% 100%' : undefined,
-        backgroundRepeat: 'no-repeat',
-        color: meta.ink,
-        // Hairline frame: 1px ink edge; attacker/selected swaps in a gold ring.
-        border: selected ? '2px solid #FFD86A' : '1px solid rgba(0,0,0,0.85)',
-        cursor: onClick ? 'pointer' : 'default',
-        opacity: dimmed && def.type === 'meme' ? 0.62 : 1,
-        fontFamily: 'system-ui, sans-serif',
-        display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-        position: 'relative', flex: '0 0 auto',
-      }}>
-      {full ? <FullCardFaceContent def={def} instance={instance} footer={footer} />
-        : tpl ? <TemplatedCardFaceContent def={def} instance={instance} footer={footer} tpl={tpl} /> : <>
-      {/* Name gets the full width; the cost rides on the art (below). */}
-      <div style={{ fontWeight: 800, fontSize: compact ? 9.5 : 11, lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        position: 'relative', zIndex: 1 }}>{def.name}</div>
-      {/* Art window. Memes and Moves have art; Nodes show their faction sigil.
-          Without this only framed Machine/Aura cards showed any picture. */}
-      <div style={{ position: 'relative', zIndex: 1, flex: 1, minHeight: 0, margin: '3px 0', borderRadius: 4, overflow: 'hidden',
-        background: 'rgba(0,0,0,0.35)', boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.6)', display: 'grid', placeItems: 'center' }}>
-        {def.image
-          ? <img src={def.image} alt="" loading="lazy" draggable={false}
-              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
-          : <ChainLogo color={def.color} size={compact ? 34 : 52} />}
-        {def.cost && (
-          <span style={{ position: 'absolute', top: 2, left: 2, display: 'flex', gap: 2 }}>
-            {(['any', ...COLORS] as const).map(c => {
-              const n = def.cost?.[c] ?? 0; if (!n) return null;
-              const cm = c === 'any' ? { hex: '#c8c8d0', ink: '#1a1a1a' } : COLOR_META[c];
-              return (
-                <span key={c} title={c === 'any' ? `${n} any gas` : `${n} ${COLOR_META[c].name} gas`} style={{
-                  width: 15, height: 15, borderRadius: 8, display: 'grid', placeItems: 'center',
-                  background: cm.hex, color: cm.ink, fontSize: 9.5, fontWeight: 900,
-                  border: '1px solid #000', boxShadow: '0 1px 3px rgba(0,0,0,0.8)',
-                }}>{n}</span>
-              );
-            })}
-          </span>
-        )}
-        {instance?.summoningSick && (
-          <span title="Summoning sick — cannot attack this turn"
-            style={{ position: 'absolute', top: 2, right: 2, display: 'inline-flex', alignItems: 'center', gap: 2, color: '#2a1f00', background: '#ffd76a', padding: '0 3px', borderRadius: 3, fontSize: 7, fontWeight: 800, boxShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
-            <Moon size={8} />SICK
-          </span>
-        )}
-        {tapped && !instance?.summoningSick && (
-          <span title="Tapped" style={{ position: 'absolute', top: 2, right: 2, display: 'inline-flex', alignItems: 'center', gap: 2, color: '#111', background: '#b9bcc8', padding: '0 3px', borderRadius: 3, fontSize: 7, fontWeight: 800, boxShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
-            <Refresh size={8} />TAPPED
-          </span>
-        )}
-      </div>
-      {/* Type line — big enough to read at a glance; P/T sits on it for Memes */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 3, position: 'relative', zIndex: 1 }}>
-        <span style={{ fontSize: compact ? 8 : 9, fontWeight: 900, letterSpacing: '0.08em', padding: '1px 4px', borderRadius: 3,
-          background: 'rgba(0,0,0,0.55)', color: '#fff' }}>{def.type.toUpperCase()}</span>
-        {def.type === 'meme' && (
-          <span style={{
-            fontWeight: 800, fontSize: compact ? 10 : 12, padding: '0 5px', borderRadius: 4, color: '#F4F2EA',
-            background: 'linear-gradient(180deg, rgba(20,16,10,0.85), rgba(8,6,4,0.9))',
-            boxShadow: 'inset 0 0 0 1px rgba(229,184,75,0.45), 0 1px 2px rgba(0,0,0,0.6)',
-          }}>
-            {def.power}/{(def.toughness ?? 1) - (instance?.damage ?? 0)}
-          </span>
-        )}
-      </div>
-      {/* Rules text only where it is legible; phones read it via long-press. */}
-      {!compact && def.type !== 'meme' && def.type !== 'node' && (
-        <div style={{ fontSize: 8, marginTop: 2, maxHeight: 28, overflow: 'hidden', lineHeight: 1.15, position: 'relative', zIndex: 1 }}>{def.text}</div>
-      )}
-      {footer && <div style={{ fontSize: 8, lineHeight: 1.1, position: 'relative', zIndex: 1 }}>{footer}</div>}
-      </>}
-      {damaged && <span aria-hidden className="brd-damaged" />}
-      <span aria-hidden className="brd-gloss" />
-    </div>
-    </CardHover>
-  );
-}
-
-/**
- * Overlays for a full-card render (CardDef.fullCard). The image already shows
- * name, cost, type, text and printed P/T, so only live state goes on top:
- * status badges at the art's top-right corner and, once a Meme has taken
- * damage, a current P/T chip over the printed box at the bottom-right.
- */
-function FullCardFaceContent({ def, instance, footer }: { def: CardDef; instance?: Instance; footer?: React.ReactNode }) {
-  const damage = instance?.damage ?? 0;
-  return (
-    <>
-      {instance?.summoningSick && (
-        <span title="Summoning sick — cannot attack this turn"
-          style={{ position: 'absolute', top: '13.5%', right: '9%', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 1, color: '#2a1f00', background: '#ffd76a', padding: '0 3px', borderRadius: 3, fontSize: 6, fontWeight: 800, boxShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
-          <Moon size={7} />SICK
-        </span>
-      )}
-      {instance?.tapped && !instance?.summoningSick && (
-        <span title="Tapped"
-          style={{ position: 'absolute', top: '13.5%', right: '9%', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 1, color: '#111', background: '#b9bcc8', padding: '0 3px', borderRadius: 3, fontSize: 6, fontWeight: 800, boxShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
-          <Refresh size={7} />TAP
-        </span>
-      )}
-      {def.type === 'meme' && damage > 0 && (
-        <span title={`${damage} damage marked`} style={{
-          position: 'absolute', right: '6%', bottom: '4.5%', zIndex: 1,
-          fontWeight: 800, fontSize: 10, color: '#ffb3a7',
-          padding: '0 5px', borderRadius: 4,
-          background: 'linear-gradient(180deg, rgba(60,10,6,0.95), rgba(20,4,2,0.97))',
-          boxShadow: 'inset 0 0 0 1px rgba(255,120,100,0.6), 0 1px 3px rgba(0,0,0,0.8)',
-        }}>
-          {def.power}/{(def.toughness ?? 1) - damage}
-        </span>
-      )}
-      {footer && (
-        <div style={{ position: 'absolute', left: '9%', right: '9%', bottom: '1.5%', zIndex: 1, fontSize: 6, lineHeight: 1.05,
-          color: '#fff', padding: '1px 3px', borderRadius: 2, background: 'rgba(0,0,0,0.7)' }}>{footer}</div>
-      )}
-    </>
-  );
-}
-
-/** Content placed inside a templated MTG-style frame (per-color via COLOR_META.template). */
-function TemplatedCardFaceContent({ def, instance, footer, tpl }: { def: CardDef; instance?: Instance; footer?: React.ReactNode; tpl: { url: string; glyph?: string } }) {
-  const meta = COLOR_META[def.color];
-  return (
-    <>
-      {/* Name on the top grey bar */}
-      <div style={{
-        position: 'absolute', top: '5.6%', left: '9%', right: '9%', height: '5%',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: 4, padding: '0 4px',
-        fontSize: 8, fontWeight: 800, color: '#1a1a1a',
-      }}>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def.name}</span>
-        {def.cost && (
-          <span style={{ display: 'flex', gap: 1 }}>
-            {(['any', ...COLORS] as const).map(c => {
-              const n = def.cost?.[c] ?? 0; if (!n) return null;
-              const cm = c === 'any' ? { hex: '#c8c8d0', ink: '#1a1a1a' } : COLOR_META[c];
-              return (
-                <span key={c} style={{
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  width: 10, height: 10, borderRadius: 5,
-                  background: cm.hex, color: cm.ink,
-                  fontWeight: 800, fontSize: 7,
-                }}>{n}</span>
-              );
-            })}
-          </span>
-        )}
-      </div>
-      {/* Art zone — image sits inside the template's black window */}
-      <div style={{
-        position: 'absolute', top: '13%', left: '8.5%', right: '8.5%', height: '44%',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        overflow: 'hidden',
-      }}>
-        {tpl.glyph && tpl.glyph !== meta.glyph ? (
-          // Card-specific glyph override (MACHINE / AURA) — unchanged.
-          <span style={{
-            position: 'absolute', inset: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: meta.ink, fontWeight: 900,
-            fontSize: tpl.glyph.length > 4 ? 11 : 18,
-            letterSpacing: tpl.glyph.length > 4 ? 1 : 2,
-            textShadow: '0 2px 6px #000',
-          }}>{tpl.glyph}</span>
-        ) : (
-          <span style={{
-            position: 'absolute', inset: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}><ChainLogo color={def.color} size={40} /></span>
-        )}
-        {def.image && (
-          <img src={def.image} alt="" loading="lazy"
-            onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-            style={{ position: 'relative', width: '100%', height: '100%', objectFit: 'cover' }} />
-        )}
-        {/* Status badges overlay on top-right of art */}
-        {instance?.summoningSick && (
-          <span title="Summoning sick — cannot attack this turn"
-            style={{ position: 'absolute', top: 2, right: 2, display: 'inline-flex', alignItems: 'center', gap: 1, color: '#2a1f00', background: '#ffd76a', padding: '0 3px', borderRadius: 3, fontSize: 6, fontWeight: 800, boxShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
-            <Moon size={7} />SICK
-          </span>
-        )}
-        {instance?.tapped && !instance?.summoningSick && (
-          <span title="Tapped"
-            style={{ position: 'absolute', top: 2, right: 2, display: 'inline-flex', alignItems: 'center', gap: 1, color: '#111', background: '#b9bcc8', padding: '0 3px', borderRadius: 3, fontSize: 6, fontWeight: 800, boxShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
-            <Refresh size={7} />TAP
-          </span>
-        )}
-      </div>
-      {/* Type bar */}
-      <div style={{
-        position: 'absolute', top: '58.5%', left: '9%', right: '9%', height: '4.5%',
-        display: 'flex', alignItems: 'center', padding: '0 4px',
-        fontSize: 7, fontWeight: 700, color: '#1a1a1a',
-        letterSpacing: 0.5, textTransform: 'uppercase',
-      }}>
-        {def.type}
-      </div>
-      {/* Rules text box */}
-      <div style={{
-        position: 'absolute', top: '67%', left: '9%', right: '9%', bottom: '7%',
-        padding: '3px 5px',
-        fontSize: 7, lineHeight: 1.15, color: '#1a1a1a',
-        overflow: 'hidden',
-      }}>
-        {def.text}
-        {def.type === 'meme' && (
-          <div style={{
-            position: 'absolute', right: 4, bottom: 2,
-            fontWeight: 800, fontSize: 10, color: '#1a1a1a',
-            padding: '0 4px', background: '#e8e6c8',
-            border: '1px solid #4a5a3a', borderRadius: 2,
-          }}>
-            {def.power}/{(def.toughness ?? 1) - (instance?.damage ?? 0)}
-          </div>
-        )}
-        {footer && <div style={{ fontSize: 6, lineHeight: 1.05, marginTop: 2 }}>{footer}</div>}
-      </div>
-    </>
-  );
-}
+// CardFace, FullCardFaceContent and TemplatedCardFaceContent now live in src/components/CardFace.tsx (frontend-12).
 
 function GasBar({ gas }: { gas: Record<Color, number> }) {
   return (
@@ -665,19 +376,41 @@ function deskBtn(): React.CSSProperties {
 }
 
 export function ChainsBoard(props: Props) {
-  const { G, ctx, moves, playerID, isActive, chatMessages, sendChatMessage, matchID, matchData } = props as Props & {
+  const { ctx, moves, playerID, isActive, chatMessages, sendChatMessage, matchID, matchData } = props as Props & {
     matchID?: string;
     matchData?: Array<{ id: number; name?: string; isConnected?: boolean }>;
   };
+  // GState plus the engine-owner fields (deckCounts, voice). See PublicGState.
+  const G = props.G as PublicGState;
   const mobile = useIsMobile();
   const short = useIsShort();
   const myId  = playerID ?? '0';
   const oppId = myId === '0' ? '1' : '0';
   const me   = G.players[myId];
   const opp  = G.players[oppId];
+  // A solo/bot match has no second human, so no profiles to fetch and no voice.
+  const isSolo = !!matchID && matchID.startsWith('solo-');
+
+  // Concede wiring: the FORFEIT dialog (App.tsx) dispatches `egregore:concede`;
+  // the board turns it into the server-validated concede move while the match is
+  // live. Feature-detected — a no-op until the engine owner adds `moves.concede`.
+  useEffect(() => {
+    const onConcede = () => {
+      if (ctx.gameover) return;
+      const m = moves as Record<string, unknown>;
+      if (typeof m.concede === 'function') {
+        try { (m.concede as () => void)(); } catch { /* INVALID_MOVE is fine */ }
+      }
+    };
+    window.addEventListener('egregore:concede', onConcede);
+    return () => window.removeEventListener('egregore:concede', onConcede);
+  }, [ctx.gameover, moves]);
 
   const [selectedHand, setSelectedHand] = useState<number | null>(null);
   const [targetMode, setTargetMode] = useState<null | { kind: 'meme' | 'any' | 'machine' }>(null);
+  // Stable per-card keys for the hand (frontend-09): index keys made drag/hover
+  // state stick to the wrong card after a play shifted the rest.
+  const handCardKeys = handKeys(me.hand);
   // Mobile hand sheet. The hand itself is always visible as a strip under the
   // mat; this is the expanded grid view for browsing a large hand.
   const [handOpen, setHandOpen] = useState(false);
@@ -688,10 +421,16 @@ export function ChainsBoard(props: Props) {
   useEffect(() => {
     const el = handStripRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(([e]) => setHandStripH(Math.round(e.contentRect.height)));
+    // Guard the setter so an unchanged rounded height can't ping-pong the
+    // measure/render loop, and depend on `mobile` so this is rebuilt only when
+    // the strip actually appears/disappears — not on every board render (frontend-08).
+    const ro = new ResizeObserver(([e]) => {
+      const next = Math.round(e.contentRect.height);
+      setHandStripH((h) => (h === next ? h : next));
+    });
     ro.observe(el);
     return () => ro.disconnect();
-  });
+  }, [mobile]);
   const handCardH = Math.max(112, Math.min(170, handStripH - 2));
   // Desktop hand fan floats OVER the bottom of the playmat (Arena-style) instead
   // of taking its own row below it. The fan's cards hang HAND_HANG px below the
@@ -841,11 +580,9 @@ export function ChainsBoard(props: Props) {
   }
 
   const [blockSel, setBlockSel] = useState<{ blockerUid?: string }>({});
-  const [notice, setNotice] = useState<string>('');
-  function flash(msg: string) {
-    setNotice(msg);
-    window.setTimeout(() => setNotice(n => (n === msg ? '' : n)), 2200);
-  }
+  // Transient targeting-notice via the shared flash hook: timer in a ref,
+  // cleared on re-trigger and unmount (frontend-16).
+  const [notice, flash] = useFlash<string>(2200, '');
 
   // ── Profile names from lobby + W/L tracking via API ────────────────────────
   // Prefer lobby-supplied player names (online play). Fall back to in-game profileName (local play).
@@ -856,12 +593,20 @@ export function ChainsBoard(props: Props) {
   const [oppProfile, setOppProfile] = useState<Profile | null>(null);
 
   // Both records come from the PUBLIC profile route, which works signed out and
-  // exposes no wallet address for either player.
+  // exposes no wallet address for either player. Skip the guaranteed-404 names
+  // (solo/bot opponents and the `Player N` placeholder) and drop any response
+  // that lands after this effect is torn down (frontend-23).
   const refreshProfiles = React.useCallback(() => {
-    getProfileApi(myName).then(setMyProfile).catch(() => {});
-    getProfileApi(oppName).then(setOppProfile).catch(() => {});
-  }, [myName, oppName]);
-  useEffect(() => { refreshProfiles(); }, [refreshProfiles]);
+    let alive = true;
+    const fetchFor = (name: string, set: (p: Profile | null) => void) => {
+      if (isSolo || !name || /^Player [01]$/.test(name) || name.startsWith('Bot')) return;
+      getProfileApi(name).then((p) => { if (alive) set(p); }).catch(() => {});
+    };
+    fetchFor(myName, setMyProfile);
+    fetchFor(oppName, setOppProfile);
+    return () => { alive = false; };
+  }, [myName, oppName, isSolo]);
+  useEffect(() => refreshProfiles(), [refreshProfiles]);
 
   // ── On gameover ───────────────────────────────────────────────────────────
   //
@@ -881,8 +626,7 @@ export function ChainsBoard(props: Props) {
   // What is left here is purely local: haptics, the daily-quest flag, and the
   // solo-mode event. After a short delay we re-read both profiles, because by
   // then the server has written the result and the W/L shown on the board
-  // should reflect it.
-  const isSolo = !!matchID && matchID.startsWith('solo-');
+  // should reflect it. (`isSolo` is computed once at the top of the component.)
   const recordedRef = useRef(false);
   useEffect(() => {
     if (!ctx.gameover || recordedRef.current || !matchID) return;
@@ -893,7 +637,10 @@ export function ChainsBoard(props: Props) {
     if (draw) Haptics.turn();
     else if (winnerId === myId) Haptics.win();
     else Haptics.loss();
-    // Real daily-quest tracker ("Win 1 match" on the main menu). Any win counts.
+    // Daily-quest tracker ("Win 1 match" on the main menu). This flag is PURELY
+    // COSMETIC and client-trusted (anyone can set it from devtools). It must
+    // never gate a reward without moving the check server-side (derive it from
+    // GET /api/matches). ActivityPanel in App.tsx reads it. (frontend-25)
     if (!draw && winnerId === myId) {
       try { localStorage.setItem(`ocva.daily.${new Date().toISOString().slice(0, 10)}.win`, '1'); } catch { /* ignore */ }
     }
@@ -1241,8 +988,8 @@ export function ChainsBoard(props: Props) {
         handInset={mobile ? 0 : HAND_INSET}
         me={me} opp={opp} myId={myId} oppId={oppId}
         myName={myName} oppName={oppName}
-        myDeckCount={(G as any).deckCounts?.[myId]  ?? 0}
-        oppDeckCount={(G as any).deckCounts?.[oppId] ?? 0}
+        myDeckCount={G.deckCounts?.[myId]  ?? 0}
+        oppDeckCount={G.deckCounts?.[oppId] ?? 0}
         attackers={G.combat.attackers.map(a => a.memeUid)}
         attackerSide={ctx.currentPlayer === myId ? 'me' : 'opp'}
         blocks={G.combat.blocks}
@@ -1310,7 +1057,7 @@ export function ChainsBoard(props: Props) {
               const overlap = n > 9 ? -48 : n > 7 ? -34 : n > 5 ? -26 : -18; // tighten for larger hands
               const rest = `translateY(${arc}px) rotate(${rot}deg)`;
               return (
-                <div key={i} className="brd-fan" style={{
+                <div key={handCardKeys[i]} className="brd-fan" style={{
                   ...({ '--rest': rest, '--z': selectedHand === i ? 20 : i } as Vars),
                   transformOrigin: '50% 130%',
                   marginLeft: i === 0 ? 0 : overlap,
@@ -1384,7 +1131,7 @@ export function ChainsBoard(props: Props) {
             {me.hand.length === 0
               ? <span style={{ fontSize: 12, color: '#7b7f95', margin: '0 auto' }}>No cards in hand.</span>
               : me.hand.map((id, i) => (
-                <div key={i} style={{ flex: '0 0 auto' }}>
+                <div key={handCardKeys[i]} style={{ flex: '0 0 auto' }}>
                   <DraggableCard
                     defId={id}
                     onDrop={() => isActive && myTurn && !inBlockers && tryPlay(i)}
@@ -1493,14 +1240,24 @@ export function ChainsBoard(props: Props) {
       <MatchRail entries={G.log} myId={myId} messages={chatMessages ?? []} sendChatMessage={sendChatMessage}
         open={railOpen} onOpenChange={setRailOpen} />
 
-      {/* Proximity voice with your opponent (PeerJS WebRTC). Skipped in solo.
-          DISABLED (security audit H-6): peer ids are derived from the public
-          matchID and the inbound handler answers ANY caller with a live mic
-          stream on the public PeerJS broker, so anyone who can read a match id
-          off the lobby can open a player's microphone. Do not re-enable until
-          inbound callers are authenticated against the match roster. */}
-      {VOICE_CHAT_ENABLED && matchID && playerID && !isSolo && (
-        <VoiceChat matchID={matchID} playerID={playerID} displayName={myName} />
+      {/* Live voice chat with your opponent (PeerJS WebRTC, zero backend).
+          Only in a real two-seat match — never solo/bot (no opponent). The
+          security model (random per-session peer ids announced through the
+          `announceVoicePeer` game move, inbound calls answered only from the
+          opponent's announced id) lives at the top of Voice.tsx. Both the move
+          and G.voice are feature-detected so this compiles before they land. */}
+      {matchID && playerID && !isSolo && (
+        <VoiceChat
+          playerID={myId}
+          opponentID={oppId}
+          voicePeers={G.voice ?? {}}
+          announceVoicePeer={
+            typeof (moves as Record<string, unknown>).announceVoicePeer === 'function'
+              ? (moves as unknown as { announceVoicePeer: (id: string) => void }).announceVoicePeer
+              : undefined
+          }
+          displayName={myName}
+        />
       )}
     </div>
   );
@@ -1614,10 +1371,12 @@ function MatchRail({ entries, myId, messages, sendChatMessage, open, onOpenChang
         <div ref={logRef} className="brd-scroll" style={{ flex: 1, overflow: 'auto', padding: '10px 12px', fontSize: 12, lineHeight: 1.55, fontFamily: 'system-ui' }}>
           {entries.length === 0
             ? <div style={{ opacity: 0.4 }}>(No actions yet)</div>
-            : entries.slice(-200).map((line, i) => {
+            : (() => { const base = Math.max(0, entries.length - 200); return entries.slice(-200).map((line, i) => {
                 const isTurn = line.startsWith('— Turn');
                 return (
-                  <div key={i} style={{
+                  // Key by absolute log index so a new entry appends one row
+                  // instead of re-keying (and re-styling) all 200 (frontend-28).
+                  <div key={base + i} style={{
                     color: colorFor(line), wordBreak: 'break-word',
                     marginBottom: isTurn ? 6 : 3, marginTop: isTurn ? 8 : 0,
                     paddingLeft: isTurn ? 0 : 8,
@@ -1629,7 +1388,7 @@ function MatchRail({ entries, myId, messages, sendChatMessage, open, onOpenChang
                     textTransform: isTurn ? 'uppercase' : undefined,
                   }}>{line}</div>
                 );
-              })}
+              }); })()}
         </div>
       ) : (
         <>
@@ -1688,7 +1447,7 @@ function MatchRail({ entries, myId, messages, sendChatMessage, open, onOpenChang
 function WagerPayoutModal({
   gameover, wager, myId, myName, oppName,
 }: {
-  gameover: any;
+  gameover: GameOver | undefined;
   wager: GState['wager'];
   myId: string;
   myName: string; oppName: string;
@@ -1704,19 +1463,16 @@ function WagerPayoutModal({
   const amount = wager.amount;
 
   return (
-    <div onClick={() => setDismissed(true)} style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200,
-      fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif',
-    }}>
-      <div onClick={e => e.stopPropagation()} style={{
+    <Modal onClose={() => setDismissed(true)} labelledBy="wager-payout-title" zIndex={200}
+      backdropStyle={{ background: 'rgba(0,0,0,0.78)', fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif' }}
+      panelStyle={{
         background: 'linear-gradient(180deg, #1a1240 0%, #0a0a1e 100%)',
         border: '2px solid #4c1d95', borderRadius: 10,
         padding: 24, width: 'min(520px, calc(100vw - 24px))',
         boxShadow: '0 0 40px rgba(139,92,246,0.45)',
         color: '#ece1c7',
       }}>
-        <div style={{
+        <div id="wager-payout-title" style={{
           fontFamily: '"Cinzel", "Times New Roman", serif',
           fontSize: 20, fontWeight: 800, letterSpacing: 2,
           color: '#f0b32a', textTransform: 'uppercase',
@@ -1744,8 +1500,7 @@ function WagerPayoutModal({
           <button onClick={() => setDismissed(true)} className="brd-plate brd-plate--gold"
             style={{ padding: '9px 20px', fontSize: 13 }}>Close</button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1799,7 +1554,7 @@ function MatchEndCountdown({ headline, won }: { headline: string; won: boolean }
   );
 }
 
-function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: string; myName: string }) {
+function WinnerShareModal({ gameover, myId, myName }: { gameover: GameOver | undefined; myId: string; myName: string }) {
   const [dismissed, setDismissed] = useState(false);
   useEffect(() => { setDismissed(false); }, [gameover?.winner, gameover?.draw]);
   if (!gameover || gameover.draw) return null;
@@ -1827,13 +1582,9 @@ function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: str
   }
 
   return (
-    <div onClick={() => setDismissed(true)} style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 199,
-      fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif',
-      padding: 12,
-    }}>
-      <div onClick={e => e.stopPropagation()} style={{
+    <Modal onClose={() => setDismissed(true)} labelledBy="winner-share-title" zIndex={199}
+      backdropStyle={{ background: 'rgba(0,0,0,0.78)', fontFamily: '"EB Garamond", Garamond, "Times New Roman", serif', padding: 12 }}
+      panelStyle={{
         background: 'linear-gradient(180deg, #1a1240 0%, #0a0a1e 100%)',
         border: '2px solid #4c1d95', borderRadius: 10,
         padding: 20, width: 'min(560px, calc(100vw - 24px))',
@@ -1841,7 +1592,7 @@ function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: str
         boxShadow: '0 0 40px rgba(139,92,246,0.45)',
         color: '#ece1c7',
       }}>
-        <div style={{
+        <div id="winner-share-title" style={{
           fontFamily: '"Cinzel", "Times New Roman", serif',
           fontSize: 22, fontWeight: 800, letterSpacing: 2,
           color: '#f0b32a', textTransform: 'uppercase',
@@ -1878,8 +1629,7 @@ function WinnerShareModal({ gameover, myId, myName }: { gameover: any; myId: str
           <button onClick={() => setDismissed(true)} className="brd-plate brd-plate--gold"
             style={{ padding: '10px 18px', fontSize: 13 }}>Close</button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1891,19 +1641,7 @@ function CTA({ color, children }: { color: string; children: React.ReactNode }) 
   }}>{children}</b>;
 }
 
-function PlayerHeaderTargetable({ label, clickable, onClick }: { label: string; clickable: boolean; onClick: () => void }) {
-  return (
-    <div onClick={clickable ? onClick : undefined}
-      style={{
-        padding: '4px 8px', margin: '4px 0',
-        background: clickable ? '#553' : '#222',
-        cursor: clickable ? 'pointer' : 'default',
-        border: '1px solid #555', fontWeight: 700,
-      }}>
-      {label} {clickable && <span style={{fontSize:11, opacity:0.7}}>(click to target)</span>}
-    </div>
-  );
-}
+// PlayerHeaderTargetable removed: dead component (frontend-07).
 
 // ── Playmat — positions zones over the splash mat image ─────────────────────
 /**
@@ -2762,16 +2500,17 @@ function MobileHandSheet({
   onPlay: (i: number) => void;
 }) {
   const [dragging, setDragging] = useState(false);
+  const keys = handKeys(hand);
   return (
-    <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, zIndex: 140,
-      background: dragging ? 'rgba(4,6,12,0.10)' : 'rgba(4,6,12,0.78)',
-      backdropFilter: dragging ? 'none' : 'blur(6px)',
-      display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-      transition: 'background 0.15s ease',
-      pointerEvents: dragging ? 'none' : 'auto',
-    }}>
-      <div onClick={e => e.stopPropagation()} className="brd-scroll" style={{
+    <Modal onClose={onClose} align="end" zIndex={140} labelledBy="mobile-hand-title"
+      backdropStyle={{
+        background: dragging ? 'rgba(4,6,12,0.10)' : 'rgba(4,6,12,0.78)',
+        backdropFilter: dragging ? 'none' : 'blur(6px)',
+        transition: 'background 0.15s ease',
+        pointerEvents: dragging ? 'none' : 'auto',
+      }}
+      panelClassName="brd-scroll"
+      panelStyle={{
         width: '100%', maxHeight: '85dvh', overflowY: 'auto',
         background: 'linear-gradient(180deg, rgba(28,18,52,0.98), rgba(10,8,22,0.99))',
         borderTop: '1px solid rgba(143,92,255,0.55)',
@@ -2784,7 +2523,7 @@ function MobileHandSheet({
         pointerEvents: dragging ? 'none' : 'auto',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div className="brd-zone-label" style={{
+          <div id="mobile-hand-title" className="brd-zone-label" style={{
             fontSize: 14, letterSpacing: 2, color: GOLD_HI,
             display: 'flex', alignItems: 'center', gap: 8,
             textShadow: '0 0 12px rgba(255,216,106,0.35)',
@@ -2805,7 +2544,7 @@ function MobileHandSheet({
             gap: 10,
           }}>
             {hand.map((id, i) => (
-              <div key={i} style={{
+              <div key={keys[i]} style={{
                 display: 'flex', justifyContent: 'center',
                 opacity: canPlay ? 1 : 0.7,
                 outline: selectedIdx === i ? '2px solid #ffd76a' : 'none',
@@ -2832,8 +2571,7 @@ function MobileHandSheet({
             Wait for your turn to play a card.
           </div>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -2851,6 +2589,7 @@ function MulliganModal({
   onForceEnd: () => void;
 }) {
   const mobile = useIsMobile();
+  const keys = handKeys(hand);
   const nextSize = mulliganDrawCount(mulliganCount + 1);
   const atFloor = hand.length <= MULLIGAN_FLOOR;
   // Live countdown tick.
@@ -2873,16 +2612,16 @@ function MulliganModal({
     }
   }, [waitingOnOpp, expired, onForceEnd]);
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 150,
-      background: 'rgba(4,6,12,0.86)', backdropFilter: 'blur(8px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      // Phones: hug the safe area so the modal is never under the notch/home bar.
-      padding: mobile
-        ? 'max(10px, env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom))'
-        : 20,
-    }}>
-      <div className="brd-scroll brd-panel" style={{
+    <Modal label="Mulligan" zIndex={150}
+      backdropStyle={{
+        background: 'rgba(4,6,12,0.86)', backdropFilter: 'blur(8px)',
+        // Phones: hug the safe area so the modal is never under the notch/home bar.
+        padding: mobile
+          ? 'max(10px, env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom))'
+          : 20,
+      }}
+      panelClassName="brd-scroll brd-panel"
+      panelStyle={{
         width: 'min(960px, 100%)', maxHeight: mobile ? '100%' : '92dvh', overflow: 'auto',
         background: 'linear-gradient(180deg, rgba(30,22,54,0.97), rgba(9,7,18,0.97))',
         border: '1px solid rgba(229,184,75,0.42)',
@@ -2926,7 +2665,7 @@ function MulliganModal({
           boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.7)',
         }}>
           {hand.map((defId, i) => (
-            <CardFace key={i} defId={defId} />
+            <CardFace key={keys[i]} defId={defId} />
           ))}
         </div>
 
@@ -2976,8 +2715,7 @@ function MulliganModal({
             <Dot size={8} /> Opponent {oppDone ? 'ready' : 'choosing…'}
           </span>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -2994,7 +2732,7 @@ function TurnBanner({
 }: {
   myTurn: boolean; turn: number; phase: string;
   myName: string; oppName: string;
-  myProfile?: any; oppProfile?: any;
+  myProfile?: Profile | null; oppProfile?: Profile | null;
   onOpenRules: () => void;
   onEndTurn: () => void;
   canEndTurn: boolean;
@@ -3013,40 +2751,39 @@ function TurnBanner({
   const bannerAccent = myTurn ? '#FFD86A' : '#C45CFF';   // gold / violet illumination
   const headline = myTurn ? 'YOUR TURN' : "OPPONENT'S TURN";
 
-  // 60-second auto-end-turn timer. Resets whenever turn/phase ownership changes.
-  const TURN_LIMIT = 60;
-  const [secondsLeft, setSecondsLeft] = useState(TURN_LIMIT);
-  const firedRef = useRef(false);
+  // Visible auto-end-turn countdown, driven by the SERVER clock (G.turnDeadline)
+  // so both players see the same number, it survives parent re-renders (onEndTurn
+  // is held in a ref, not an interval dep) and it no longer jumps back to 60 each
+  // time the opponent enters/leaves the blockers stage (frontend-17). One shared
+  // `nowMs` tick powers both this and the AFK force-end countdown below.
+  const onEndTurnRef = useRef(onEndTurn);
+  useEffect(() => { onEndTurnRef.current = onEndTurn; }, [onEndTurn]);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const needTick = turnDeadline > 0 && (canEndTurn || canForceEnd);
   useEffect(() => {
-    setSecondsLeft(TURN_LIMIT);
-    firedRef.current = false;
-  }, [turn, myTurn, canEndTurn]);
-  useEffect(() => {
-    if (!canEndTurn) return;
-    const id = setInterval(() => {
-      setSecondsLeft(s => {
-        if (s <= 1) {
-          if (!firedRef.current) { firedRef.current = true; onEndTurn(); }
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-    return () => clearInterval(id);
-  }, [canEndTurn, onEndTurn]);
-
-  const lowTime = canEndTurn && secondsLeft <= 10;
-  const timerColor = lowTime ? '#ff5d73' : '#ffd76a';
-
-  // AFK escape hatch — if it's the opponent's turn and the server deadline has
-  // passed (plus a small grace window), any client may force-end their turn.
-  // This prevents the game from soft-locking when the opponent disconnects.
-  const [nowMs, setNowMs] = useState(Date.now());
-  useEffect(() => {
-    if (!canForceEnd || !turnDeadline) return;
+    if (!needTick) return;
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [canForceEnd, turnDeadline]);
+  }, [needTick]);
+
+  // Fire the auto-end once per turn when my server deadline lapses.
+  const firedRef = useRef(false);
+  useEffect(() => { firedRef.current = false; }, [turn, myTurn]);
+  const myMsLeft = canEndTurn && turnDeadline > 0 ? turnDeadline - nowMs : Infinity;
+  const secondsLeft = Number.isFinite(myMsLeft) ? Math.max(0, Math.ceil(myMsLeft / 1000)) : 0;
+  useEffect(() => {
+    if (!canEndTurn || !turnDeadline) return;
+    if (myMsLeft <= 0 && !firedRef.current) { firedRef.current = true; onEndTurnRef.current(); }
+  }, [canEndTurn, turnDeadline, myMsLeft]);
+
+  // Only show the countdown chip when there is a real server deadline to show.
+  const showTimer = canEndTurn && turnDeadline > 0;
+  const lowTime = showTimer && secondsLeft <= 10;
+  const timerColor = lowTime ? '#ff5d73' : '#ffd76a';
+
+  // AFK escape hatch — once the opponent's deadline has passed (plus a small
+  // grace window), any client may force-end their turn so the game can't
+  // soft-lock on a disconnect.
   const forceGraceMs = 5000;
   const oppMsLeft = canForceEnd && turnDeadline ? (turnDeadline + forceGraceMs) - nowMs : Infinity;
   const showForceBtn = canForceEnd && turnDeadline > 0 && oppMsLeft <= 0;
@@ -3099,7 +2836,7 @@ function TurnBanner({
             background: 'linear-gradient(180deg, rgba(0,0,0,0.5), rgba(0,0,0,0.28))',
             boxShadow: `inset 0 0 0 1px ${bannerAccent}44`,
           }}>TURN {turn}</span>
-          {canEndTurn && (
+          {showTimer && (
             <span style={{
               fontFamily: 'system-ui', fontWeight: 800, fontSize: 13, letterSpacing: 1,
               color: timerColor, padding: '3px 9px', borderRadius: 5,
@@ -3186,12 +2923,10 @@ function TurnBanner({
 /** Slide-in rules drawer launched by the floating ? button. */
 function RulesDrawer({ onClose }: { onClose: () => void }) {
   return (
-    <div onClick={onClose} style={{
-      position: 'fixed', inset: 0, zIndex: 100,
-      background: 'rgba(0,0,0,0.7)',
-      display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end',
-    }}>
-      <div onClick={e => e.stopPropagation()} className="brd-scroll" style={{
+    <Modal onClose={onClose} align="stretch-end" zIndex={100} labelledBy="rules-drawer-title"
+      backdropStyle={{ background: 'rgba(0,0,0,0.7)' }}
+      panelClassName="brd-scroll"
+      panelStyle={{
         width: 'min(720px, 100%)', height: '100%',
         background: 'linear-gradient(180deg, #15101e, #0a0710)',
         borderLeft: '1px solid #ffd76a55',
@@ -3202,7 +2937,7 @@ function RulesDrawer({ onClose }: { onClose: () => void }) {
         display: 'flex', flexDirection: 'column', gap: 16,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{
+          <div id="rules-drawer-title" style={{
             fontFamily: '"Cinzel", "Times New Roman", serif',
             fontSize: 22, fontWeight: 800, color: '#ffd76a', letterSpacing: 2,
           }}>HOW TO PLAY</div>
@@ -3225,8 +2960,7 @@ function RulesDrawer({ onClose }: { onClose: () => void }) {
         </div>
         <RulesPanel side="left" />
         <RulesPanel side="right" />
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -3366,92 +3100,9 @@ function MiniCard({
   );
 }
 
-function Side({
-  title, side, deckCount, face,
-  onNodeClick, onMemeClick, onMachineClick,
-  memeTargetable, machineTargetable,
-  attackingUids, blocks, selectedBlocker,
-}: {
-  title: string;
-  side: GState['players'][string];
-  deckCount: number;
-  face: 'up' | 'down';
-  onNodeClick?: (uid: string) => void;
-  onMemeClick?: (uid: string) => void;
-  onMachineClick?: (uid: string) => void;
-  memeTargetable?: boolean;
-  machineTargetable?: boolean;
-  attackingUids?: string[];
-  blocks?: Record<string, string[]>;
-  selectedBlocker?: string;
-}) {
-  return (
-    <div style={{ marginBottom: 6 }}>
-      <div style={{ fontSize: 12, opacity: 0.7 }}>{title} — Hand: {side.hand.length} · Deck: {deckCount} · Graveyard: {side.graveyard.length}</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-        <Zone label="Nodes"    instances={side.nodes}    onClick={onNodeClick} />
-        <Zone label="Memes"    instances={side.memes}
-          onClick={onMemeClick}
-          highlightUids={attackingUids}
-          selectedUid={selectedBlocker}
-          targetable={memeTargetable}
-          blocks={blocks}
-        />
-        <Zone label="Machines" instances={side.machines}
-          onClick={onMachineClick}
-          targetable={machineTargetable}
-        />
-      </div>
-    </div>
-  );
-}
+// Side and Zone removed: dead components (frontend-07).
 
-function Zone({
-  label, instances, onClick,
-  highlightUids = [], selectedUid, targetable, blocks,
-}: {
-  label: string;
-  instances: Instance[];
-  onClick?: (uid: string) => void;
-  highlightUids?: string[];
-  selectedUid?: string;
-  targetable?: boolean;
-  blocks?: Record<string, string[]>;
-}) {
-  return (
-    <div style={{ flex: 1, minWidth: 240, padding: 4, border: '1px solid #333' }}>
-      <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 2 }}>{label}</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap' }}>
-        {instances.length === 0 && <div style={{ fontSize: 11, opacity: 0.4 }}>—</div>}
-        {instances.map(inst => {
-          const attacking = highlightUids.includes(inst.uid);
-          const blockedBy = blocks?.[inst.uid] ?? [];
-          return (
-            <div key={inst.uid} style={{ position: 'relative' }}>
-              <CardFace
-                defId={inst.defId}
-                instance={inst}
-                selected={inst.uid === selectedUid || attacking}
-                onClick={onClick ? () => onClick(inst.uid) : undefined}
-                footer={
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ opacity: 0.6 }}>{inst.uid}</span>
-                    <CombatBadges attacking={attacking} blockedCount={blockedBy.length} />
-                  </span>
-                }
-              />
-              {targetable && <div style={{
-                position: 'absolute', inset: 0, border: '2px dashed #ff0', pointerEvents: 'none',
-              }} />}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function CombatStrip({ G, ctx, myId }: { G: GState; ctx: any; myId: string }) {
+function CombatStrip({ G, ctx, myId }: { G: GState; ctx: Ctx; myId: string }) {
   const mobile = useIsMobile();
   // Phones: "No combat in progress." is a whole line of chrome that says
   // nothing. Render it only where there is room for it.

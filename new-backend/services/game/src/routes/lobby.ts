@@ -60,7 +60,11 @@ const LobbyQuery = z.object({
 });
 
 const CreateBody = strictBody({
-  mode: z.enum(['casual', 'ranked', 'wager']).default('casual'),
+  // Ranked matches may ONLY be minted by the matchmaker (insertLiveRankedMatch),
+  // never through this public route (server-30). Allowing mode:'ranked' here let
+  // two colluding accounts create private ranked matches and farm LP outside the
+  // rating window. Casual and wager only.
+  mode: z.enum(['casual', 'wager']).default('casual'),
   /** Unlisted matches are hidden from the public lobby. */
   unlisted: z.boolean().default(false),
   /** Addressing a match to someone turns it into a challenge (implies unlisted). */

@@ -12,24 +12,41 @@
 // GET  /api/presence → { online }
 // POST /api/presence → { online }   (heartbeat; needs Authorization)
 
+import crypto from 'node:crypto';
 import pg from 'pg';
 
 const GATEWAY = process.env.CHAT_GATEWAY ?? 'https://api.ocva.online';
 /** Clients beat every 30s; allow one missed beat before dropping someone. */
 const ONLINE_WINDOW_S = 75;
+/** Hard ceiling on how long an identity may be cached. */
+const ID_CACHE_MAX_MS = 5 * 60_000;
 
 let pool: pg.Pool | null = null;
 function db(): pg.Pool {
   if (!pool) {
     const url = process.env.CHAT_DATABASE_URL;
     if (!url) throw new Error('CHAT_DATABASE_URL is not set');
-    pool = new pg.Pool({ connectionString: url, max: 2, ssl: { rejectUnauthorized: false } });
+    pool = new pg.Pool({ connectionString: url, max: 2, ssl: pgSsl() });
   }
   return pool;
 }
 
+// Verify the server's TLS certificate (client-api-10 / server-24). Neon serves a
+// publicly-trusted chain, so `rejectUnauthorized: true` works with no extra
+// config. Set PG_CA to a PEM bundle to pin an explicit CA, or put
+// `?sslmode=verify-full` in CHAT_DATABASE_URL. We NEVER disable verification.
+function pgSsl(): pg.PoolConfig['ssl'] {
+  const ca = process.env.PG_CA;
+  return ca ? { rejectUnauthorized: true, ca } : { rejectUnauthorized: true };
+}
+
+// Schema lives in a migration run once against the Neon CHAT database (see
+// migrations/presence.sql); the request path does NO DDL (server-25). For a throwaway
+// / preview database set PRESENCE_AUTOMIGRATE=1 to let the first request create
+// the table; in production leave it unset.
 let ready: Promise<unknown> | null = null;
 function ensureTable(): Promise<unknown> {
+  if (process.env.PRESENCE_AUTOMIGRATE !== '1') return Promise.resolve();
   ready ??= db().query(`
     CREATE TABLE IF NOT EXISTS player_presence (
       profile_id text PRIMARY KEY,
@@ -41,19 +58,43 @@ function ensureTable(): Promise<unknown> {
 }
 
 // Warm instances reuse this: a heartbeat every 30s costs one gateway call per
-// player per few minutes, not one per beat.
+// player per few minutes, not one per beat. Keyed on a SHA-256 of the bearer
+// token (never the raw token, client-api-10) and expired at min(5min, JWT exp).
 const idCache = new Map<string, { id: string; exp: number }>();
+
+function tokenKey(auth: string): string {
+  return crypto.createHash('sha256').update(auth).digest('hex');
+}
+
+function jwtExpMs(auth: string): number | null {
+  const m = /^Bearer\s+(.+)$/.exec(auth);
+  if (!m) return null;
+  const parts = m[1].split('.');
+  if (parts.length < 2) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as { exp?: unknown };
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
 
 async function profileId(auth: string | null): Promise<string | null> {
   if (!auth?.startsWith('Bearer ')) return null;
-  const hit = idCache.get(auth);
+  const k = tokenKey(auth);
+  const hit = idCache.get(k);
   if (hit && hit.exp > Date.now()) return hit.id;
   const res = await fetch(`${GATEWAY}/api/profiles/me`, { headers: { Authorization: auth } });
   if (!res.ok) return null;
   const { profile } = (await res.json()) as { profile?: { id: string } };
   if (!profile?.id) return null;
-  if (idCache.size > 5000) idCache.clear();
-  idCache.set(auth, { id: String(profile.id), exp: Date.now() + 5 * 60_000 });
+  const now = Date.now();
+  const exp = jwtExpMs(auth);
+  const until = exp === null ? now + ID_CACHE_MAX_MS : Math.min(now + ID_CACHE_MAX_MS, exp);
+  if (until > now) {
+    if (idCache.size > 5000) idCache.clear();
+    idCache.set(k, { id: String(profile.id), exp: until });
+  }
   return String(profile.id);
 }
 

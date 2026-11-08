@@ -3,8 +3,9 @@
 // deckbuilder so any card can be reviewed at full size.
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { CARDS, COLOR_META, COLORS, templateFor, type Color, type CardDef } from './cards';
+import { CARDS, COLOR_META, templateFor, type Color, type CardDef } from './cards';
 import { ChainLogo } from './chain-logos';
+import { CostPips, cardText } from './components/CardFace';
 
 const PREVIEW_W = 280;
 const PREVIEW_H = 400;
@@ -27,22 +28,7 @@ export function CardPreview({ def }: { def: CardDef }) {
       {/* Title bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
         <div style={{ fontWeight: 800, fontSize: 18, lineHeight: 1.1 }}>{def.name}</div>
-        {def.cost && (
-          <div style={{ display: 'flex', gap: 4 }}>
-            {(['any', ...COLORS] as const).map(c => {
-              const n = def.cost?.[c] ?? 0; if (!n) return null;
-              const cm = c === 'any' ? { hex: '#c8c8d0', ink: '#1a1a1a' } : COLOR_META[c];
-              return (
-                <span key={c} style={{
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  width: 22, height: 22, borderRadius: 11,
-                  background: cm.hex, color: cm.ink,
-                  border: '1px solid #0007', fontWeight: 800, fontSize: 12,
-                }}>{n}</span>
-              );
-            })}
-          </div>
-        )}
+        <CostPips def={def} size={22} />
       </div>
 
       {/* Type line */}
@@ -63,7 +49,7 @@ export function CardPreview({ def }: { def: CardDef }) {
         fontSize: 13, lineHeight: 1.4,
         overflowY: 'auto', whiteSpace: 'pre-wrap',
       }}>
-        {def.text || (def.type === 'meme' ? `A ${def.power}/${def.toughness} ${meta.name} meme.` : '—')}
+        {cardText(def)}
       </div>
 
       {/* Footer: P/T for memes */}
@@ -123,22 +109,7 @@ export function TemplatedPreview({ def, tpl }: { def: CardDef; tpl: { url: strin
         <div style={{ fontWeight: 800, fontSize: 14, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {def.name}
         </div>
-        {def.cost && (
-          <div style={{ display: 'flex', gap: 3 }}>
-            {(['any', ...COLORS] as const).map(c => {
-              const n = def.cost?.[c] ?? 0; if (!n) return null;
-              const cm = c === 'any' ? { hex: '#c8c8d0', ink: '#1a1a1a' } : COLOR_META[c];
-              return (
-                <span key={c} style={{
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  width: 18, height: 18, borderRadius: 9,
-                  background: cm.hex, color: cm.ink,
-                  border: '1px solid #0007', fontWeight: 800, fontSize: 11,
-                }}>{n}</span>
-              );
-            })}
-          </div>
-        )}
+        <CostPips def={def} size={18} />
       </div>
 
       {/* Art area — image sits inside the template's black window (no overlay backdrop) */}
@@ -185,7 +156,7 @@ export function TemplatedPreview({ def, tpl }: { def: CardDef; tpl: { url: strin
         fontSize: 12, lineHeight: 1.35, color: '#1a1a1a',
         overflow: 'hidden',
       }}>
-        {def.text || (def.type === 'meme' ? `A ${def.power}/${def.toughness} ${meta.name} meme.` : '—')}
+        {cardText(def)}
         {def.type === 'meme' && (
           <div style={{
             position: 'absolute', right: 12, bottom: 6,
